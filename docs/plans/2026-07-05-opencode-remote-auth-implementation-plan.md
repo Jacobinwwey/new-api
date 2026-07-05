@@ -327,7 +327,7 @@ Sidecar smoke:
   start/status/screenshot/stop on https://opencode.ai/auth
 
 Remote clean artifact rollout:
-  clean checkout fixed to pushed main commit 3f5da2bf
+  clean checkout fixed to pushed main commit 2f4f270f
   web/default build completed on the remote host
   web/classic build completed on the remote host
   Go binary built into an isolated artifact with the OpenCode sidecar script
@@ -336,6 +336,7 @@ Remote clean artifact rollout:
   service active after restart
   local HTTP smoke returned 200
   artifact sidecar status smoke returned success/stopped with an empty state directory
+  artifact sidecar invalid Chromium smoke returned a structured JSON failure
 ```
 
 The `web/classic` build failure was traced to `date-fns-tz@1.3.8` resolving its peer `date-fns` to the workspace-level `date-fns@4`. That package version blocks private subpath imports such as `date-fns/_lib/cloneObject/index.js`. The fix keeps `web/default` on `date-fns@4` and adds a classic-only Rsbuild alias so Semi UI's `date-fns-tz` resolves to Semi's nested `date-fns@2.30.0`.
@@ -682,7 +683,7 @@ Sidecar smoke：
   https://opencode.ai/auth 上完成 start/status/screenshot/stop
 
 远端 clean artifact 上线：
-  clean checkout 固定到已推送 main 提交 3f5da2bf
+  clean checkout 固定到已推送 main 提交 2f4f270f
   远端 web/default 构建完成
   远端 web/classic 构建完成
   Go 二进制已构建到隔离 artifact，并包含 OpenCode sidecar 脚本
@@ -691,6 +692,7 @@ Sidecar smoke：
   重启后服务为 active
   本机 HTTP smoke 返回 200
   artifact sidecar 在空 state directory 下返回 success/stopped
+  artifact sidecar 在无效 Chromium 配置下返回结构化 JSON 失败
 ```
 
 `web/classic` 构建失败的根因已经定位为 `date-fns-tz@1.3.8` 将 peer `date-fns` 解析到了 workspace 顶层的 `date-fns@4`。该版本通过 package exports 阻断 `date-fns/_lib/cloneObject/index.js` 等 private subpath。修复方式是保持 `web/default` 使用 `date-fns@4`，只在 classic 的 Rsbuild 配置中增加局部 alias，让 Semi UI 的 `date-fns-tz` 解析到 Semi 自带的 `date-fns@2.30.0`。

@@ -131,6 +131,26 @@ async function waitForBrowser(port, timeoutMs = 15000) {
   throw lastError || new Error("browser did not expose CDP");
 }
 
+function watchProcessStartup(child, label, command) {
+  let waiting = true;
+  return {
+    promise: new Promise((resolve) => {
+      child.once("error", (error) => {
+        if (!waiting) return;
+        resolve(new Error(`failed to start ${label} (${command}): ${error.message}`));
+      });
+      child.once("exit", (code, signal) => {
+        if (!waiting) return;
+        const reason = signal ? `signal ${signal}` : `code ${code}`;
+        resolve(new Error(`${label} exited before ready (${reason})`));
+      });
+    }),
+    ready() {
+      waiting = false;
+    },
+  };
+}
+
 async function pageWebSocketURL(port) {
   const pages = await requestJSON(`http://127.0.0.1:${port}/json/list`);
   const page = pages.find((item) => item.type === "page" && item.webSocketDebuggerUrl);
@@ -213,19 +233,22 @@ async function startSession(args) {
   const port = await allocatePort();
   const display = `:${200 + (accountID % 300)}`;
   let xvfb;
+  let xvfbStartup;
   const env = { ...process.env };
   if (os.platform() !== "win32" && !env.DISPLAY) {
     xvfb = spawn("Xvfb", [display, "-screen", "0", `${DEFAULT_VIEWPORT.width}x${DEFAULT_VIEWPORT.height}x24`], {
       detached: true,
       stdio: "ignore",
     });
+    xvfbStartup = watchProcessStartup(xvfb, "Xvfb", "Xvfb");
     xvfb.unref();
     env.DISPLAY = display;
   }
 
   const profile = profileDir(stateDir, accountID);
   await ensureDir(profile);
-  const browser = spawn(chromiumBinary(), [
+  const browserCommand = chromiumBinary();
+  const browser = spawn(browserCommand, [
     `--remote-debugging-port=${port}`,
     "--remote-debugging-address=127.0.0.1",
     `--user-data-dir=${profile}`,
@@ -239,9 +262,15 @@ async function startSession(args) {
     stdio: "ignore",
     env,
   });
+  const browserStartup = watchProcessStartup(browser, "chromium", browserCommand);
   browser.unref();
 
-  await waitForBrowser(port);
+  const startupChecks = [waitForBrowser(port), browserStartup.promise];
+  if (xvfbStartup) startupChecks.push(xvfbStartup.promise);
+  const startupResult = await Promise.race(startupChecks);
+  if (startupResult instanceof Error) throw startupResult;
+  browserStartup.ready();
+  if (xvfbStartup) xvfbStartup.ready();
   const state = {
     accountID,
     port,

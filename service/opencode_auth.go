@@ -187,6 +187,9 @@ func isQuotaCandidate(key string) bool {
 }
 
 func isQuotaLimitCandidate(key string) bool {
+	if isQuotaUsedCandidate(key) {
+		return false
+	}
 	return strings.Contains(key, "limit") ||
 		strings.Contains(key, "total") ||
 		strings.Contains(key, "quota")

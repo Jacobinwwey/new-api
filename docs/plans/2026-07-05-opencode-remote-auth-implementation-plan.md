@@ -244,9 +244,11 @@ End-to-end verification:
 | OpenCode account model | Implemented | Added `opencode_accounts` model, migration registration, validation, encrypted secret storage, and masked public view. |
 | Reversible encryption helper | Implemented | Added AES-GCM `EncryptSecret` / `DecryptSecret` using `CRYPTO_SECRET`-derived key and versioned ciphertext. |
 | Root-only OpenCode account API | Implemented | Added CRUD, login-session, extract, quota refresh, and activate routes under `/api/opencode/accounts`. Quota refresh now accepts quota-only browser payloads and updates structured `quota_limit` / `quota_used` fields. |
+| Quota candidate classification | Implemented | Quota limit detection now excludes used/usage/consumed keys, preventing `quota.used` values from being recorded as quota limits when browser payload traversal order varies. |
 | Remote browser sidecar | Implemented and smoke-tested on the remote host without credentials | Added Node CDP + Xvfb sidecar with start/status/screenshot/click/key/extract/stop actions. Remote smoke tests covered `about:blank` and the official OpenCode authorization entrypoint without logging in. |
 | Sensitive browser input transport | Implemented | `login/key` now sends typed text to the Node sidecar through stdin instead of argv, so Google/OpenCode login text does not appear in process command lines. The sidecar rejects legacy `--text` input. |
 | Login status idempotency | Implemented | `login/status` now returns a successful `stopped` status when no sidecar state file exists, so frontend polling and page refreshes do not surface false failures before a login session has started. |
+| Browser startup diagnostics | Implemented | The sidecar now watches Chromium and Xvfb `error`/early-`exit` events during startup and returns structured JSON failures, avoiding opaque CDP timeouts when browser dependencies are missing or misconfigured. |
 | Extractor | Implemented | Candidate-based scanner covers OpenCode-domain cookies, local/session storage, and JSON responses; tests cover ranking and empty-state rejection. |
 | Frontend account window | Implemented | Added Root-only admin route, sidebar entry, account list, remote screenshot controls, extract, quota refresh, activate, stop, and delete actions. |
 | Activation into existing channels | Implemented | Activation decrypts the selected account API key, updates the bound channel inside a transaction, marks the account active, and refreshes channel cache after commit. |
@@ -278,6 +280,10 @@ The latest security refinement closes an argv exposure in the CDP key path. Brow
 
 The status endpoint is now deliberately idempotent. A missing sidecar state file means "no login browser has been started for this account", not "the connector failed". Screenshot, click, key, and extract still fail without an existing session because those operations require a live browser target.
 
+Browser startup failures now fail early and diagnostically. Before this refinement, an invalid Chromium binary or an early Xvfb/Chromium exit could collapse into an unstructured process error or a slow CDP timeout. The sidecar now races CDP readiness against process startup failure and emits a structured JSON error that the API layer can surface to the operator.
+
+Quota parsing has also been tightened. A quota field name is no longer enough to classify a numeric value as a limit when the key also says used, usage, or consumed. This removes an order-dependent failure mode where `quota.used` could be stored as `quota_limit`, which would corrupt quota display and any downstream reasoning about account capacity.
+
 The biggest deployment pitfall is `CRYPTO_SECRET`: durable imported credentials require a stable value. If an operator runs with an auto-generated or rotated secret, stored OpenCode account material will fail closed on decrypt and must be re-imported.
 
 Remote deployment is now separated from the previous runtime worktree. The service runs from a clean artifact built from the pushed `main`, while the existing runtime data location is preserved explicitly. This avoids overwriting unrelated local cache/accounting work that still exists in the old runtime tree and keeps source, artifact, and runtime data as separate concerns.
@@ -296,6 +302,8 @@ go test ./service -run TestObserveChannelAffinityUsageCacheByRelayFormat_MixedMo
 go test ./service -run 'TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState|TestActivateOpenCodeAccount|TestObserveChannelAffinityUsageCacheByRelayFormat_MixedMode' -count=1
 go test ./service -run 'TestBuildOpenCodeAuthCommandSpecPassesKeyTextThroughStdin|TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState|TestActivateOpenCodeAccount|TestObserveChannelAffinityUsageCacheByRelayFormat_MixedMode' -count=1
 go test ./service -run 'TestBuildOpenCodeAuthCommandSpecPassesKeyTextThroughStdin|TestOpenCodeAuthSidecarStatusTreatsMissingStateAsStopped|TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState|TestActivateOpenCodeAccount|TestObserveChannelAffinityUsageCacheByRelayFormat_MixedMode' -count=1
+go test ./service -run 'TestOpenCodeAuthSidecarStartReportsInvalidChromiumBinary|TestOpenCodeAuthSidecarStatusTreatsMissingStateAsStopped|TestBuildOpenCodeAuthCommandSpecPassesKeyTextThroughStdin' -count=1
+go test ./service -run 'TestOpenCodeAuthSidecarStartReportsInvalidChromiumBinary|TestOpenCodeAuthSidecarStatusTreatsMissingStateAsStopped|TestBuildOpenCodeAuthCommandSpecPassesKeyTextThroughStdin|TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState|TestActivateOpenCodeAccount|TestObserveChannelAffinityUsageCacheByRelayFormat_MixedMode' -count=1
 bun run typecheck
 bunx oxlint -c .oxlintrc.json src/features/opencode-accounts src/routes/_authenticated/opencode-accounts src/hooks/use-sidebar-data.ts src/hooks/use-sidebar-config.ts
 bun run build in web/default
@@ -591,9 +599,11 @@ web/default/src/routes/_authenticated/opencode-accounts/index.tsx
 | OpenCode account model | 已实现 | 已增加 `opencode_accounts` model、迁移注册、校验、加密 secret 存储与 masked public view。 |
 | 可逆加密 helper | 已实现 | 已增加 AES-GCM `EncryptSecret` / `DecryptSecret`，使用 `CRYPTO_SECRET` 派生 key，密文带版本前缀。 |
 | Root-only OpenCode account API | 已实现 | `/api/opencode/accounts` 下已包含 CRUD、登录会话、提取、quota refresh 与 activate 路由。quota refresh 现在支持只包含 quota 的浏览器 payload，并会更新结构化 `quota_limit` / `quota_used` 字段。 |
+| Quota 候选分类 | 已实现 | quota limit 检测现在会排除 used/usage/consumed 键，避免浏览器 payload 遍历顺序变化时把 `quota.used` 写入 quota limit。 |
 | 远端浏览器 sidecar | 已实现，并已在远端主机完成无凭证 smoke test | 已增加 Node CDP + Xvfb sidecar，支持 start/status/screenshot/click/key/extract/stop。远端 smoke 覆盖 `about:blank` 与官方 OpenCode 授权入口，未登录、未使用任何账号材料。 |
 | 敏感浏览器输入传输 | 已实现 | `login/key` 现在通过 stdin 向 Node sidecar 传递键入文本，不再放入 argv，因此 Google/OpenCode 登录页中的输入不会出现在进程命令行中。sidecar 会拒绝旧的 `--text` 输入。 |
 | 登录状态幂等性 | 已实现 | 当 sidecar state 文件不存在时，`login/status` 现在返回成功的 `stopped` 状态，避免前端轮询或页面刷新在尚未启动登录会话前暴露伪失败。 |
+| 浏览器启动诊断 | 已实现 | sidecar 现在会在启动阶段监听 Chromium 与 Xvfb 的 `error` / early-`exit` 事件，并返回结构化 JSON 失败，避免浏览器依赖缺失或配置错误时退化为不透明的 CDP 超时。 |
 | Extractor | 已实现 | 候选扫描覆盖 OpenCode 域 cookie、local/session storage 与 JSON responses；测试覆盖排序和空状态拒绝。 |
 | 前端账号窗口 | 已实现 | 已增加 Root-only 管理路由、侧边栏入口、账号列表、远端截图控制、extract、quota refresh、activate、stop、delete 操作。 |
 | 激活到现有渠道 | 已实现 | 激活时解密选中账号 API key，在事务内更新绑定 channel，标记账号 active，并在 commit 后刷新 channel cache。 |
@@ -625,6 +635,10 @@ Admin Web
 
 状态接口现在刻意保持幂等。缺少 sidecar state 文件表示“该账号还没有启动登录浏览器”，而不是“连接器失败”。screenshot、click、key、extract 仍然会在没有现存会话时失败，因为这些操作确实需要 live browser target。
 
+浏览器启动失败现在会更早、更可诊断地失败。在这次收敛之前，错误的 Chromium 路径或 Xvfb/Chromium 早退可能表现为非结构化进程错误或缓慢的 CDP timeout。现在 sidecar 会将 CDP ready 与进程启动失败进行竞速，并输出 API 层可直接展示给操作者的结构化 JSON 错误。
+
+quota 解析也已经收紧。当 key 同时表达 used、usage 或 consumed 时，不能仅因为字段路径包含 quota 就把数值分类为 limit。这个修复移除了一个顺序相关故障：`quota.used` 可能被写入 `quota_limit`，从而污染 quota 展示和后续对账号容量的判断。
+
 最大部署坑点是 `CRYPTO_SECRET`：导入的持久凭证要求该值稳定。如果运行时使用自动生成或轮换的 secret，已存 OpenCode 账号材料会解密失败并 fail closed，需要重新导入。
 
 远端部署现在已经与旧运行工作树分离。服务从基于已推送 `main` 构建的 clean artifact 运行，同时显式保留既有运行时数据位置。这样不会覆盖旧运行树中仍存在的本地 cache/accounting 工作，也把源码、artifact 与运行时数据拆成了三个独立边界。
@@ -643,6 +657,8 @@ go test ./service -run TestObserveChannelAffinityUsageCacheByRelayFormat_MixedMo
 go test ./service -run 'TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState|TestActivateOpenCodeAccount|TestObserveChannelAffinityUsageCacheByRelayFormat_MixedMode' -count=1
 go test ./service -run 'TestBuildOpenCodeAuthCommandSpecPassesKeyTextThroughStdin|TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState|TestActivateOpenCodeAccount|TestObserveChannelAffinityUsageCacheByRelayFormat_MixedMode' -count=1
 go test ./service -run 'TestBuildOpenCodeAuthCommandSpecPassesKeyTextThroughStdin|TestOpenCodeAuthSidecarStatusTreatsMissingStateAsStopped|TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState|TestActivateOpenCodeAccount|TestObserveChannelAffinityUsageCacheByRelayFormat_MixedMode' -count=1
+go test ./service -run 'TestOpenCodeAuthSidecarStartReportsInvalidChromiumBinary|TestOpenCodeAuthSidecarStatusTreatsMissingStateAsStopped|TestBuildOpenCodeAuthCommandSpecPassesKeyTextThroughStdin' -count=1
+go test ./service -run 'TestOpenCodeAuthSidecarStartReportsInvalidChromiumBinary|TestOpenCodeAuthSidecarStatusTreatsMissingStateAsStopped|TestBuildOpenCodeAuthCommandSpecPassesKeyTextThroughStdin|TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState|TestActivateOpenCodeAccount|TestObserveChannelAffinityUsageCacheByRelayFormat_MixedMode' -count=1
 bun run typecheck
 bunx oxlint -c .oxlintrc.json src/features/opencode-accounts src/routes/_authenticated/opencode-accounts src/hooks/use-sidebar-data.ts src/hooks/use-sidebar-config.ts
 web/default 下 bun run build

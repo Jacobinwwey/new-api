@@ -1,6 +1,7 @@
 package service
 
 import (
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -41,4 +42,30 @@ func TestOpenCodeAuthSidecarStatusTreatsMissingStateAsStopped(t *testing.T) {
 	assert.False(t, response.Status.Running)
 	assert.Equal(t, "stopped", response.Status.Status)
 	assert.Equal(t, 197, response.Status.AccountID)
+}
+
+func TestOpenCodeAuthSidecarStartReportsInvalidChromiumBinary(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node is required for opencode auth sidecar tests")
+	}
+	scriptPath, err := filepath.Abs(filepath.Join("..", "scripts", "opencode-auth-session.mjs"))
+	require.NoError(t, err)
+
+	command := exec.Command("node",
+		scriptPath,
+		"--action", "start",
+		"--account-id", "198",
+		"--state-dir", t.TempDir(),
+		"--url", "about:blank",
+	)
+	command.Env = append(os.Environ(), "CHROMIUM_BIN=definitely-missing-opencode-browser-binary")
+
+	output, err := command.Output()
+	require.NoError(t, err)
+
+	var response openCodeAuthSidecarResponse
+	require.NoError(t, common.Unmarshal(output, &response))
+	require.False(t, response.Success, string(output))
+	assert.Contains(t, response.Message, "chromium")
+	assert.Contains(t, response.Message, "definitely-missing-opencode-browser-binary")
 }

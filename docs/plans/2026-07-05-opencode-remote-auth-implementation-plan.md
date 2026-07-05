@@ -245,6 +245,7 @@ End-to-end verification:
 | Reversible encryption helper | Implemented | Added AES-GCM `EncryptSecret` / `DecryptSecret` using `CRYPTO_SECRET`-derived key and versioned ciphertext. |
 | Root-only OpenCode account API | Implemented | Added CRUD, login-session, extract, quota refresh, and activate routes under `/api/opencode/accounts`. Quota refresh now accepts quota-only browser payloads and updates structured `quota_limit` / `quota_used` fields. |
 | Remote browser sidecar | Implemented and smoke-tested on the remote host without credentials | Added Node CDP + Xvfb sidecar with start/status/screenshot/click/key/extract/stop actions. Remote smoke tests covered `about:blank` and the official OpenCode authorization entrypoint without logging in. |
+| Sensitive browser input transport | Implemented | `login/key` now sends typed text to the Node sidecar through stdin instead of argv, so Google/OpenCode login text does not appear in process command lines. The sidecar rejects legacy `--text` input. |
 | Extractor | Implemented | Candidate-based scanner covers OpenCode-domain cookies, local/session storage, and JSON responses; tests cover ranking and empty-state rejection. |
 | Frontend account window | Implemented | Added Root-only admin route, sidebar entry, account list, remote screenshot controls, extract, quota refresh, activate, stop, and delete actions. |
 | Activation into existing channels | Implemented | Activation decrypts the selected account API key, updates the bound channel inside a transaction, marks the account active, and refreshes channel cache after commit. |
@@ -271,6 +272,8 @@ The most important architectural decision that survived implementation is owners
 
 The deliberate tradeoff is that the first browser bridge uses CDP screenshot/click/key primitives rather than noVNC. This is smaller, easier to permission-gate, and enough for OAuth authorization, but it is less comfortable than a full remote desktop if OpenCode or Google introduces complex browser UI. The fallback direction remains noVNC or Playwright-backed streaming only if CDP interaction becomes insufficient in real E2E.
 
+The latest security refinement closes an argv exposure in the CDP key path. Browser text input, including anything typed on Google/OpenCode pages, is now supplied to the sidecar over stdin. This avoids leaking operator input through `ps`, service supervisors, shell history, or structured process telemetry. The tradeoff is that ad-hoc manual sidecar invocations can no longer pass `--text`; this is intentional because the web API should be the only supported input surface.
+
 The biggest deployment pitfall is `CRYPTO_SECRET`: durable imported credentials require a stable value. If an operator runs with an auto-generated or rotated secret, stored OpenCode account material will fail closed on decrypt and must be re-imported.
 
 ### Verification Update
@@ -285,6 +288,7 @@ go test ./router -run TestOpenCodeAccountRoutesRegisterExpectedPaths -count=1
 go test ./service -run 'TestExtractOpenCodeSecretsFromBrowserState|TestActivateOpenCodeAccount' -count=1
 go test ./service -run TestObserveChannelAffinityUsageCacheByRelayFormat_MixedMode -count=1
 go test ./service -run 'TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState|TestActivateOpenCodeAccount|TestObserveChannelAffinityUsageCacheByRelayFormat_MixedMode' -count=1
+go test ./service -run 'TestBuildOpenCodeAuthCommandSpecPassesKeyTextThroughStdin|TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState|TestActivateOpenCodeAccount|TestObserveChannelAffinityUsageCacheByRelayFormat_MixedMode' -count=1
 bun run typecheck
 bunx oxlint -c .oxlintrc.json src/features/opencode-accounts src/routes/_authenticated/opencode-accounts src/hooks/use-sidebar-data.ts src/hooks/use-sidebar-config.ts
 bun run build in web/default
@@ -570,6 +574,7 @@ web/default/src/routes/_authenticated/opencode-accounts/index.tsx
 | 可逆加密 helper | 已实现 | 已增加 AES-GCM `EncryptSecret` / `DecryptSecret`，使用 `CRYPTO_SECRET` 派生 key，密文带版本前缀。 |
 | Root-only OpenCode account API | 已实现 | `/api/opencode/accounts` 下已包含 CRUD、登录会话、提取、quota refresh 与 activate 路由。quota refresh 现在支持只包含 quota 的浏览器 payload，并会更新结构化 `quota_limit` / `quota_used` 字段。 |
 | 远端浏览器 sidecar | 已实现，并已在远端主机完成无凭证 smoke test | 已增加 Node CDP + Xvfb sidecar，支持 start/status/screenshot/click/key/extract/stop。远端 smoke 覆盖 `about:blank` 与官方 OpenCode 授权入口，未登录、未使用任何账号材料。 |
+| 敏感浏览器输入传输 | 已实现 | `login/key` 现在通过 stdin 向 Node sidecar 传递键入文本，不再放入 argv，因此 Google/OpenCode 登录页中的输入不会出现在进程命令行中。sidecar 会拒绝旧的 `--text` 输入。 |
 | Extractor | 已实现 | 候选扫描覆盖 OpenCode 域 cookie、local/session storage 与 JSON responses；测试覆盖排序和空状态拒绝。 |
 | 前端账号窗口 | 已实现 | 已增加 Root-only 管理路由、侧边栏入口、账号列表、远端截图控制、extract、quota refresh、activate、stop、delete 操作。 |
 | 激活到现有渠道 | 已实现 | 激活时解密选中账号 API key，在事务内更新绑定 channel，标记账号 active，并在 commit 后刷新 channel cache。 |
@@ -596,6 +601,8 @@ Admin Web
 
 当前取舍是先用 CDP screenshot/click/key primitives，而不是 noVNC。它的暴露面更小、权限边界更容易收束，对 OAuth 授权通常足够；代价是如果 OpenCode 或 Google 登录页出现复杂交互，操作体验不如完整远端桌面。更稳妥的升级路径是在真实 E2E 证明 CDP 不足时再加 noVNC 或 Playwright streaming 兜底，不改变账号模型和激活契约。
 
+最新的安全收敛修复了 CDP key 路径上的 argv 暴露问题。浏览器文本输入，包括在 Google/OpenCode 页面键入的内容，现在通过 stdin 提供给 sidecar。这样可以避免操作者输入出现在 `ps`、服务管理器、shell history 或进程遥测中。代价是临时手工调用 sidecar 时不能再使用 `--text`；这是有意收窄，因为 Web API 应该是唯一受支持的输入面。
+
 最大部署坑点是 `CRYPTO_SECRET`：导入的持久凭证要求该值稳定。如果运行时使用自动生成或轮换的 secret，已存 OpenCode 账号材料会解密失败并 fail closed，需要重新导入。
 
 ### 验证更新
@@ -610,6 +617,7 @@ go test ./router -run TestOpenCodeAccountRoutesRegisterExpectedPaths -count=1
 go test ./service -run 'TestExtractOpenCodeSecretsFromBrowserState|TestActivateOpenCodeAccount' -count=1
 go test ./service -run TestObserveChannelAffinityUsageCacheByRelayFormat_MixedMode -count=1
 go test ./service -run 'TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState|TestActivateOpenCodeAccount|TestObserveChannelAffinityUsageCacheByRelayFormat_MixedMode' -count=1
+go test ./service -run 'TestBuildOpenCodeAuthCommandSpecPassesKeyTextThroughStdin|TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState|TestActivateOpenCodeAccount|TestObserveChannelAffinityUsageCacheByRelayFormat_MixedMode' -count=1
 bun run typecheck
 bunx oxlint -c .oxlintrc.json src/features/opencode-accounts src/routes/_authenticated/opencode-accounts src/hooks/use-sidebar-data.ts src/hooks/use-sidebar-config.ts
 web/default 下 bun run build

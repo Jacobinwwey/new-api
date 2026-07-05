@@ -47,33 +47,36 @@ type openCodeAuthSidecarResponse struct {
 	BrowserState OpenCodeBrowserState       `json:"browser_state"`
 }
 
+type openCodeAuthCommandSpec struct {
+	args  []string
+	stdin string
+}
+
 func StartOpenCodeLoginSession(ctx context.Context, accountID int) (OpenCodeLoginSessionStatus, error) {
-	return runOpenCodeAuthStatusAction(ctx, "start", accountID, nil)
+	return runOpenCodeAuthStatusAction(ctx, "start", accountID, nil, "")
 }
 
 func GetOpenCodeLoginSessionStatus(ctx context.Context, accountID int) (OpenCodeLoginSessionStatus, error) {
-	return runOpenCodeAuthStatusAction(ctx, "status", accountID, nil)
+	return runOpenCodeAuthStatusAction(ctx, "status", accountID, nil, "")
 }
 
 func ClickOpenCodeLoginSession(ctx context.Context, accountID int, click OpenCodeLoginClick) (OpenCodeLoginSessionStatus, error) {
 	return runOpenCodeAuthStatusAction(ctx, "click", accountID, map[string]string{
 		"x": strconv.Itoa(click.X),
 		"y": strconv.Itoa(click.Y),
-	})
+	}, "")
 }
 
 func TypeOpenCodeLoginSessionText(ctx context.Context, accountID int, input OpenCodeLoginKeyInput) (OpenCodeLoginSessionStatus, error) {
-	return runOpenCodeAuthStatusAction(ctx, "key", accountID, map[string]string{
-		"text": input.Text,
-	})
+	return runOpenCodeAuthStatusAction(ctx, "key", accountID, nil, input.Text)
 }
 
 func StopOpenCodeLoginSession(ctx context.Context, accountID int) (OpenCodeLoginSessionStatus, error) {
-	return runOpenCodeAuthStatusAction(ctx, "stop", accountID, nil)
+	return runOpenCodeAuthStatusAction(ctx, "stop", accountID, nil, "")
 }
 
 func CaptureOpenCodeLoginScreenshot(ctx context.Context, accountID int) (OpenCodeLoginScreenshot, error) {
-	resp, err := runOpenCodeAuthSidecar(ctx, "screenshot", accountID, nil)
+	resp, err := runOpenCodeAuthSidecar(ctx, "screenshot", accountID, nil, "")
 	if err != nil {
 		return OpenCodeLoginScreenshot{}, err
 	}
@@ -81,22 +84,22 @@ func CaptureOpenCodeLoginScreenshot(ctx context.Context, accountID int) (OpenCod
 }
 
 func ExtractOpenCodeBrowserState(ctx context.Context, accountID int) (OpenCodeBrowserState, error) {
-	resp, err := runOpenCodeAuthSidecar(ctx, "extract", accountID, nil)
+	resp, err := runOpenCodeAuthSidecar(ctx, "extract", accountID, nil, "")
 	if err != nil {
 		return OpenCodeBrowserState{}, err
 	}
 	return resp.BrowserState, nil
 }
 
-func runOpenCodeAuthStatusAction(ctx context.Context, action string, accountID int, args map[string]string) (OpenCodeLoginSessionStatus, error) {
-	resp, err := runOpenCodeAuthSidecar(ctx, action, accountID, args)
+func runOpenCodeAuthStatusAction(ctx context.Context, action string, accountID int, args map[string]string, stdin string) (OpenCodeLoginSessionStatus, error) {
+	resp, err := runOpenCodeAuthSidecar(ctx, action, accountID, args, stdin)
 	if err != nil {
 		return OpenCodeLoginSessionStatus{}, err
 	}
 	return resp.Status, nil
 }
 
-func runOpenCodeAuthSidecar(ctx context.Context, action string, accountID int, args map[string]string) (openCodeAuthSidecarResponse, error) {
+func runOpenCodeAuthSidecar(ctx context.Context, action string, accountID int, args map[string]string, stdin string) (openCodeAuthSidecarResponse, error) {
 	if accountID <= 0 {
 		return openCodeAuthSidecarResponse{}, errors.New("opencode account id is required")
 	}
@@ -113,17 +116,14 @@ func runOpenCodeAuthSidecar(ctx context.Context, action string, accountID int, a
 	if err != nil {
 		return openCodeAuthSidecarResponse{}, err
 	}
-	cmdArgs := []string{
-		scriptPath,
-		"--action", action,
-		"--account-id", strconv.Itoa(accountID),
-		"--state-dir", stateDir,
-		"--url", openCodeAuthURL,
-	}
+	spec := buildOpenCodeAuthCommandSpec(scriptPath, action, accountID, stateDir, stdin)
 	for key, value := range args {
-		cmdArgs = append(cmdArgs, "--"+key, value)
+		spec.args = append(spec.args, "--"+key, value)
 	}
-	command := exec.CommandContext(ctx, "node", cmdArgs...)
+	command := exec.CommandContext(ctx, "node", spec.args...)
+	if spec.stdin != "" {
+		command.Stdin = strings.NewReader(spec.stdin)
+	}
 	var stderr bytes.Buffer
 	command.Stderr = &stderr
 	output, err := command.Output()
@@ -145,6 +145,19 @@ func runOpenCodeAuthSidecar(ctx context.Context, action string, accountID int, a
 		return resp, errors.New(resp.Message)
 	}
 	return resp, nil
+}
+
+func buildOpenCodeAuthCommandSpec(scriptPath string, action string, accountID int, stateDir string, stdin string) openCodeAuthCommandSpec {
+	return openCodeAuthCommandSpec{
+		args: []string{
+			scriptPath,
+			"--action", action,
+			"--account-id", strconv.Itoa(accountID),
+			"--state-dir", stateDir,
+			"--url", openCodeAuthURL,
+		},
+		stdin: stdin,
+	}
 }
 
 func commonDecodeOpenCodeSidecar(output []byte, target *openCodeAuthSidecarResponse) error {

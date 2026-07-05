@@ -29,6 +29,15 @@ function fail(message) {
   json({ success: false, message });
 }
 
+async function readStdinText() {
+  if (process.stdin.isTTY) return "";
+  const chunks = [];
+  for await (const chunk of process.stdin) {
+    chunks.push(Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
 async function ensureDir(dir) {
   await fs.mkdir(dir, { recursive: true, mode: 0o700 });
 }
@@ -293,8 +302,10 @@ async function clickSession(args) {
 
 async function keySession(args) {
   const state = await readState(args["state-dir"], Number(args["account-id"]));
+  if (args.text) throw new Error("key text must be passed through stdin");
+  const text = await readStdinText();
   await withPage(state, async (cdp) => {
-    await cdp.send("Input.insertText", { text: args.text || "" });
+    await cdp.send("Input.insertText", { text });
   });
   json({ success: true, status: await statusFromState(state) });
 }

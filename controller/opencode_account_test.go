@@ -4,9 +4,12 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func TestOpenCodeAccountResponseDoesNotExposeSecrets(t *testing.T) {
@@ -65,4 +68,43 @@ func TestMergeExtractedOpenCodeSecretsPreservesExistingFields(t *testing.T) {
 	assert.Equal(t, "workspace-existing-test", merged.WorkspaceID)
 	assert.Equal(t, "opencode-api-key-existing-test", merged.APIKey)
 	assert.Equal(t, "cookie-extracted-test", merged.Cookie)
+}
+
+func TestOpenCodeAccountResponseMarksCodexPlainAPIKeyNotReady(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	originalDB := model.DB
+	model.DB = db
+	t.Cleanup(func() {
+		model.DB = originalDB
+	})
+	require.NoError(t, db.AutoMigrate(&model.Channel{}))
+
+	originalSecret := common.CryptoSecret
+	common.CryptoSecret = "opencode-controller-codex-readiness-test-secret"
+	t.Cleanup(func() {
+		common.CryptoSecret = originalSecret
+	})
+
+	require.NoError(t, db.Create(&model.Channel{
+		Id:     21,
+		Name:   "Codex Readiness",
+		Type:   constant.ChannelTypeCodex,
+		Key:    `{"access_token":"old-token","account_id":"old-account"}`,
+		Status: common.ChannelStatusEnabled,
+	}).Error)
+
+	account := &model.OpenCodeAccount{
+		Id:        22,
+		Label:     "codex-plain",
+		ChannelID: 21,
+	}
+	require.NoError(t, account.EncryptSecrets(model.OpenCodeAccountSecrets{
+		APIKey: "plain-opencode-api-key",
+	}))
+
+	response := toOpenCodeAccountResponse(account)
+
+	assert.False(t, response.ActivationReady)
+	assert.Contains(t, response.MissingActivationFields, "codex_oauth_key")
 }

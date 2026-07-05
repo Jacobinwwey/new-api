@@ -38,7 +38,21 @@ func toOpenCodeAccountResponse(account *model.OpenCodeAccount) model.OpenCodeAcc
 	if account == nil {
 		return model.OpenCodeAccountPublic{}
 	}
-	return account.PublicView()
+	response := account.PublicView()
+	for _, field := range service.GetOpenCodeActivationMissingFields(account) {
+		response.MissingActivationFields = appendMissingActivationField(response.MissingActivationFields, field)
+	}
+	response.ActivationReady = len(response.MissingActivationFields) == 0
+	return response
+}
+
+func appendMissingActivationField(fields []string, field string) []string {
+	for _, existing := range fields {
+		if existing == field {
+			return fields
+		}
+	}
+	return append(fields, field)
 }
 
 func GetOpenCodeAccounts(c *gin.Context) {

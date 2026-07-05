@@ -259,6 +259,7 @@ End-to-end verification:
 | Credential readiness diagnostics | Implemented | Public OpenCode account responses now expose masked `credential_integrity`, `activation_ready`, and `missing_activation_fields` signals, so operators can distinguish missing account material from decrypt failures without seeing raw secrets. |
 | Frontend account window | Implemented | Added Root-only admin route, sidebar entry, account list, enabled-channel selector with numeric ID fallback, remote screenshot controls, extract, quota refresh, activate, stop, and delete actions. |
 | Activation into existing channels | Implemented | Activation decrypts the selected account API key, updates the bound channel inside a transaction, marks the account active, and refreshes channel cache after commit. |
+| Activation credential contract | Implemented and locally verified | Activation now builds channel credentials according to the bound channel type. Plain OpenCode API keys remain valid for non-Codex channels, while Codex channels require JSON material containing `access_token` and `account_id`. Public readiness diagnostics now mark Codex/plain-key bindings as not activation-ready before the operator clicks activate. |
 | Remote clean artifact deployment | Done | Built pushed `main` from an isolated clean checkout, produced self-contained binary-plus-sidecar artifacts, switched the remote service to those artifacts, preserved the existing runtime data path, and verified the service is active. |
 | Latest remote rollout | Done | Pushed `main` commit `c734a4d0` is now deployed on the remote service. HTTP smoke returns 200, empty-state sidecar status returns successful `stopped`, remote Node sidecar tests pass, OpenCode extractor targeted Go tests pass, and the official OpenCode authorization page start/screenshot/extract/stop smoke passed without credentials. |
 | Real OpenCode login E2E | Pending | Requires an operator-controlled OpenCode subscription account. The repository contains no real account material. |
@@ -310,6 +311,8 @@ Channel binding is now validated before an OpenCode account is persisted. The fr
 
 Credential readiness is now an explicit API contract. Earlier public responses exposed only `has_*` flags, which can remain true even when stored ciphertext cannot be decrypted after an incorrect `CRYPTO_SECRET` change. The account response now separates ciphertext presence from credential integrity and activation readiness. The UI can show a masked credential-error state and disable activation before the operator reaches a failing channel update. The tradeoff is a small response-schema expansion, but it is limited to field names and booleans; no raw secret, cookie, workspace ID, account email, OAuth payload, or local deployment path is exposed.
 
+Activation now has a channel credential contract instead of blindly copying extracted material into `channel.key`. This matters because Codex channels in this fork consume OAuth JSON and the relay layer requires both `access_token` and `account_id`; a plain OpenCode API key would make the admin UI report activation success while the first request fails in `SetupRequestHeader`. The service now rejects that mismatch transactionally, leaves the previous channel key untouched, and feeds the same diagnosis into account readiness so the frontend can disable the impossible activate path. The tradeoff is intentionally conservative: the connector does not infer `account_id` from `workspace_id` because those identifiers are not proven equivalent.
+
 The biggest deployment pitfall is `CRYPTO_SECRET`: durable imported credentials require a stable value. If an operator runs with an auto-generated or rotated secret, stored OpenCode account material will fail closed on decrypt and must be re-imported.
 
 Remote deployment is now separated from the previous runtime worktree. The service runs from a clean artifact built from the pushed `main`, while the existing runtime data location is preserved explicitly. This avoids overwriting unrelated local cache/accounting work that still exists in the old runtime tree and keeps source, artifact, and runtime data as separate concerns.
@@ -336,6 +339,8 @@ go test ./service -run 'TestOpenCodeAuthSidecarStartReportsInvalidChromiumBinary
 go test ./service -run 'TestOpenCodeAuthSidecarStartReportsInvalidChromiumBinary|TestOpenCodeAuthSidecarStartDoesNotReusePidWithoutCDP|TestOpenCodeAuthSidecarStatusTreatsMissingStateAsStopped|TestBuildOpenCodeAuthCommandSpecPassesKeyTextThroughStdin|TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState|TestActivateOpenCodeAccount|TestObserveChannelAffinityUsageCacheByRelayFormat_MixedMode' -count=1
 go test ./service -run 'TestOpenCodeAuthSidecarStopWaitsForRecordedProcessExit|TestOpenCodeAuthSidecarStartReportsInvalidChromiumBinary|TestOpenCodeAuthSidecarStartDoesNotReusePidWithoutCDP|TestOpenCodeAuthSidecarStatusTreatsMissingStateAsStopped|TestBuildOpenCodeAuthCommandSpecPassesKeyTextThroughStdin|TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState|TestActivateOpenCodeAccount|TestObserveChannelAffinityUsageCacheByRelayFormat_MixedMode' -count=1
 go test ./service -run 'TestSanitizeOpenCodeLoginSessionStatus|TestBuildOpenCodeAuthCommandSpecPassesKeyTextThroughStdin|TestOpenCodeAuthSidecarStatusTreatsMissingStateAsStopped|TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState|TestActivateOpenCodeAccount|TestObserveChannelAffinityUsageCacheByRelayFormat_MixedMode' -count=1
+go test ./service ./controller -run "TestActivateOpenCodeAccount|TestOpenCodeAccountResponse" -count=1
+go test ./model ./controller ./service ./router -run "TestCreateOpenCodeAccount|TestOpenCodeAccountPublicViewReportsCredentialDecryptFailure|TestOpenCodeAccountResponse|TestMergeExtractedOpenCodeSecretsPreservesExistingFields|TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState|TestActivateOpenCodeAccount|TestBuildOpenCodeAuthCommandSpecPassesKeyTextThroughStdin|TestOpenCodeAuthSidecarStatusTreatsMissingStateAsStopped|TestOpenCodeAccountRoutesRegisterExpectedPaths" -count=1
 bun run typecheck
 bunx oxlint -c .oxlintrc.json src/features/opencode-accounts src/routes/_authenticated/opencode-accounts src/hooks/use-sidebar-data.ts src/hooks/use-sidebar-config.ts
 bun run build in web/default
@@ -343,6 +348,8 @@ bun run build in web/classic
 go build .
 node --test scripts/opencode-auth-session.test.mjs
 node --check scripts/opencode-auth-session.mjs
+git diff --check
+diff secret-pattern scan
 ```
 
 Additional remote smoke validation:
@@ -663,6 +670,7 @@ web/default/src/routes/_authenticated/opencode-accounts/index.tsx
 | 凭据 readiness 诊断 | 已实现 | OpenCode account 公开响应现在提供脱敏的 `credential_integrity`、`activation_ready` 与 `missing_activation_fields` 信号，让操作者能区分账号材料缺失与密文解密失败，而不看到任何原始 secret。 |
 | 前端账号窗口 | 已实现 | 已增加 Root-only 管理路由、侧边栏入口、账号列表、已启用 channel 选择器与数字 ID fallback、远端截图控制、extract、quota refresh、activate、stop、delete 操作。 |
 | 激活到现有渠道 | 已实现 | 激活时解密选中账号 API key，在事务内更新绑定 channel，标记账号 active，并在 commit 后刷新 channel cache。 |
+| Activation credential contract | 已实现并完成本地验证 | 激活现在会按照绑定 channel 类型构造 channel credential。非 Codex channel 继续接受纯 OpenCode API key；Codex channel 必须提供包含 `access_token` 与 `account_id` 的 JSON 材料。公开 readiness 诊断现在会在操作者点击 activate 前，把 Codex/plain-key 绑定标记为不可激活。 |
 | 远端 clean artifact 部署 | 已完成 | 已从隔离的干净 checkout 构建已推送的 `main`，生成包含二进制与 sidecar 的 artifact，远端服务已切换到这些 artifact，并显式保留既有运行时数据路径，服务状态已验证为 active。 |
 | 最新远端上线 | 已完成 | 已推送的 `main` 提交 `c734a4d0` 现在已部署到远端服务。HTTP smoke 返回 200，空 state 的 sidecar status 返回成功的 `stopped`，远端 Node sidecar 测试通过，OpenCode extractor 相关 Go 定向测试通过，官方 OpenCode 授权页无凭证 start/screenshot/extract/stop smoke 通过。 |
 | 真实 OpenCode 登录 E2E | 待执行 | 需要操作者控制的 OpenCode 订阅账号；仓库不包含真实账号材料。 |
@@ -714,6 +722,8 @@ Channel binding 现在会在 OpenCode account 持久化前校验。前端也复�
 
 凭据 readiness 现在是明确的 API 契约。先前公开响应只有 `has_*` 标志；如果 `CRYPTO_SECRET` 配错或轮换，密文字段仍然“存在”，但实际已无法解密，操作者要到 activate 阶段才会看到失败。现在账号响应会区分密文存在、凭据完整性和是否可激活。前端因此可以显示脱敏的 credential error 状态，并在明显无法成功时禁用 activate。代价是响应 schema 小幅扩展，但只暴露字段名与布尔状态，不暴露原始 secret、cookie、workspace ID、账号邮箱、OAuth payload 或本地部署路径。
 
+激活现在有明确的 channel credential contract，而不是把提取到的材料盲写进 `channel.key`。这对 Codex channel 很关键：当前 fork 的 Codex relay 消费 OAuth JSON，并在请求头构造阶段要求同时存在 `access_token` 与 `account_id`；如果把纯 OpenCode API key 写进去，Admin UI 会显示激活成功，但第一轮调用会在 `SetupRequestHeader` 失败。现在 service 会在事务内拒绝这种不匹配，保持旧 channel key 不变，并把同一诊断反馈到账号 readiness，让前端提前禁用必然失败的 activate 路径。这里的取舍是保守的：连接器不会把 `workspace_id` 推断成 `account_id`，因为两者等价性没有证据。
+
 最大部署坑点是 `CRYPTO_SECRET`：导入的持久凭证要求该值稳定。如果运行时使用自动生成或轮换的 secret，已存 OpenCode 账号材料会解密失败并 fail closed，需要重新导入。
 
 远端部署现在已经与旧运行工作树分离。服务从基于已推送 `main` 构建的 clean artifact 运行，同时显式保留既有运行时数据位置。这样不会覆盖旧运行树中仍存在的本地 cache/accounting 工作，也把源码、artifact 与运行时数据拆成了三个独立边界。
@@ -739,6 +749,8 @@ go test ./service -run 'TestOpenCodeAuthSidecarStartReportsInvalidChromiumBinary
 go test ./service -run 'TestOpenCodeAuthSidecarStartReportsInvalidChromiumBinary|TestOpenCodeAuthSidecarStartDoesNotReusePidWithoutCDP|TestOpenCodeAuthSidecarStatusTreatsMissingStateAsStopped|TestBuildOpenCodeAuthCommandSpecPassesKeyTextThroughStdin|TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState|TestActivateOpenCodeAccount|TestObserveChannelAffinityUsageCacheByRelayFormat_MixedMode' -count=1
 go test ./service -run 'TestOpenCodeAuthSidecarStopWaitsForRecordedProcessExit|TestOpenCodeAuthSidecarStartReportsInvalidChromiumBinary|TestOpenCodeAuthSidecarStartDoesNotReusePidWithoutCDP|TestOpenCodeAuthSidecarStatusTreatsMissingStateAsStopped|TestBuildOpenCodeAuthCommandSpecPassesKeyTextThroughStdin|TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState|TestActivateOpenCodeAccount|TestObserveChannelAffinityUsageCacheByRelayFormat_MixedMode' -count=1
 go test ./service -run 'TestSanitizeOpenCodeLoginSessionStatus|TestBuildOpenCodeAuthCommandSpecPassesKeyTextThroughStdin|TestOpenCodeAuthSidecarStatusTreatsMissingStateAsStopped|TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState|TestActivateOpenCodeAccount|TestObserveChannelAffinityUsageCacheByRelayFormat_MixedMode' -count=1
+go test ./service ./controller -run "TestActivateOpenCodeAccount|TestOpenCodeAccountResponse" -count=1
+go test ./model ./controller ./service ./router -run "TestCreateOpenCodeAccount|TestOpenCodeAccountPublicViewReportsCredentialDecryptFailure|TestOpenCodeAccountResponse|TestMergeExtractedOpenCodeSecretsPreservesExistingFields|TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState|TestActivateOpenCodeAccount|TestBuildOpenCodeAuthCommandSpecPassesKeyTextThroughStdin|TestOpenCodeAuthSidecarStatusTreatsMissingStateAsStopped|TestOpenCodeAccountRoutesRegisterExpectedPaths" -count=1
 bun run typecheck
 bunx oxlint -c .oxlintrc.json src/features/opencode-accounts src/routes/_authenticated/opencode-accounts src/hooks/use-sidebar-data.ts src/hooks/use-sidebar-config.ts
 bunx oxlint -c .oxlintrc.json src/features/opencode-accounts
@@ -747,6 +759,8 @@ web/classic 下 bun run build
 go build .
 node --test scripts/opencode-auth-session.test.mjs
 node --check scripts/opencode-auth-session.mjs
+git diff --check
+diff secret-pattern scan
 ```
 
 额外远端 smoke 验证：

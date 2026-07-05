@@ -542,6 +542,8 @@ function formatMissingActivationFields(
           return t('Channel')
         case 'credentials_decryptable':
           return t('Credentials')
+        case 'codex_oauth_key':
+          return t('Codex OAuth key')
         default:
           return field
       }

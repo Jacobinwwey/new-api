@@ -254,6 +254,7 @@ End-to-end verification:
 | Frontend account window | Implemented | Added Root-only admin route, sidebar entry, account list, remote screenshot controls, extract, quota refresh, activate, stop, and delete actions. |
 | Activation into existing channels | Implemented | Activation decrypts the selected account API key, updates the bound channel inside a transaction, marks the account active, and refreshes channel cache after commit. |
 | Remote clean artifact deployment | Done | Built the pushed `main` from an isolated clean checkout, produced a self-contained binary-plus-sidecar artifact, switched the remote service to that artifact, preserved the existing runtime data path, and verified the service is active. |
+| Latest remote rollout | Pending network recovery | The stale-state reuse fix is pushed to `main`, but the remote artifact has not yet been rebuilt for that commit because the Tailscale/SSH path is currently unreachable. |
 | Real OpenCode login E2E | Pending | Requires an operator-controlled OpenCode subscription account. The repository contains no real account material. |
 | Real `glm-5.2` cache-hit E2E | Pending | Should run only after a real OpenCode account has been imported and activated through New API. |
 
@@ -284,6 +285,8 @@ The status endpoint is now deliberately idempotent. A missing sidecar state file
 Browser startup failures now fail early and diagnostically. Before this refinement, an invalid Chromium binary or an early Xvfb/Chromium exit could collapse into an unstructured process error or a slow CDP timeout. The sidecar now races CDP readiness against process startup failure and emits a structured JSON error that the API layer can surface to the operator.
 
 Existing browser reuse is now gated by CDP reachability, not by PID liveness alone. A process ID can remain alive or be reused while the recorded debugging port is dead; treating that as a reusable session makes the UI report a stopped session after a start request. The sidecar now continues into a fresh startup unless the existing session is actually reachable.
+
+The latest stale-state fix has been pushed to `main` but is not yet deployed to the remote artifact. Current evidence shows the Tailscale node is visible, but SSH and Tailscale ping are not returning, so remote rebuild and browser lifecycle smoke must resume once the network path recovers.
 
 Quota parsing has also been tightened. A quota field name is no longer enough to classify a numeric value as a limit when the key also says used, usage, or consumed. This removes an order-dependent failure mode where `quota.used` could be stored as `quota_limit`, which would corrupt quota display and any downstream reasoning about account capacity.
 
@@ -614,6 +617,7 @@ web/default/src/routes/_authenticated/opencode-accounts/index.tsx
 | 前端账号窗口 | 已实现 | 已增加 Root-only 管理路由、侧边栏入口、账号列表、远端截图控制、extract、quota refresh、activate、stop、delete 操作。 |
 | 激活到现有渠道 | 已实现 | 激活时解密选中账号 API key，在事务内更新绑定 channel，标记账号 active，并在 commit 后刷新 channel cache。 |
 | 远端 clean artifact 部署 | 已完成 | 已从隔离的干净 checkout 构建已推送的 `main`，生成包含二进制与 sidecar 的 artifact，远端服务已切换到该 artifact，并显式保留既有运行时数据路径，服务状态已验证为 active。 |
+| 最新远端上线 | 等待网络恢复 | 陈旧状态复用修复已推送到 `main`，但由于当前 Tailscale/SSH 路径不可达，远端 artifact 尚未针对该提交重建。 |
 | 真实 OpenCode 登录 E2E | 待执行 | 需要操作者控制的 OpenCode 订阅账号；仓库不包含真实账号材料。 |
 | 真实 `glm-5.2` cache-hit E2E | 待执行 | 只能在真实 OpenCode 账号经 New API 导入并激活后执行。 |
 
@@ -644,6 +648,8 @@ Admin Web
 浏览器启动失败现在会更早、更可诊断地失败。在这次收敛之前，错误的 Chromium 路径或 Xvfb/Chromium 早退可能表现为非结构化进程错误或缓慢的 CDP timeout。现在 sidecar 会将 CDP ready 与进程启动失败进行竞速，并输出 API 层可直接展示给操作者的结构化 JSON 错误。
 
 既有浏览器复用现在以 CDP 可达性为准，而不是只看 PID 是否存活。进程 ID 可能仍存活或被复用，但记录的调试端口已经不可用；如果把这种状态当成可复用会话，前端会在 start 后看到 stopped。现在除非既有会话真实可达，否则 sidecar 会继续拉起新浏览器。
+
+最新的陈旧状态修复已经推送到 `main`，但尚未部署到远端 artifact。当前证据是 Tailscale 节点可见，但 SSH 与 Tailscale ping 都没有返回；远端重建与浏览器生命周期 smoke 需要等网络路径恢复后继续。
 
 quota 解析也已经收紧。当 key 同时表达 used、usage 或 consumed 时，不能仅因为字段路径包含 quota 就把数值分类为 limit。这个修复移除了一个顺序相关故障：`quota.used` 可能被写入 `quota_limit`，从而污染 quota 展示和后续对账号容量的判断。
 

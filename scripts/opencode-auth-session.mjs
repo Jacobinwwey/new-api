@@ -276,7 +276,14 @@ async function statusFromState(state) {
 }
 
 async function statusSession(args) {
-  const state = await readState(args["state-dir"], Number(args["account-id"]));
+  const accountID = Number(args["account-id"]);
+  let state;
+  try {
+    state = await readState(args["state-dir"], accountID);
+  } catch {
+    json({ success: true, status: { account_id: accountID, running: false, status: "stopped" } });
+    return;
+  }
   json({ success: true, status: await statusFromState(state) });
 }
 

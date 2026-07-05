@@ -68,7 +68,18 @@ func TestCreateOpenCodeAccountRejectsInvalidLabel(t *testing.T) {
 	DB = db
 	require.NoError(t, db.AutoMigrate(&OpenCodeAccount{}))
 
-	err = CreateOpenCodeAccount(&OpenCodeAccount{Label: "bad label"}, OpenCodeAccountSecrets{})
+	err = CreateOpenCodeAccount(&OpenCodeAccount{Label: "bad label", ChannelID: 7}, OpenCodeAccountSecrets{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "label")
+}
+
+func TestCreateOpenCodeAccountRejectsMissingChannelBinding(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	DB = db
+	require.NoError(t, db.AutoMigrate(&OpenCodeAccount{}))
+
+	err = CreateOpenCodeAccount(&OpenCodeAccount{Label: "primary"}, OpenCodeAccountSecrets{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "channel id")
 }

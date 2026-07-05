@@ -180,6 +180,9 @@ func normalizeOpenCodeAccount(account *OpenCodeAccount) error {
 	if label == "" {
 		return errors.New("label is required")
 	}
+	if account.ChannelID <= 0 {
+		return errors.New("channel id is required")
+	}
 	for _, c := range label {
 		if !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-') {
 			return errors.New("label must contain only lowercase letters, numbers, and hyphens")

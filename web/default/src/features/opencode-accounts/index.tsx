@@ -17,6 +17,14 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
   Table,
   TableBody,
   TableCell,
@@ -24,6 +32,9 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { getChannels } from '@/features/channels/api'
+import { getChannelTypeLabel } from '@/features/channels/lib'
+import type { Channel } from '@/features/channels/types'
 import { cn } from '@/lib/utils'
 
 import {
@@ -58,7 +69,19 @@ export function OpenCodeAccounts() {
     queryKey: ['opencode-accounts'],
     queryFn: listOpenCodeAccounts,
   })
+  const channelsQuery = useQuery({
+    queryKey: ['opencode-channel-options'],
+    queryFn: () =>
+      getChannels({
+        p: 1,
+        page_size: 200,
+        status: 'enabled',
+        id_sort: true,
+      }),
+    retry: false,
+  })
   const accounts = accountsQuery.data?.data ?? []
+  const channels = channelsQuery.data?.data?.items ?? []
   const selectedAccount =
     accounts.find((account) => account.id === selectedID) ?? null
   const selectedAccountID = selectedAccount?.id ?? null
@@ -162,7 +185,11 @@ export function OpenCodeAccounts() {
 
   const handleCreate = () => {
     const parsedChannelID = Number(channelID)
-    if (!label.trim() || !Number.isInteger(parsedChannelID)) {
+    if (
+      !label.trim() ||
+      !Number.isInteger(parsedChannelID) ||
+      parsedChannelID <= 0
+    ) {
       toast.error(t('Label and channel ID are required'))
       return
     }
@@ -171,6 +198,8 @@ export function OpenCodeAccounts() {
       channel_id: parsedChannelID,
     })
   }
+
+  const selectedChannel = findChannelByID(channels, Number(channelID))
 
   const runSelected = (action: (id: number) => void) => {
     if (selectedAccountID === null) {
@@ -209,17 +238,42 @@ export function OpenCodeAccounts() {
       </SectionPageLayout.Actions>
       <SectionPageLayout.Content>
         <div className='grid min-h-0 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(480px,0.9fr)]'>
-          <section className='min-w-0 rounded-lg border bg-background'>
-            <div className='grid gap-3 border-b p-3 md:grid-cols-[minmax(0,1fr)_160px_auto]'>
+          <section className='bg-background min-w-0 rounded-lg border'>
+            <div className='grid gap-3 border-b p-3 md:grid-cols-[minmax(0,1fr)_minmax(220px,280px)_120px_auto]'>
               <Input
                 value={label}
                 onChange={(event) => setLabel(event.target.value)}
                 placeholder={t('Account label')}
               />
+              <Select
+                items={channels.map((channel) => ({
+                  value: String(channel.id),
+                  label: formatChannelOption(channel, t),
+                }))}
+                value={selectedChannel ? String(selectedChannel.id) : null}
+                onValueChange={(value) => {
+                  if (value !== null) {
+                    setChannelID(value)
+                  }
+                }}
+              >
+                <SelectTrigger className='w-full min-w-0'>
+                  <SelectValue placeholder={t('Select channel')} />
+                </SelectTrigger>
+                <SelectContent alignItemWithTrigger={false}>
+                  <SelectGroup>
+                    {channels.map((channel) => (
+                      <SelectItem key={channel.id} value={String(channel.id)}>
+                        {formatChannelOption(channel, t)}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
               <Input
                 value={channelID}
                 onChange={(event) => setChannelID(event.target.value)}
-                placeholder={t('Channel ID')}
+                placeholder={t('ID')}
                 inputMode='numeric'
               />
               <Button
@@ -266,13 +320,15 @@ export function OpenCodeAccounts() {
             </Table>
           </section>
 
-          <section className='grid min-w-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-3 rounded-lg border bg-background p-3'>
+          <section className='bg-background grid min-w-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-3 rounded-lg border p-3'>
             <div className='flex min-w-0 flex-wrap items-center gap-2'>
               <Badge variant={loginStatus?.running ? 'default' : 'outline'}>
                 {loginStatus?.running ? t('Running') : t('Stopped')}
               </Badge>
               <span className='text-muted-foreground min-w-0 truncate text-sm'>
-                {loginStatus?.url || selectedAccount?.label || t('No account selected')}
+                {loginStatus?.url ||
+                  selectedAccount?.label ||
+                  t('No account selected')}
               </span>
             </div>
             <div className='flex flex-wrap items-center gap-2'>
@@ -366,6 +422,17 @@ export function OpenCodeAccounts() {
       </SectionPageLayout.Content>
     </SectionPageLayout>
   )
+}
+
+function findChannelByID(channels: Channel[], channelID: number) {
+  if (!Number.isInteger(channelID)) {
+    return null
+  }
+  return channels.find((channel) => channel.id === channelID) ?? null
+}
+
+function formatChannelOption(channel: Channel, t: (key: string) => string) {
+  return `#${channel.id} ${channel.name} · ${t(getChannelTypeLabel(channel.type))}`
 }
 
 type AccountRowProps = {

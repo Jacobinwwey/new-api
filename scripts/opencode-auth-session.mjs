@@ -71,6 +71,44 @@ function pidRunning(pid) {
   }
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForProcessExit(pid, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!pidRunning(pid)) return true;
+    await sleep(50);
+  }
+  return !pidRunning(pid);
+}
+
+async function stopProcess(pid) {
+  if (!pid || !pidRunning(pid)) return;
+  try {
+    process.kill(pid, "SIGTERM");
+  } catch {
+    return;
+  }
+  if (await waitForProcessExit(pid, 2000)) return;
+  if (os.platform() === "win32") {
+    await new Promise((resolve) => {
+      const killer = spawn("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore" });
+      killer.once("exit", resolve);
+      killer.once("error", resolve);
+    });
+    await waitForProcessExit(pid, 1000);
+    return;
+  }
+  try {
+    process.kill(pid, "SIGKILL");
+  } catch {
+    return;
+  }
+  await waitForProcessExit(pid, 1000);
+}
+
 async function allocatePort() {
   return new Promise((resolve, reject) => {
     const server = net.createServer();
@@ -390,14 +428,7 @@ async function stopSession(args) {
     json({ success: true, status: { account_id: accountID, running: false, status: "stopped" } });
     return;
   }
-  for (const pid of [state.browserPid, state.xvfbPid]) {
-    if (!pid) continue;
-    try {
-      process.kill(pid, "SIGTERM");
-    } catch {
-      /* already stopped */
-    }
-  }
+  await Promise.all([stopProcess(state.browserPid), stopProcess(state.xvfbPid)]);
   json({ success: true, status: { account_id: accountID, running: false, status: "stopped" } });
 }
 

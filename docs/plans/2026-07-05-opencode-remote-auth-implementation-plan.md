@@ -250,6 +250,7 @@ End-to-end verification:
 | Login status idempotency | Implemented | `login/status` now returns a successful `stopped` status when no sidecar state file exists, so frontend polling and page refreshes do not surface false failures before a login session has started. |
 | Browser startup diagnostics | Implemented | The sidecar now watches Chromium and Xvfb `error`/early-`exit` events during startup and returns structured JSON failures, avoiding opaque CDP timeouts when browser dependencies are missing or misconfigured. |
 | Stale browser state handling | Implemented | `login/start` now reuses an existing browser only when the recorded PID is alive and the CDP endpoint is reachable; stale PID/state combinations fall through to a fresh browser startup. |
+| Stop lifecycle cleanup | Implemented | `login/stop` now waits for recorded browser/Xvfb processes to exit after SIGTERM and falls back to a force kill, reducing stale browser process leakage before returning `stopped`. |
 | Extractor | Implemented | Candidate-based scanner covers OpenCode-domain cookies, local/session storage, and JSON responses; tests cover ranking and empty-state rejection. |
 | Frontend account window | Implemented | Added Root-only admin route, sidebar entry, account list, remote screenshot controls, extract, quota refresh, activate, stop, and delete actions. |
 | Activation into existing channels | Implemented | Activation decrypts the selected account API key, updates the bound channel inside a transaction, marks the account active, and refreshes channel cache after commit. |
@@ -286,6 +287,8 @@ Browser startup failures now fail early and diagnostically. Before this refineme
 
 Existing browser reuse is now gated by CDP reachability, not by PID liveness alone. A process ID can remain alive or be reused while the recorded debugging port is dead; treating that as a reusable session makes the UI report a stopped session after a start request. The sidecar now continues into a fresh startup unless the existing session is actually reachable.
 
+Stop now owns process cleanup more completely. It no longer returns immediately after sending SIGTERM; it waits for recorded browser/Xvfb processes to exit and uses a force-kill fallback when they do not. This makes lifecycle smoke tests and repeated login attempts less likely to accumulate stale headless browser processes.
+
 The latest stale-state fix has been pushed to `main` but is not yet deployed to the remote artifact. Current evidence shows the Tailscale node is visible, but SSH and Tailscale ping are not returning, so remote rebuild and browser lifecycle smoke must resume once the network path recovers.
 
 Quota parsing has also been tightened. A quota field name is no longer enough to classify a numeric value as a limit when the key also says used, usage, or consumed. This removes an order-dependent failure mode where `quota.used` could be stored as `quota_limit`, which would corrupt quota display and any downstream reasoning about account capacity.
@@ -311,6 +314,7 @@ go test ./service -run 'TestBuildOpenCodeAuthCommandSpecPassesKeyTextThroughStdi
 go test ./service -run 'TestOpenCodeAuthSidecarStartReportsInvalidChromiumBinary|TestOpenCodeAuthSidecarStatusTreatsMissingStateAsStopped|TestBuildOpenCodeAuthCommandSpecPassesKeyTextThroughStdin' -count=1
 go test ./service -run 'TestOpenCodeAuthSidecarStartReportsInvalidChromiumBinary|TestOpenCodeAuthSidecarStatusTreatsMissingStateAsStopped|TestBuildOpenCodeAuthCommandSpecPassesKeyTextThroughStdin|TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState|TestActivateOpenCodeAccount|TestObserveChannelAffinityUsageCacheByRelayFormat_MixedMode' -count=1
 go test ./service -run 'TestOpenCodeAuthSidecarStartReportsInvalidChromiumBinary|TestOpenCodeAuthSidecarStartDoesNotReusePidWithoutCDP|TestOpenCodeAuthSidecarStatusTreatsMissingStateAsStopped|TestBuildOpenCodeAuthCommandSpecPassesKeyTextThroughStdin|TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState|TestActivateOpenCodeAccount|TestObserveChannelAffinityUsageCacheByRelayFormat_MixedMode' -count=1
+go test ./service -run 'TestOpenCodeAuthSidecarStopWaitsForRecordedProcessExit|TestOpenCodeAuthSidecarStartReportsInvalidChromiumBinary|TestOpenCodeAuthSidecarStartDoesNotReusePidWithoutCDP|TestOpenCodeAuthSidecarStatusTreatsMissingStateAsStopped|TestBuildOpenCodeAuthCommandSpecPassesKeyTextThroughStdin|TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState|TestActivateOpenCodeAccount|TestObserveChannelAffinityUsageCacheByRelayFormat_MixedMode' -count=1
 bun run typecheck
 bunx oxlint -c .oxlintrc.json src/features/opencode-accounts src/routes/_authenticated/opencode-accounts src/hooks/use-sidebar-data.ts src/hooks/use-sidebar-config.ts
 bun run build in web/default
@@ -613,6 +617,7 @@ web/default/src/routes/_authenticated/opencode-accounts/index.tsx
 | 登录状态幂等性 | 已实现 | 当 sidecar state 文件不存在时，`login/status` 现在返回成功的 `stopped` 状态，避免前端轮询或页面刷新在尚未启动登录会话前暴露伪失败。 |
 | 浏览器启动诊断 | 已实现 | sidecar 现在会在启动阶段监听 Chromium 与 Xvfb 的 `error` / early-`exit` 事件，并返回结构化 JSON 失败，避免浏览器依赖缺失或配置错误时退化为不透明的 CDP 超时。 |
 | 陈旧浏览器状态处理 | 已实现 | `login/start` 现在只会在记录的 PID 存活且 CDP endpoint 可达时复用既有浏览器；陈旧 PID/state 组合会继续走新浏览器启动流程。 |
+| Stop 生命周期清理 | 已实现 | `login/stop` 现在会在 SIGTERM 后等待记录的 browser/Xvfb 进程退出，并在未退出时使用强制清理兜底，减少返回 `stopped` 前遗留浏览器进程的概率。 |
 | Extractor | 已实现 | 候选扫描覆盖 OpenCode 域 cookie、local/session storage 与 JSON responses；测试覆盖排序和空状态拒绝。 |
 | 前端账号窗口 | 已实现 | 已增加 Root-only 管理路由、侧边栏入口、账号列表、远端截图控制、extract、quota refresh、activate、stop、delete 操作。 |
 | 激活到现有渠道 | 已实现 | 激活时解密选中账号 API key，在事务内更新绑定 channel，标记账号 active，并在 commit 后刷新 channel cache。 |
@@ -649,6 +654,8 @@ Admin Web
 
 既有浏览器复用现在以 CDP 可达性为准，而不是只看 PID 是否存活。进程 ID 可能仍存活或被复用，但记录的调试端口已经不可用；如果把这种状态当成可复用会话，前端会在 start 后看到 stopped。现在除非既有会话真实可达，否则 sidecar 会继续拉起新浏览器。
 
+stop 现在更完整地拥有进程清理语义。它不再发送 SIGTERM 后立刻返回，而是等待记录的 browser/Xvfb 进程退出，并在未退出时使用强制清理兜底。这样 lifecycle smoke 与重复登录尝试更不容易堆积陈旧 headless browser 进程。
+
 最新的陈旧状态修复已经推送到 `main`，但尚未部署到远端 artifact。当前证据是 Tailscale 节点可见，但 SSH 与 Tailscale ping 都没有返回；远端重建与浏览器生命周期 smoke 需要等网络路径恢复后继续。
 
 quota 解析也已经收紧。当 key 同时表达 used、usage 或 consumed 时，不能仅因为字段路径包含 quota 就把数值分类为 limit。这个修复移除了一个顺序相关故障：`quota.used` 可能被写入 `quota_limit`，从而污染 quota 展示和后续对账号容量的判断。
@@ -674,6 +681,7 @@ go test ./service -run 'TestBuildOpenCodeAuthCommandSpecPassesKeyTextThroughStdi
 go test ./service -run 'TestOpenCodeAuthSidecarStartReportsInvalidChromiumBinary|TestOpenCodeAuthSidecarStatusTreatsMissingStateAsStopped|TestBuildOpenCodeAuthCommandSpecPassesKeyTextThroughStdin' -count=1
 go test ./service -run 'TestOpenCodeAuthSidecarStartReportsInvalidChromiumBinary|TestOpenCodeAuthSidecarStatusTreatsMissingStateAsStopped|TestBuildOpenCodeAuthCommandSpecPassesKeyTextThroughStdin|TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState|TestActivateOpenCodeAccount|TestObserveChannelAffinityUsageCacheByRelayFormat_MixedMode' -count=1
 go test ./service -run 'TestOpenCodeAuthSidecarStartReportsInvalidChromiumBinary|TestOpenCodeAuthSidecarStartDoesNotReusePidWithoutCDP|TestOpenCodeAuthSidecarStatusTreatsMissingStateAsStopped|TestBuildOpenCodeAuthCommandSpecPassesKeyTextThroughStdin|TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState|TestActivateOpenCodeAccount|TestObserveChannelAffinityUsageCacheByRelayFormat_MixedMode' -count=1
+go test ./service -run 'TestOpenCodeAuthSidecarStopWaitsForRecordedProcessExit|TestOpenCodeAuthSidecarStartReportsInvalidChromiumBinary|TestOpenCodeAuthSidecarStartDoesNotReusePidWithoutCDP|TestOpenCodeAuthSidecarStatusTreatsMissingStateAsStopped|TestBuildOpenCodeAuthCommandSpecPassesKeyTextThroughStdin|TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState|TestActivateOpenCodeAccount|TestObserveChannelAffinityUsageCacheByRelayFormat_MixedMode' -count=1
 bun run typecheck
 bunx oxlint -c .oxlintrc.json src/features/opencode-accounts src/routes/_authenticated/opencode-accounts src/hooks/use-sidebar-data.ts src/hooks/use-sidebar-config.ts
 web/default 下 bun run build

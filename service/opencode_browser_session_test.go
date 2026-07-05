@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/stretchr/testify/assert"
@@ -104,4 +105,65 @@ func TestOpenCodeAuthSidecarStartDoesNotReusePidWithoutCDP(t *testing.T) {
 	require.NoError(t, common.Unmarshal(output, &response))
 	require.False(t, response.Success, string(output))
 	assert.Contains(t, response.Message, "definitely-missing-opencode-browser-binary")
+}
+
+func TestOpenCodeAuthSidecarStopWaitsForRecordedProcessExit(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node is required for opencode auth sidecar tests")
+	}
+	scriptPath, err := filepath.Abs(filepath.Join("..", "scripts", "opencode-auth-session.mjs"))
+	require.NoError(t, err)
+	stateDir := t.TempDir()
+
+	child := exec.Command("node", "-e", `
+		process.on("SIGTERM", () => setTimeout(() => process.exit(0), 350));
+		setInterval(() => {}, 1000);
+	`)
+	require.NoError(t, child.Start())
+	waitDone := make(chan struct{})
+	go func() {
+		_ = child.Wait()
+		close(waitDone)
+	}()
+	t.Cleanup(func() {
+		select {
+		case <-waitDone:
+			return
+		default:
+			_ = child.Process.Kill()
+		}
+		<-waitDone
+	})
+
+	require.NoError(t, os.WriteFile(filepath.Join(stateDir, "account-200.json"), []byte(`{
+		"accountID": 200,
+		"port": 9,
+		"display": ":400",
+		"profile": "",
+		"browserPid": `+strconv.Itoa(child.Process.Pid)+`,
+		"xvfbPid": 0,
+		"startedAt": 1
+	}`), 0o600))
+
+	output, err := exec.Command("node",
+		scriptPath,
+		"--action", "stop",
+		"--account-id", "200",
+		"--state-dir", stateDir,
+		"--url", openCodeAuthURL,
+	).Output()
+	require.NoError(t, err)
+
+	var response openCodeAuthSidecarResponse
+	require.NoError(t, common.Unmarshal(output, &response))
+	require.True(t, response.Success, string(output))
+
+	assert.Eventually(t, func() bool {
+		select {
+		case <-waitDone:
+			return true
+		default:
+			return false
+		}
+	}, 100*time.Millisecond, 10*time.Millisecond)
 }

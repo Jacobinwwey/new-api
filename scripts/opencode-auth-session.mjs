@@ -6,6 +6,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { pathToFileURL } from "node:url";
 
 const DEFAULT_VIEWPORT = { width: 1280, height: 900 };
 
@@ -73,6 +74,25 @@ function pidRunning(pid) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export async function retryTransientBrowserAction(action, options = {}) {
+  const attempts = Math.max(1, Number(options.attempts || 3));
+  const delayMs = Math.max(0, Number(options.delayMs || 250));
+  let lastError;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await action(attempt);
+    } catch (error) {
+      lastError = error;
+      if (attempt < attempts && delayMs > 0) {
+        await sleep(delayMs);
+      }
+    }
+  }
+
+  throw lastError || new Error("browser action failed");
 }
 
 async function waitForProcessExit(pid, timeoutMs) {
@@ -359,10 +379,12 @@ async function statusSession(args) {
 
 async function screenshotSession(args) {
   const state = await readState(args["state-dir"], Number(args["account-id"]));
-  const screenshot = await withPage(state, async (cdp) => {
-    const result = await cdp.send("Page.captureScreenshot", { format: "png", fromSurface: true });
-    return { image_base64: result.data || "" };
-  });
+  const screenshot = await retryTransientBrowserAction(() =>
+    withPage(state, async (cdp) => {
+      const result = await cdp.send("Page.captureScreenshot", { format: "png", fromSurface: true });
+      return { image_base64: result.data || "" };
+    })
+  );
   json({ success: true, screenshot, status: await statusFromState(state) });
 }
 
@@ -454,4 +476,6 @@ async function main() {
   }
 }
 
-main();
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main();
+}

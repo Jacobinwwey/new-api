@@ -79,7 +79,7 @@ func ExtractOpenCodeQuotaFromBrowserState(state OpenCodeBrowserState) (OpenCodeE
 
 func scanKeyValues(values map[string]string, extracted *OpenCodeExtractedAccount) {
 	for key, value := range values {
-		if extracted.QuotaRaw == "" && isQuotaCandidate(strings.ToLower(strings.TrimSpace(key))) {
+		if extracted.QuotaRaw == "" && isQuotaRawCandidate(strings.ToLower(strings.TrimSpace(key))) {
 			extracted.QuotaRaw = strings.TrimSpace(value)
 			extracted.Confidence++
 		}
@@ -140,7 +140,7 @@ func acceptCandidate(key string, value string, extracted *OpenCodeExtractedAccou
 	case extracted.Secrets.Email == "" && emailCandidatePattern.MatchString(value):
 		extracted.Secrets.Email = value
 		extracted.Confidence++
-	case extracted.QuotaRaw == "" && isQuotaCandidate(key):
+	case extracted.QuotaRaw == "" && isQuotaRawCandidate(key):
 		extracted.QuotaRaw = value
 		extracted.Confidence++
 	}
@@ -196,6 +196,10 @@ func isQuotaCandidate(key string) bool {
 	return strings.Contains(key, "quota") ||
 		strings.Contains(key, "credit") ||
 		strings.Contains(key, "limit")
+}
+
+func isQuotaRawCandidate(key string) bool {
+	return isQuotaCandidate(key) && !isQuotaUsedCandidate(key)
 }
 
 func isQuotaLimitCandidate(key string) bool {

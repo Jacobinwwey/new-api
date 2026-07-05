@@ -244,7 +244,7 @@ End-to-end verification:
 | OpenCode account model | Implemented | Added `opencode_accounts` model, migration registration, validation, encrypted secret storage, and masked public view. |
 | Reversible encryption helper | Implemented | Added AES-GCM `EncryptSecret` / `DecryptSecret` using `CRYPTO_SECRET`-derived key and versioned ciphertext. |
 | Root-only OpenCode account API | Implemented | Added CRUD, login-session, extract, quota refresh, and activate routes under `/api/opencode/accounts`. Quota refresh now accepts quota-only browser payloads and updates structured `quota_limit` / `quota_used` fields. |
-| Quota candidate classification | Implemented | Quota limit detection now excludes used/usage/consumed keys, preventing `quota.used` values from being recorded as quota limits when browser payload traversal order varies. |
+| Quota candidate classification | Implemented | Quota limit and raw display detection now exclude used/usage/consumed keys, preventing `quota.used` values from being recorded as quota limits or quota raw display values when browser payload traversal order varies. |
 | Remote browser sidecar | Implemented and smoke-tested on the remote host without credentials | Added Node CDP + Xvfb sidecar with start/status/screenshot/click/key/extract/stop actions. Remote smoke tests covered `about:blank` and the official OpenCode authorization entrypoint without logging in. Extract now probes likely OpenCode same-site JSON resources loaded by the page, excluding static assets and OAuth payload URLs, so API-key/workspace/quota candidates are not limited to browser storage. |
 | Sensitive browser input transport | Implemented | `login/key` now sends typed text to the Node sidecar through stdin instead of argv, so Google/OpenCode login text does not appear in process command lines. The sidecar rejects legacy `--text` input. |
 | Login status URL sanitization | Implemented | Status responses now strip query strings and fragments from HTTP(S) browser URLs before returning them through New API, preventing OAuth `state`, `code`, or similar authorization payloads from reaching the Admin UI/API response. |
@@ -311,7 +311,7 @@ The sidecar extractor now closes a real implementation gap in the original plan.
 
 The extractor now also rejects OAuth token fields as API-key candidates. This is a stricter boundary than matching every key ending in `token`: OpenCode API keys remain discoverable through explicit API-key-shaped names such as `api_key`, `apiKey`, `api.key`, or `.key`, while `access_token`, `id_token`, and `refresh_token` are treated as authorization artifacts, not provider API keys. The tradeoff is deliberate: if a future upstream exposes only a generic bearer token field, the connector should fail extraction and require a targeted parser update rather than silently persisting the wrong credential class.
 
-Quota parsing has also been tightened. A quota field name is no longer enough to classify a numeric value as a limit when the key also says used, usage, or consumed. This removes an order-dependent failure mode where `quota.used` could be stored as `quota_limit`, which would corrupt quota display and any downstream reasoning about account capacity.
+Quota parsing has also been tightened. A quota field name is no longer enough to classify a numeric value as a limit or raw display value when the key also says used, usage, or consumed. This removes order-dependent failure modes where `quota.used` could be stored as `quota_limit` or shown as the raw quota value, which would corrupt quota display and any downstream reasoning about account capacity.
 
 Extraction now preserves durable account material when the browser only yields partial candidates. This matters because real auth pages can expose cookie/quota first and API key/workspace later, or expose different fields depending on navigation timing. The controller now merges non-empty extracted fields into the existing decrypted secret set and re-encrypts the result, instead of treating missing candidates as explicit deletion.
 
@@ -338,7 +338,7 @@ go test ./controller -run TestOpenCodeAccountResponseDoesNotExposeSecrets -count
 go test ./controller -run 'TestOpenCodeAccountResponseDoesNotExposeSecrets|TestMergeExtractedOpenCodeSecretsPreservesExistingFields' -count=1
 go test ./router -run TestOpenCodeAccountRoutesRegisterExpectedPaths -count=1
 go test ./service -run 'TestExtractOpenCodeSecretsFromBrowserState|TestActivateOpenCodeAccount' -count=1
-go test ./service -run "TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState" -count=1
+go test ./service -run "TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState" -count=20
 go test ./service -run TestObserveChannelAffinityUsageCacheByRelayFormat_MixedMode -count=1
 go test ./service -run 'TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState|TestActivateOpenCodeAccount|TestObserveChannelAffinityUsageCacheByRelayFormat_MixedMode' -count=1
 go test ./service -run 'TestBuildOpenCodeAuthCommandSpecPassesKeyTextThroughStdin|TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState|TestActivateOpenCodeAccount|TestObserveChannelAffinityUsageCacheByRelayFormat_MixedMode' -count=1
@@ -664,7 +664,7 @@ web/default/src/routes/_authenticated/opencode-accounts/index.tsx
 | OpenCode account model | 已实现 | 已增加 `opencode_accounts` model、迁移注册、校验、加密 secret 存储与 masked public view。 |
 | 可逆加密 helper | 已实现 | 已增加 AES-GCM `EncryptSecret` / `DecryptSecret`，使用 `CRYPTO_SECRET` 派生 key，密文带版本前缀。 |
 | Root-only OpenCode account API | 已实现 | `/api/opencode/accounts` 下已包含 CRUD、登录会话、提取、quota refresh 与 activate 路由。quota refresh 现在支持只包含 quota 的浏览器 payload，并会更新结构化 `quota_limit` / `quota_used` 字段。 |
-| Quota 候选分类 | 已实现 | quota limit 检测现在会排除 used/usage/consumed 键，避免浏览器 payload 遍历顺序变化时把 `quota.used` 写入 quota limit。 |
+| Quota 候选分类 | 已实现 | quota limit 与 raw display 检测现在会排除 used/usage/consumed 键，避免浏览器 payload 遍历顺序变化时把 `quota.used` 写入 quota limit 或 quota raw 展示值。 |
 | 远端浏览器 sidecar | 已实现，并已在远端主机完成无凭证 smoke test | 已增加 Node CDP + Xvfb sidecar，支持 start/status/screenshot/click/key/extract/stop。远端 smoke 覆盖 `about:blank` 与官方 OpenCode 授权入口，未登录、未使用任何账号材料。extract 现在会 probe 页面已加载的疑似 OpenCode 同站 JSON 资源，并排除静态资源与 OAuth payload URL，因此 API key、workspace、quota 候选不再只依赖浏览器 storage。 |
 | 敏感浏览器输入传输 | 已实现 | `login/key` 现在通过 stdin 向 Node sidecar 传递键入文本，不再放入 argv，因此 Google/OpenCode 登录页中的输入不会出现在进程命令行中。sidecar 会拒绝旧的 `--text` 输入。 |
 | 登录状态 URL 脱敏 | 已实现 | status 响应现在会在经 New API 返回前移除 HTTP(S) 浏览器 URL 的 query string 与 fragment，避免 OAuth `state`、`code` 或类似授权载荷进入 Admin UI/API 响应。 |
@@ -731,7 +731,7 @@ Sidecar extractor 现在补上了原计划中的一个真实实现缺口。后�
 
 extractor 现在也会拒绝把 OAuth token 字段作为 API-key 候选。这比“所有以 `token` 结尾的 key 都可作为 API key”更严格：OpenCode API key 仍可通过 `api_key`、`apiKey`、`api.key` 或 `.key` 这类明确 API-key 形态的字段发现；`access_token`、`id_token`、`refresh_token` 则被视为授权过程产物，而不是 provider API key。这里的取舍是有意保守：如果未来上游只暴露泛化 bearer token 字段，连接器应该提取失败并要求补充针对性 parser，而不是静默持久化错误凭据类别。
 
-quota 解析也已经收紧。当 key 同时表达 used、usage 或 consumed 时，不能仅因为字段路径包含 quota 就把数值分类为 limit。这个修复移除了一个顺序相关故障：`quota.used` 可能被写入 `quota_limit`，从而污染 quota 展示和后续对账号容量的判断。
+quota 解析也已经收紧。当 key 同时表达 used、usage 或 consumed 时，不能仅因为字段路径包含 quota 就把数值分类为 limit 或 raw display。这个修复移除了顺序相关故障：`quota.used` 可能被写入 `quota_limit` 或作为 quota raw 展示值，从而污染 quota 展示和后续对账号容量的判断。
 
 提取流程现在会在浏览器只给出部分候选时保留已有持久账号材料。真实授权页可能先暴露 cookie/quota，稍后才暴露 API key/workspace，或者因为导航时机不同只暴露部分字段。controller 现在会把非空提取字段合并到既有解密 secret 集合并重新加密保存，而不是把缺失候选当作显式删除。
 
@@ -757,7 +757,7 @@ go test ./controller -run TestOpenCodeAccountResponseDoesNotExposeSecrets -count
 go test ./controller -run 'TestOpenCodeAccountResponseDoesNotExposeSecrets|TestMergeExtractedOpenCodeSecretsPreservesExistingFields' -count=1
 go test ./router -run TestOpenCodeAccountRoutesRegisterExpectedPaths -count=1
 go test ./service -run 'TestExtractOpenCodeSecretsFromBrowserState|TestActivateOpenCodeAccount' -count=1
-go test ./service -run "TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState" -count=1
+go test ./service -run "TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState" -count=20
 go test ./service -run TestObserveChannelAffinityUsageCacheByRelayFormat_MixedMode -count=1
 go test ./service -run 'TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState|TestActivateOpenCodeAccount|TestObserveChannelAffinityUsageCacheByRelayFormat_MixedMode' -count=1
 go test ./service -run 'TestBuildOpenCodeAuthCommandSpecPassesKeyTextThroughStdin|TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState|TestActivateOpenCodeAccount|TestObserveChannelAffinityUsageCacheByRelayFormat_MixedMode' -count=1

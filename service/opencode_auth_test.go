@@ -32,6 +32,8 @@ func TestExtractOpenCodeSecretsFromBrowserStateRanksStorageAndJsonCandidates(t *
 	assert.Equal(t, "opencode-api-key-storage-test", extracted.Secrets.APIKey)
 	assert.Contains(t, extracted.Secrets.Cookie, "oc_session=fixture-session-test")
 	assert.Contains(t, extracted.QuotaRaw, "limit")
+	assert.EqualValues(t, 1000000, extracted.QuotaLimit)
+	assert.EqualValues(t, 42, extracted.QuotaUsed)
 	assert.GreaterOrEqual(t, extracted.Confidence, 4)
 }
 
@@ -39,4 +41,19 @@ func TestExtractOpenCodeSecretsFromBrowserStateRejectsEmptyCandidates(t *testing
 	extracted, err := ExtractOpenCodeSecretsFromBrowserState(OpenCodeBrowserState{})
 	require.Error(t, err)
 	assert.Empty(t, extracted.Secrets.APIKey)
+}
+
+func TestExtractOpenCodeQuotaFromBrowserStateAcceptsQuotaOnlyPayload(t *testing.T) {
+	state := OpenCodeBrowserState{
+		JSONResponses: []string{
+			`{"quota":{"limit":250000,"used":1250}}`,
+		},
+	}
+
+	quota, err := ExtractOpenCodeQuotaFromBrowserState(state)
+	require.NoError(t, err)
+
+	assert.Contains(t, quota.Raw, "250000")
+	assert.EqualValues(t, 250000, quota.Limit)
+	assert.EqualValues(t, 1250, quota.Used)
 }

@@ -26,7 +26,15 @@ type OpenCodeBrowserState struct {
 type OpenCodeExtractedAccount struct {
 	Secrets    model.OpenCodeAccountSecrets
 	QuotaRaw   string
+	QuotaLimit int64
+	QuotaUsed  int64
 	Confidence int
+}
+
+type OpenCodeExtractedQuota struct {
+	Raw   string
+	Limit int64
+	Used  int64
 }
 
 var emailCandidatePattern = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
@@ -50,6 +58,23 @@ func ExtractOpenCodeSecretsFromBrowserState(state OpenCodeBrowserState) (OpenCod
 		return OpenCodeExtractedAccount{}, errors.New("no OpenCode account candidates found")
 	}
 	return extracted, nil
+}
+
+func ExtractOpenCodeQuotaFromBrowserState(state OpenCodeBrowserState) (OpenCodeExtractedQuota, error) {
+	var extracted OpenCodeExtractedAccount
+	scanKeyValues(state.LocalStorage, &extracted)
+	scanKeyValues(state.SessionStorage, &extracted)
+	for _, raw := range state.JSONResponses {
+		scanJSONCandidate(raw, &extracted)
+	}
+	if extracted.QuotaRaw == "" && extracted.QuotaLimit == 0 && extracted.QuotaUsed == 0 {
+		return OpenCodeExtractedQuota{}, errors.New("no OpenCode quota candidates found")
+	}
+	return OpenCodeExtractedQuota{
+		Raw:   extracted.QuotaRaw,
+		Limit: extracted.QuotaLimit,
+		Used:  extracted.QuotaUsed,
+	}, nil
 }
 
 func scanKeyValues(values map[string]string, extracted *OpenCodeExtractedAccount) {
@@ -90,6 +115,9 @@ func walkOpenCodeCandidate(key string, value any, extracted *OpenCodeExtractedAc
 		}
 	case string:
 		acceptCandidate(key, typed, extracted)
+	case float64:
+		acceptQuotaNumberCandidate(key, int64(typed), extracted)
+		acceptCandidate(key, fmt.Sprintf("%v", typed), extracted)
 	default:
 		acceptCandidate(key, fmt.Sprintf("%v", typed), extracted)
 	}
@@ -101,6 +129,7 @@ func acceptCandidate(key string, value string, extracted *OpenCodeExtractedAccou
 	if value == "" {
 		return
 	}
+	acceptQuotaStringCandidate(key, value, extracted)
 	switch {
 	case extracted.Secrets.APIKey == "" && isAPIKeyCandidate(key):
 		extracted.Secrets.APIKey = value
@@ -114,6 +143,27 @@ func acceptCandidate(key string, value string, extracted *OpenCodeExtractedAccou
 	case extracted.QuotaRaw == "" && isQuotaCandidate(key):
 		extracted.QuotaRaw = value
 		extracted.Confidence++
+	}
+}
+
+func acceptQuotaStringCandidate(key string, value string, extracted *OpenCodeExtractedAccount) {
+	number, ok := parseQuotaNumber(value)
+	if !ok {
+		return
+	}
+	acceptQuotaNumberCandidate(key, number, extracted)
+}
+
+func acceptQuotaNumberCandidate(key string, value int64, extracted *OpenCodeExtractedAccount) {
+	key = strings.ToLower(strings.TrimSpace(key))
+	if value < 0 {
+		return
+	}
+	switch {
+	case extracted.QuotaUsed == 0 && isQuotaUsedCandidate(key):
+		extracted.QuotaUsed = value
+	case extracted.QuotaLimit == 0 && isQuotaLimitCandidate(key):
+		extracted.QuotaLimit = value
 	}
 }
 
@@ -134,6 +184,30 @@ func isQuotaCandidate(key string) bool {
 	return strings.Contains(key, "quota") ||
 		strings.Contains(key, "credit") ||
 		strings.Contains(key, "limit")
+}
+
+func isQuotaLimitCandidate(key string) bool {
+	return strings.Contains(key, "limit") ||
+		strings.Contains(key, "total") ||
+		strings.Contains(key, "quota")
+}
+
+func isQuotaUsedCandidate(key string) bool {
+	return strings.Contains(key, "used") ||
+		strings.Contains(key, "usage") ||
+		strings.Contains(key, "consumed")
+}
+
+func parseQuotaNumber(value string) (int64, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0, false
+	}
+	var parsed int64
+	if _, err := fmt.Sscan(value, &parsed); err != nil {
+		return 0, false
+	}
+	return parsed, true
 }
 
 func joinCandidateKey(parent string, child string) string {

@@ -240,11 +240,16 @@ func ExtractOpenCodeAccountLogin(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	secrets, err := account.DecryptSecrets()
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	account.QuotaRaw = extracted.QuotaRaw
 	account.QuotaLimit = extracted.QuotaLimit
 	account.QuotaUsed = extracted.QuotaUsed
 	account.LastExtractedAt = common.GetTimestamp()
-	if err := model.UpdateOpenCodeAccount(account, extracted.Secrets); err != nil {
+	if err := model.UpdateOpenCodeAccount(account, mergeExtractedOpenCodeSecrets(secrets, extracted.Secrets)); err != nil {
 		common.ApiError(c, err)
 		return
 	}
@@ -320,4 +325,20 @@ func parseOpenCodeAccountID(c *gin.Context) (int, bool) {
 		return 0, false
 	}
 	return id, true
+}
+
+func mergeExtractedOpenCodeSecrets(existing model.OpenCodeAccountSecrets, extracted model.OpenCodeAccountSecrets) model.OpenCodeAccountSecrets {
+	if extracted.Email != "" {
+		existing.Email = extracted.Email
+	}
+	if extracted.WorkspaceID != "" {
+		existing.WorkspaceID = extracted.WorkspaceID
+	}
+	if extracted.APIKey != "" {
+		existing.APIKey = extracted.APIKey
+	}
+	if extracted.Cookie != "" {
+		existing.Cookie = extracted.Cookie
+	}
+	return existing
 }

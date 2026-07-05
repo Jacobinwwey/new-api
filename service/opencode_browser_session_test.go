@@ -22,6 +22,32 @@ func TestBuildOpenCodeAuthCommandSpecPassesKeyTextThroughStdin(t *testing.T) {
 	assert.Equal(t, "secret-login-text", spec.stdin)
 }
 
+func TestSanitizeOpenCodeLoginSessionStatusDropsAuthorizationPayload(t *testing.T) {
+	status := sanitizeOpenCodeLoginSessionStatus(OpenCodeLoginSessionStatus{
+		AccountID: 9,
+		Running:   true,
+		Status:    "running",
+		URL:       "https://operator:secret@auth.opencode.ai/authorize?client_id=app&state=oauth-state&code=auth-code#fragment",
+		StartedAt: 123,
+	})
+
+	assert.Equal(t, 9, status.AccountID)
+	assert.Equal(t, "https://auth.opencode.ai/authorize", status.URL)
+	assert.NotContains(t, status.URL, "operator")
+	assert.NotContains(t, status.URL, "secret")
+	assert.NotContains(t, status.URL, "oauth-state")
+	assert.NotContains(t, status.URL, "auth-code")
+	assert.NotContains(t, status.URL, "fragment")
+}
+
+func TestSanitizeOpenCodeLoginSessionStatusKeepsNonHTTPBrowserURL(t *testing.T) {
+	status := sanitizeOpenCodeLoginSessionStatus(OpenCodeLoginSessionStatus{
+		URL: "about:blank",
+	})
+
+	assert.Equal(t, "about:blank", status.URL)
+}
+
 func TestOpenCodeAuthSidecarStatusTreatsMissingStateAsStopped(t *testing.T) {
 	if _, err := exec.LookPath("node"); err != nil {
 		t.Skip("node is required for opencode auth sidecar tests")

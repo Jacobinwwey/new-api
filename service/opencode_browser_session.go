@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -96,7 +97,7 @@ func runOpenCodeAuthStatusAction(ctx context.Context, action string, accountID i
 	if err != nil {
 		return OpenCodeLoginSessionStatus{}, err
 	}
-	return resp.Status, nil
+	return sanitizeOpenCodeLoginSessionStatus(resp.Status), nil
 }
 
 func runOpenCodeAuthSidecar(ctx context.Context, action string, accountID int, args map[string]string, stdin string) (openCodeAuthSidecarResponse, error) {
@@ -158,6 +159,29 @@ func buildOpenCodeAuthCommandSpec(scriptPath string, action string, accountID in
 		},
 		stdin: stdin,
 	}
+}
+
+func sanitizeOpenCodeLoginSessionStatus(status OpenCodeLoginSessionStatus) OpenCodeLoginSessionStatus {
+	status.URL = sanitizeOpenCodeBrowserURL(status.URL)
+	return status
+}
+
+func sanitizeOpenCodeBrowserURL(rawURL string) string {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return ""
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil || parsed.Scheme == "" {
+		return ""
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return rawURL
+	}
+	parsed.User = nil
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return parsed.String()
 }
 
 func commonDecodeOpenCodeSidecar(output []byte, target *openCodeAuthSidecarResponse) error {

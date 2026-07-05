@@ -44,3 +44,22 @@ func TestOpenCodeAccountResponseDoesNotExposeSecrets(t *testing.T) {
 	assert.NotContains(t, body, "operator@example.test")
 	assert.NotContains(t, body, "Ciphertext")
 }
+
+func TestMergeExtractedOpenCodeSecretsPreservesExistingFields(t *testing.T) {
+	merged := mergeExtractedOpenCodeSecrets(
+		model.OpenCodeAccountSecrets{
+			Email:       "operator@example.test",
+			WorkspaceID: "workspace-existing-test",
+			APIKey:      "opencode-api-key-existing-test",
+			Cookie:      "cookie-existing-test",
+		},
+		model.OpenCodeAccountSecrets{
+			Cookie: "cookie-extracted-test",
+		},
+	)
+
+	assert.Equal(t, "operator@example.test", merged.Email)
+	assert.Equal(t, "workspace-existing-test", merged.WorkspaceID)
+	assert.Equal(t, "opencode-api-key-existing-test", merged.APIKey)
+	assert.Equal(t, "cookie-extracted-test", merged.Cookie)
+}

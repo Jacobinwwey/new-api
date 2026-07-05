@@ -250,6 +250,7 @@ End-to-end verification:
 | Extractor | Implemented | Candidate-based scanner covers OpenCode-domain cookies, local/session storage, and JSON responses; tests cover ranking and empty-state rejection. |
 | Frontend account window | Implemented | Added Root-only admin route, sidebar entry, account list, remote screenshot controls, extract, quota refresh, activate, stop, and delete actions. |
 | Activation into existing channels | Implemented | Activation decrypts the selected account API key, updates the bound channel inside a transaction, marks the account active, and refreshes channel cache after commit. |
+| Remote clean artifact deployment | Done | Built the pushed `main` from an isolated clean checkout, produced a self-contained binary-plus-sidecar artifact, switched the remote service to that artifact, preserved the existing runtime data path, and verified the service is active. |
 | Real OpenCode login E2E | Pending | Requires an operator-controlled OpenCode subscription account. The repository contains no real account material. |
 | Real `glm-5.2` cache-hit E2E | Pending | Should run only after a real OpenCode account has been imported and activated through New API. |
 
@@ -279,7 +280,7 @@ The status endpoint is now deliberately idempotent. A missing sidecar state file
 
 The biggest deployment pitfall is `CRYPTO_SECRET`: durable imported credentials require a stable value. If an operator runs with an auto-generated or rotated secret, stored OpenCode account material will fail closed on decrypt and must be re-imported.
 
-Remote deployment must be separated from the current runtime worktree before rollout. The observed remote runtime directory contains local uncommitted cache/accounting changes and database sidecar files. Overwriting it directly would risk losing unrelated work or mixing runtime data into source control. The robust path is to deploy from a clean checkout or artifact directory, preserve the existing data directory, and restart only after the binary and static assets are built from the pushed `main`.
+Remote deployment is now separated from the previous runtime worktree. The service runs from a clean artifact built from the pushed `main`, while the existing runtime data location is preserved explicitly. This avoids overwriting unrelated local cache/accounting work that still exists in the old runtime tree and keeps source, artifact, and runtime data as separate concerns.
 
 ### Verification Update
 
@@ -316,6 +317,17 @@ Remote host dependency check:
 Sidecar smoke:
   start/status/screenshot/extract/stop on about:blank
   start/status/screenshot/stop on https://opencode.ai/auth
+
+Remote clean artifact rollout:
+  clean checkout fixed to pushed main commit 3f5da2bf
+  web/default build completed on the remote host
+  web/classic build completed on the remote host
+  Go binary built into an isolated artifact with the OpenCode sidecar script
+  artifact filename scan found no database, env, cookie, workspace, API-key, or token files
+  system service switched to the clean artifact while preserving the existing runtime data path
+  service active after restart
+  local HTTP smoke returned 200
+  artifact sidecar status smoke returned success/stopped with an empty state directory
 ```
 
 The `web/classic` build failure was traced to `date-fns-tz@1.3.8` resolving its peer `date-fns` to the workspace-level `date-fns@4`. That package version blocks private subpath imports such as `date-fns/_lib/cloneObject/index.js`. The fix keeps `web/default` on `date-fns@4` and adds a classic-only Rsbuild alias so Semi UI's `date-fns-tz` resolves to Semi's nested `date-fns@2.30.0`.
@@ -328,9 +340,9 @@ Known verification limits:
 
 ### Immediate Next Steps
 
-1. Deploy the branch to the remote New API host with a stable `CRYPTO_SECRET`.
-2. Ensure Chromium, Xvfb, and Node are available to the New API process, or set `CHROMIUM_BIN` explicitly.
-3. Import one non-production OpenCode subscription account through `/opencode-accounts`.
+1. Open the deployed Admin Web and use `/opencode-accounts` with an operator-controlled OpenCode subscription account.
+2. Complete the official OpenCode/Google authorization in the remote browser session.
+3. Extract account material and verify only masked indicators are visible in the UI.
 4. Activate the bound New API channel and confirm channel cache refresh.
 5. Run repeated `glm-5.2` requests through New API, then compare prompt cached-token accounting before and after warm cache.
 6. If CDP screenshot interaction proves insufficient for Google authorization, add a noVNC fallback without changing the account model or activation contract.
@@ -585,6 +597,7 @@ web/default/src/routes/_authenticated/opencode-accounts/index.tsx
 | Extractor | 已实现 | 候选扫描覆盖 OpenCode 域 cookie、local/session storage 与 JSON responses；测试覆盖排序和空状态拒绝。 |
 | 前端账号窗口 | 已实现 | 已增加 Root-only 管理路由、侧边栏入口、账号列表、远端截图控制、extract、quota refresh、activate、stop、delete 操作。 |
 | 激活到现有渠道 | 已实现 | 激活时解密选中账号 API key，在事务内更新绑定 channel，标记账号 active，并在 commit 后刷新 channel cache。 |
+| 远端 clean artifact 部署 | 已完成 | 已从隔离的干净 checkout 构建已推送的 `main`，生成包含二进制与 sidecar 的 artifact，远端服务已切换到该 artifact，并显式保留既有运行时数据路径，服务状态已验证为 active。 |
 | 真实 OpenCode 登录 E2E | 待执行 | 需要操作者控制的 OpenCode 订阅账号；仓库不包含真实账号材料。 |
 | 真实 `glm-5.2` cache-hit E2E | 待执行 | 只能在真实 OpenCode 账号经 New API 导入并激活后执行。 |
 
@@ -614,7 +627,7 @@ Admin Web
 
 最大部署坑点是 `CRYPTO_SECRET`：导入的持久凭证要求该值稳定。如果运行时使用自动生成或轮换的 secret，已存 OpenCode 账号材料会解密失败并 fail closed，需要重新导入。
 
-远端上线前必须把部署目录与当前运行工作树分离。当前观察到的远端运行目录包含本地未提交的 cache/accounting 改动与数据库旁路文件，直接覆盖会有丢失无关工作或把运行时数据混入源码控制的风险。稳妥路径是从干净 checkout 或 artifact 目录部署，保留现有 data 目录，并且只在二进制和静态资源确认来自已推送 `main` 后重启服务。
+远端部署现在已经与旧运行工作树分离。服务从基于已推送 `main` 构建的 clean artifact 运行，同时显式保留既有运行时数据位置。这样不会覆盖旧运行树中仍存在的本地 cache/accounting 工作，也把源码、artifact 与运行时数据拆成了三个独立边界。
 
 ### 验证更新
 
@@ -651,6 +664,17 @@ node --check scripts/opencode-auth-session.mjs
 Sidecar smoke：
   about:blank 上完成 start/status/screenshot/extract/stop
   https://opencode.ai/auth 上完成 start/status/screenshot/stop
+
+远端 clean artifact 上线：
+  clean checkout 固定到已推送 main 提交 3f5da2bf
+  远端 web/default 构建完成
+  远端 web/classic 构建完成
+  Go 二进制已构建到隔离 artifact，并包含 OpenCode sidecar 脚本
+  artifact 文件名扫描未发现数据库、env、cookie、workspace、API-key 或 token 文件
+  system service 已切换到 clean artifact，同时保留既有运行时数据路径
+  重启后服务为 active
+  本机 HTTP smoke 返回 200
+  artifact sidecar 在空 state directory 下返回 success/stopped
 ```
 
 `web/classic` 构建失败的根因已经定位为 `date-fns-tz@1.3.8` 将 peer `date-fns` 解析到了 workspace 顶层的 `date-fns@4`。该版本通过 package exports 阻断 `date-fns/_lib/cloneObject/index.js` 等 private subpath。修复方式是保持 `web/default` 使用 `date-fns@4`，只在 classic 的 Rsbuild 配置中增加局部 alias，让 Semi UI 的 `date-fns-tz` 解析到 Semi 自带的 `date-fns@2.30.0`。
@@ -663,9 +687,9 @@ Sidecar smoke：
 
 ### 下一步
 
-1. 将分支部署到远端 New API 主机，并确认使用稳定 `CRYPTO_SECRET`。
-2. 确认 New API 进程可访问 Chromium、Xvfb、Node；必要时显式设置 `CHROMIUM_BIN`。
-3. 通过 `/opencode-accounts` 导入一个非生产 OpenCode 订阅账号。
+1. 打开已部署的 Admin Web，通过 `/opencode-accounts` 使用操作者控制的 OpenCode 订阅账号。
+2. 在远端浏览器会话中完成官方 OpenCode/Google 授权。
+3. 提取账号材料，并确认 UI 只显示 masked indicator。
 4. 激活绑定的 New API channel，并确认 channel cache refresh。
 5. 通过 New API 多轮调用 `glm-5.2`，比较 warm cache 前后的 prompt cached-token accounting。
 6. 如果 CDP 截图交互不足以完成 Google 授权，再加 noVNC 兜底，但不改变账号模型和 activation contract。

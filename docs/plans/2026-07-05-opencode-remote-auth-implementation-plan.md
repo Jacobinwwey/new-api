@@ -258,7 +258,7 @@ End-to-end verification:
 | Frontend account window | Implemented | Added Root-only admin route, sidebar entry, account list, enabled-channel selector with numeric ID fallback, remote screenshot controls, extract, quota refresh, activate, stop, and delete actions. |
 | Activation into existing channels | Implemented | Activation decrypts the selected account API key, updates the bound channel inside a transaction, marks the account active, and refreshes channel cache after commit. |
 | Remote clean artifact deployment | Done | Built pushed `main` from an isolated clean checkout, produced self-contained binary-plus-sidecar artifacts, switched the remote service to those artifacts, preserved the existing runtime data path, and verified the service is active. |
-| Latest remote rollout | Done | Pushed `main` commit `6121afe7` is now deployed on the remote service. HTTP smoke returns 200, empty-state sidecar status returns successful `stopped`, remote tests for URL sanitization and partial secret merge pass, and the official OpenCode authorization page lifecycle smoke passed without credentials. |
+| Latest remote rollout | Done | Pushed `main` commit `787ee8a8` is now deployed on the remote service. HTTP smoke returns 200, empty-state sidecar status returns successful `stopped`, remote tests for channel binding validation pass, and the official OpenCode authorization page lifecycle smoke passed without credentials after a screenshot retry. |
 | Real OpenCode login E2E | Pending | Requires an operator-controlled OpenCode subscription account. The repository contains no real account material. |
 | Real `glm-5.2` cache-hit E2E | Pending | Should run only after a real OpenCode account has been imported and activated through New API. |
 
@@ -294,7 +294,7 @@ Existing browser reuse is now gated by CDP reachability, not by PID liveness alo
 
 Stop now owns process cleanup more completely. It no longer returns immediately after sending SIGTERM; it waits for recorded browser/Xvfb processes to exit and uses a force-kill fallback when they do not. This makes lifecycle smoke tests and repeated login attempts less likely to accumulate stale headless browser processes.
 
-The latest sidecar lifecycle, status sanitization, and partial-extract merge fixes are now deployed from pushed `main` commit `6121afe7`. The remote service was switched to the new clean artifact, restarted, and verified through an HTTP smoke test plus sidecar checks. The official OpenCode authorization page was exercised without credentials through start, status, screenshot, and stop. The screenshot step reached the OpenCode authorization domain, stop returned `stopped`, and a browser-process-specific residue check found no Chromium/Xvfb process tied to the smoke session.
+The latest sidecar lifecycle, status sanitization, partial-extract merge, channel-binding, and frontend channel-selector fixes are now deployed from pushed `main` commit `787ee8a8`. The remote service was switched to the new clean artifact, restarted, and verified through an HTTP smoke test plus sidecar checks. The official OpenCode authorization page was exercised without credentials through start, status, screenshot, and stop; one screenshot attempt returned a transient failure, and the immediate retry succeeded. The successful screenshot step reached the OpenCode authorization domain, stop returned `stopped`, and a browser-process-specific residue check found no Chromium/Xvfb process tied to the smoke session.
 
 Quota parsing has also been tightened. A quota field name is no longer enough to classify a numeric value as a limit when the key also says used, usage, or consumed. This removes an order-dependent failure mode where `quota.used` could be stored as `quota_limit`, which would corrupt quota display and any downstream reasoning about account capacity.
 
@@ -350,7 +350,7 @@ Sidecar smoke:
   start/status/screenshot/stop on https://opencode.ai/auth
 
 Remote clean artifact rollout:
-  clean checkout fixed to pushed main commit 6121afe7
+  clean checkout fixed to pushed main commit 787ee8a8
   web/default build completed on the remote host
   web/classic build completed on the remote host
   Go binary built into an isolated artifact with the OpenCode sidecar script
@@ -363,6 +363,8 @@ Remote clean artifact rollout:
   official OpenCode auth page lifecycle smoke passed start/status/screenshot/stop without credentials
   post-stop browser residue check found no Chromium/Xvfb process for the smoke session
   remote targeted Go tests passed for login status URL sanitization and partial extract secret merge
+  remote targeted Go tests passed for channel binding validation
+  web/default typecheck and build completed with the channel selector UI
 ```
 
 The `web/classic` build failure was traced to `date-fns-tz@1.3.8` resolving its peer `date-fns` to the workspace-level `date-fns@4`. That package version blocks private subpath imports such as `date-fns/_lib/cloneObject/index.js`. The fix keeps `web/default` on `date-fns@4` and adds a classic-only Rsbuild alias so Semi UI's `date-fns-tz` resolves to Semi's nested `date-fns@2.30.0`.
@@ -640,7 +642,7 @@ web/default/src/routes/_authenticated/opencode-accounts/index.tsx
 | 前端账号窗口 | 已实现 | 已增加 Root-only 管理路由、侧边栏入口、账号列表、已启用 channel 选择器与数字 ID fallback、远端截图控制、extract、quota refresh、activate、stop、delete 操作。 |
 | 激活到现有渠道 | 已实现 | 激活时解密选中账号 API key，在事务内更新绑定 channel，标记账号 active，并在 commit 后刷新 channel cache。 |
 | 远端 clean artifact 部署 | 已完成 | 已从隔离的干净 checkout 构建已推送的 `main`，生成包含二进制与 sidecar 的 artifact，远端服务已切换到这些 artifact，并显式保留既有运行时数据路径，服务状态已验证为 active。 |
-| 最新远端上线 | 已完成 | 已推送的 `main` 提交 `6121afe7` 现在已部署到远端服务。HTTP smoke 返回 200，空 state 的 sidecar status 返回成功的 `stopped`，登录状态 URL 脱敏与 partial secret merge 的远端测试通过，官方 OpenCode 授权页无凭证 lifecycle smoke 通过。 |
+| 最新远端上线 | 已完成 | 已推送的 `main` 提交 `787ee8a8` 现在已部署到远端服务。HTTP smoke 返回 200，空 state 的 sidecar status 返回成功的 `stopped`，channel binding validation 的远端测试通过，官方 OpenCode 授权页无凭证 lifecycle smoke 在一次 screenshot 重试后通过。 |
 | 真实 OpenCode 登录 E2E | 待执行 | 需要操作者控制的 OpenCode 订阅账号；仓库不包含真实账号材料。 |
 | 真实 `glm-5.2` cache-hit E2E | 待执行 | 只能在真实 OpenCode 账号经 New API 导入并激活后执行。 |
 
@@ -676,7 +678,7 @@ Admin Web
 
 stop 现在更完整地拥有进程清理语义。它不再发送 SIGTERM 后立刻返回，而是等待记录的 browser/Xvfb 进程退出，并在未退出时使用强制清理兜底。这样 lifecycle smoke 与重复登录尝试更不容易堆积陈旧 headless browser 进程。
 
-最新的 sidecar 生命周期、状态脱敏和 partial-extract merge 修复已经从已推送的 `main` 提交 `6121afe7` 部署到远端。远端服务已切换到新的 clean artifact、完成重启，并通过 HTTP smoke 与 sidecar 检查。官方 OpenCode 授权页已经在无凭证条件下完成 start、status、screenshot、stop；screenshot 阶段到达 OpenCode 授权域，stop 返回 `stopped`，按浏览器进程名约束的残留检查未发现该 smoke session 对应的 Chromium/Xvfb 进程。
+最新的 sidecar 生命周期、状态脱敏、partial-extract merge、channel binding 和前端 channel selector 修复已经从已推送的 `main` 提交 `787ee8a8` 部署到远端。远端服务已切换到新的 clean artifact、完成重启，并通过 HTTP smoke 与 sidecar 检查。官方 OpenCode 授权页已经在无凭证条件下执行 start、status、screenshot、stop；其中一次 screenshot 出现瞬时失败，立即重试后成功。成功的 screenshot 阶段到达 OpenCode 授权域，stop 返回 `stopped`，按浏览器进程名约束的残留检查未发现该 smoke session 对应的 Chromium/Xvfb 进程。
 
 quota 解析也已经收紧。当 key 同时表达 used、usage 或 consumed 时，不能仅因为字段路径包含 quota 就把数值分类为 limit。这个修复移除了一个顺序相关故障：`quota.used` 可能被写入 `quota_limit`，从而污染 quota 展示和后续对账号容量的判断。
 
@@ -732,7 +734,7 @@ Sidecar smoke：
   https://opencode.ai/auth 上完成 start/status/screenshot/stop
 
 远端 clean artifact 上线：
-  clean checkout 固定到已推送 main 提交 6121afe7
+  clean checkout 固定到已推送 main 提交 787ee8a8
   远端 web/default 构建完成
   远端 web/classic 构建完成
   Go 二进制已构建到隔离 artifact，并包含 OpenCode sidecar 脚本
@@ -745,6 +747,8 @@ Sidecar smoke：
   官方 OpenCode 授权页无凭证 lifecycle smoke 通过 start/status/screenshot/stop
   stop 后按浏览器进程名检查，未发现该 smoke session 对应的 Chromium/Xvfb 残留进程
   登录状态 URL 脱敏与 partial extract secret merge 的远端定向 Go 测试通过
+  channel binding validation 的远端定向 Go 测试通过
+  web/default typecheck 与包含 channel selector UI 的 build 完成
 ```
 
 `web/classic` 构建失败的根因已经定位为 `date-fns-tz@1.3.8` 将 peer `date-fns` 解析到了 workspace 顶层的 `date-fns@4`。该版本通过 package exports 阻断 `date-fns/_lib/cloneObject/index.js` 等 private subpath。修复方式是保持 `web/default` 使用 `date-fns@4`，只在 classic 的 Rsbuild 配置中增加局部 alias，让 Semi UI 的 `date-fns-tz` 解析到 Semi 自带的 `date-fns@2.30.0`。

@@ -10,12 +10,18 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
+	"os"
 	"strings"
 
 	"golang.org/x/crypto/bcrypt"
 )
 
 const secretCiphertextVersion = "v1:"
+
+const (
+	SecretEncryptionKeySourceCryptoSecret          = "crypto_secret"
+	SecretEncryptionKeySourceSessionSecretFallback = "session_secret_fallback"
+)
 
 func GenerateHMACWithKey(key []byte, data string) string {
 	h := hmac.New(sha256.New, key)
@@ -83,6 +89,13 @@ func DecryptSecret(ciphertext string) (string, error) {
 func secretEncryptionKey() []byte {
 	sum := sha256.Sum256([]byte(CryptoSecret))
 	return sum[:]
+}
+
+func SecretEncryptionKeySource() string {
+	if strings.TrimSpace(os.Getenv("CRYPTO_SECRET")) != "" {
+		return SecretEncryptionKeySourceCryptoSecret
+	}
+	return SecretEncryptionKeySourceSessionSecretFallback
 }
 
 func Password2Hash(password string) (string, error) {

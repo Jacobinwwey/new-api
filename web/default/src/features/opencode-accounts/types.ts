@@ -23,6 +23,7 @@ export type OpenCodeAccount = {
   has_cookie: boolean
   email_masked: string
   credential_integrity: 'ok' | 'decrypt_failed'
+  credential_key_source: 'crypto_secret' | 'session_secret_fallback'
   activation_ready: boolean
   missing_activation_fields: string[]
 }

@@ -60,6 +60,7 @@ func TestCreateOpenCodeAccountEncryptsSecretsAndMasksPublicView(t *testing.T) {
 	assert.True(t, public.HasAPIKey)
 	assert.True(t, public.HasCookie)
 	assert.Equal(t, "ok", public.CredentialIntegrity)
+	assert.NotEmpty(t, public.CredentialKeySource)
 	assert.True(t, public.ActivationReady)
 	assert.Empty(t, public.MissingActivationFields)
 	assert.NotContains(t, public.EmailMasked, "operator@example.test")
@@ -101,6 +102,19 @@ func TestOpenCodeAccountPublicViewReportsCredentialDecryptFailure(t *testing.T) 
 	assert.False(t, public.ActivationReady)
 	assert.Contains(t, public.MissingActivationFields, "credentials_decryptable")
 	assert.Empty(t, public.EmailMasked)
+}
+
+func TestOpenCodeAccountPublicViewReportsCredentialKeySource(t *testing.T) {
+	account := &OpenCodeAccount{
+		Label:     "primary",
+		ChannelID: 7,
+	}
+
+	t.Setenv("CRYPTO_SECRET", "configured-crypto-secret")
+	assert.Equal(t, common.SecretEncryptionKeySourceCryptoSecret, account.PublicView().CredentialKeySource)
+
+	t.Setenv("CRYPTO_SECRET", "")
+	assert.Equal(t, common.SecretEncryptionKeySourceSessionSecretFallback, account.PublicView().CredentialKeySource)
 }
 
 func TestCreateOpenCodeAccountRejectsInvalidLabel(t *testing.T) {

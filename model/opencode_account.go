@@ -54,6 +54,7 @@ type OpenCodeAccountPublic struct {
 	HasCookie               bool     `json:"has_cookie"`
 	EmailMasked             string   `json:"email_masked"`
 	CredentialIntegrity     string   `json:"credential_integrity"`
+	CredentialKeySource     string   `json:"credential_key_source"`
 	ActivationReady         bool     `json:"activation_ready"`
 	MissingActivationFields []string `json:"missing_activation_fields"`
 }
@@ -182,9 +183,28 @@ func (account *OpenCodeAccount) PublicView() OpenCodeAccountPublic {
 		HasCookie:               account.CookieCiphertext != "",
 		EmailMasked:             maskEmail(secrets.Email),
 		CredentialIntegrity:     credentialIntegrity,
+		CredentialKeySource:     common.SecretEncryptionKeySource(),
 		ActivationReady:         len(missingActivationFields) == 0,
 		MissingActivationFields: missingActivationFields,
 	}
+}
+
+func WarnIfOpenCodeAccountSecretKeyUsesFallback() {
+	if common.SecretEncryptionKeySource() == common.SecretEncryptionKeySourceCryptoSecret {
+		return
+	}
+	if DB == nil {
+		return
+	}
+	var accountCount int64
+	if err := DB.Model(&OpenCodeAccount{}).Count(&accountCount).Error; err != nil {
+		common.SysError("opencode credential encryption key source check failed: " + err.Error())
+		return
+	}
+	if accountCount == 0 {
+		return
+	}
+	common.SysError("opencode credential encryption is using session-secret fallback; set a stable dedicated crypto secret before importing accounts to avoid decrypt failures after session secret rotation")
 }
 
 func (account *OpenCodeAccount) missingActivationFields(secrets OpenCodeAccountSecrets, decryptErr error) []string {

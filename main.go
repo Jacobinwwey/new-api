@@ -292,6 +292,7 @@ func InitResources() error {
 		common.FatalLog("failed to initialize authorization: " + err.Error())
 		return err
 	}
+	model.WarnIfOpenCodeAccountSecretKeyUsesFallback()
 
 	model.CheckSetup()
 

@@ -262,7 +262,7 @@ End-to-end verification:
 | Activation into existing channels | Implemented | Activation decrypts the selected account API key, updates the bound channel inside a transaction, marks the account active, and refreshes channel cache after commit. |
 | Activation credential contract | Implemented and locally verified | Activation now builds channel credentials according to the bound channel type. Plain OpenCode API keys remain valid for non-Codex channels, while Codex channels require JSON material containing `access_token` and `account_id`. Public readiness diagnostics now mark Codex/plain-key bindings as not activation-ready before the operator clicks activate. |
 | Remote clean artifact deployment | Done | Built pushed `main` from an isolated clean checkout, produced self-contained binary-plus-sidecar artifacts, switched the remote service to those artifacts, preserved the existing runtime data path, and verified the service is active. |
-| Latest remote rollout | Done | Pushed `main` commit `c734a4d0` is now deployed on the remote service. HTTP smoke returns 200, empty-state sidecar status returns successful `stopped`, remote Node sidecar tests pass, OpenCode extractor targeted Go tests pass, and the official OpenCode authorization page start/screenshot/extract/stop smoke passed without credentials. |
+| Latest remote rollout | Done | Pushed `main` commit `2e1687eb` is now deployed on the remote service. HTTP smoke returns 200, the service is active, symlinked-artifact sidecar status returns successful `stopped`, remote Node sidecar tests pass, and OpenCode activation/readiness targeted Go tests pass. |
 | Real OpenCode login E2E | Pending | Requires an operator-controlled OpenCode subscription account. The repository contains no real account material. |
 | Real `glm-5.2` cache-hit E2E | Pending | Should run only after a real OpenCode account has been imported and activated through New API. |
 
@@ -301,6 +301,8 @@ Stop now owns process cleanup more completely. It no longer returns immediately 
 Screenshot capture now retries transient browser/CDP failures. This is intentionally scoped to screenshot because it is a read-only operation; click and key input remain single-shot to avoid repeating user actions. The change addresses the observed remote behavior where authorization-page screenshot failed once but succeeded immediately on retry.
 
 The sidecar CLI entrypoint now treats symlinked artifact paths as first-class. Systemd and smoke scripts execute the sidecar through the `new-api-current` symlink, while Node reports `import.meta.url` for the resolved release path. The previous literal comparison meant `main()` could silently skip under symlink execution. The fix compares realpaths and falls back to the original path only when realpath resolution fails.
+
+The latest activation credential contract and symlinked sidecar entrypoint fixes are deployed from pushed `main` commit `2e1687eb`. The remote clean artifact build completed, both frontend builds completed, remote Node sidecar tests passed, remote activation/readiness Go tests passed, the service restarted as active, HTTP smoke returned 200, and sidecar `status` executed through the symlinked artifact path returned `success/stopped`.
 
 The latest sidecar lifecycle, status sanitization, partial-extract merge, channel-binding, frontend channel-selector, and screenshot retry fixes are now deployed from pushed `main` commit `c95d3c0d`. The remote service was switched to the new clean artifact, restarted, and verified through an HTTP smoke test plus sidecar checks. The official OpenCode authorization page was exercised without credentials through start, status, screenshot, and stop. The screenshot step reached the OpenCode authorization domain, stop returned `stopped`, and a browser-process-specific residue check found no Chromium/Xvfb process tied to the smoke session.
 
@@ -676,7 +678,7 @@ web/default/src/routes/_authenticated/opencode-accounts/index.tsx
 | 激活到现有渠道 | 已实现 | 激活时解密选中账号 API key，在事务内更新绑定 channel，标记账号 active，并在 commit 后刷新 channel cache。 |
 | Activation credential contract | 已实现并完成本地验证 | 激活现在会按照绑定 channel 类型构造 channel credential。非 Codex channel 继续接受纯 OpenCode API key；Codex channel 必须提供包含 `access_token` 与 `account_id` 的 JSON 材料。公开 readiness 诊断现在会在操作者点击 activate 前，把 Codex/plain-key 绑定标记为不可激活。 |
 | 远端 clean artifact 部署 | 已完成 | 已从隔离的干净 checkout 构建已推送的 `main`，生成包含二进制与 sidecar 的 artifact，远端服务已切换到这些 artifact，并显式保留既有运行时数据路径，服务状态已验证为 active。 |
-| 最新远端上线 | 已完成 | 已推送的 `main` 提交 `c734a4d0` 现在已部署到远端服务。HTTP smoke 返回 200，空 state 的 sidecar status 返回成功的 `stopped`，远端 Node sidecar 测试通过，OpenCode extractor 相关 Go 定向测试通过，官方 OpenCode 授权页无凭证 start/screenshot/extract/stop smoke 通过。 |
+| 最新远端上线 | 已完成 | 已推送的 `main` 提交 `2e1687eb` 现在已部署到远端服务。HTTP smoke 返回 200，服务状态为 active，symlink artifact 路径下的 sidecar status 返回成功的 `stopped`，远端 Node sidecar 测试通过，OpenCode activation/readiness 相关 Go 定向测试通过。 |
 | 真实 OpenCode 登录 E2E | 待执行 | 需要操作者控制的 OpenCode 订阅账号；仓库不包含真实账号材料。 |
 | 真实 `glm-5.2` cache-hit E2E | 待执行 | 只能在真实 OpenCode 账号经 New API 导入并激活后执行。 |
 
@@ -715,6 +717,8 @@ stop 现在更完整地拥有进程清理语义。它不再发送 SIGTERM 后立
 截图捕获现在会对浏览器/CDP 的瞬时失败执行重试。这个重试刻意只用于 screenshot，因为它是只读操作；click 和 key input 仍然保持单次执行，避免重复用户动作。该修复对应远端授权页 smoke 中 screenshot 首次失败、立即重试成功的实际现象。
 
 sidecar CLI 入口现在把 symlink artifact 路径作为一等部署形态处理。systemd 和 smoke 脚本会通过 `new-api-current` symlink 执行 sidecar，而 Node 的 `import.meta.url` 会指向解析后的 release 真实路径。先前的字面路径比较会导致 symlink 执行时 `main()` 静默跳过。修复后先比较 realpath，并仅在 realpath 解析失败时回退到原始路径。
+
+最新的 activation credential contract 与 symlink sidecar 入口修复已经从已推送的 `main` 提交 `2e1687eb` 部署到远端。远端 clean artifact 构建完成，两个前端构建完成，远端 Node sidecar 测试通过，activation/readiness Go 定向测试通过，服务重启后为 active，HTTP smoke 返回 200，sidecar `status` 经 symlink artifact 路径执行时返回 `success/stopped`。
 
 最新的 sidecar 生命周期、状态脱敏、partial-extract merge、channel binding、前端 channel selector 和 screenshot retry 修复已经从已推送的 `main` 提交 `c95d3c0d` 部署到远端。远端服务已切换到新的 clean artifact、完成重启，并通过 HTTP smoke 与 sidecar 检查。官方 OpenCode 授权页已经在无凭证条件下执行 start、status、screenshot、stop；screenshot 阶段到达 OpenCode 授权域，stop 返回 `stopped`，按浏览器进程名约束的残留检查未发现该 smoke session 对应的 Chromium/Xvfb 进程。
 

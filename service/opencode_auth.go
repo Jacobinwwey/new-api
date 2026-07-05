@@ -168,10 +168,22 @@ func acceptQuotaNumberCandidate(key string, value int64, extracted *OpenCodeExtr
 }
 
 func isAPIKeyCandidate(key string) bool {
+	if isOAuthTokenCandidate(key) {
+		return false
+	}
 	return strings.Contains(key, "api_key") ||
 		strings.Contains(key, "apikey") ||
-		strings.HasSuffix(key, ".key") ||
-		strings.HasSuffix(key, "token")
+		strings.Contains(key, "api.key") ||
+		strings.HasSuffix(key, ".key")
+}
+
+func isOAuthTokenCandidate(key string) bool {
+	return strings.Contains(key, "access_token") ||
+		strings.Contains(key, "accesstoken") ||
+		strings.Contains(key, "id_token") ||
+		strings.Contains(key, "idtoken") ||
+		strings.Contains(key, "refresh_token") ||
+		strings.Contains(key, "refreshtoken")
 }
 
 func isWorkspaceCandidate(key string) bool {

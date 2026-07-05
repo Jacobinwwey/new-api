@@ -255,6 +255,7 @@ End-to-end verification:
 | Screenshot transient retry | Implemented | `login/screenshot` now retries transient browser/CDP screenshot failures for this read-only action, matching the remote smoke finding where an immediate retry succeeded after one screenshot failure. |
 | Sidecar symlinked artifact entrypoint | Implemented and locally verified | The sidecar CLI now resolves `process.argv[1]` through realpath before comparing it with `import.meta.url`, so executing the script through the `new-api-current` symlink still runs `main()`. This closes a deployment-only false-smoke risk where direct release paths worked but symlinked artifact paths produced no output. |
 | Extractor | Implemented | Candidate-based scanner covers OpenCode-domain cookies, local/session storage, and JSON responses; tests cover ranking and empty-state rejection. |
+| OAuth token candidate filtering | Implemented and locally verified | The extractor no longer treats generic `*token` fields as OpenCode API keys and explicitly rejects OAuth `access_token`, `id_token`, and `refresh_token` fields as API-key candidates. This prevents authorization artifacts from being stored as provider API keys. |
 | Partial extract merge safety | Implemented | `login/extract` now merges non-empty extracted fields into existing encrypted account material instead of overwriting previously stored API key, workspace ID, email, or cookie with empty partial candidates. |
 | Channel binding validation | Implemented | OpenCode account create/update now rejects missing channel bindings at the model boundary, preventing accounts that cannot be activated from entering persistent storage. |
 | Credential readiness diagnostics | Implemented | Public OpenCode account responses now expose masked `credential_integrity`, `activation_ready`, and `missing_activation_fields` signals, so operators can distinguish missing account material from decrypt failures without seeing raw secrets. |
@@ -308,6 +309,8 @@ The latest sidecar lifecycle, status sanitization, partial-extract merge, channe
 
 The sidecar extractor now closes a real implementation gap in the original plan. The backend extractor already accepted `json_responses`, but the browser sidecar previously returned an empty list, which meant account material available only through OpenCode page API responses could be missed during real login. Extract now evaluates an async browser-side probe that fetches recently loaded OpenCode same-site resources likely to be JSON account/quota/workspace endpoints. It intentionally rejects static assets and URLs carrying OAuth `code`, `state`, or token payloads. This improves extraction coverage without replaying authorization callbacks or touching non-OpenCode resources.
 
+The extractor now also rejects OAuth token fields as API-key candidates. This is a stricter boundary than matching every key ending in `token`: OpenCode API keys remain discoverable through explicit API-key-shaped names such as `api_key`, `apiKey`, `api.key`, or `.key`, while `access_token`, `id_token`, and `refresh_token` are treated as authorization artifacts, not provider API keys. The tradeoff is deliberate: if a future upstream exposes only a generic bearer token field, the connector should fail extraction and require a targeted parser update rather than silently persisting the wrong credential class.
+
 Quota parsing has also been tightened. A quota field name is no longer enough to classify a numeric value as a limit when the key also says used, usage, or consumed. This removes an order-dependent failure mode where `quota.used` could be stored as `quota_limit`, which would corrupt quota display and any downstream reasoning about account capacity.
 
 Extraction now preserves durable account material when the browser only yields partial candidates. This matters because real auth pages can expose cookie/quota first and API key/workspace later, or expose different fields depending on navigation timing. The controller now merges non-empty extracted fields into the existing decrypted secret set and re-encrypts the result, instead of treating missing candidates as explicit deletion.
@@ -335,6 +338,7 @@ go test ./controller -run TestOpenCodeAccountResponseDoesNotExposeSecrets -count
 go test ./controller -run 'TestOpenCodeAccountResponseDoesNotExposeSecrets|TestMergeExtractedOpenCodeSecretsPreservesExistingFields' -count=1
 go test ./router -run TestOpenCodeAccountRoutesRegisterExpectedPaths -count=1
 go test ./service -run 'TestExtractOpenCodeSecretsFromBrowserState|TestActivateOpenCodeAccount' -count=1
+go test ./service -run "TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState" -count=1
 go test ./service -run TestObserveChannelAffinityUsageCacheByRelayFormat_MixedMode -count=1
 go test ./service -run 'TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState|TestActivateOpenCodeAccount|TestObserveChannelAffinityUsageCacheByRelayFormat_MixedMode' -count=1
 go test ./service -run 'TestBuildOpenCodeAuthCommandSpecPassesKeyTextThroughStdin|TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState|TestActivateOpenCodeAccount|TestObserveChannelAffinityUsageCacheByRelayFormat_MixedMode' -count=1
@@ -671,6 +675,7 @@ web/default/src/routes/_authenticated/opencode-accounts/index.tsx
 | Screenshot 瞬时失败重试 | 已实现 | `login/screenshot` 现在会对浏览器/CDP 的瞬时截图失败执行重试；该动作是只读操作，符合远端 smoke 中 screenshot 首次失败、立即重试成功的实际现象。 |
 | Sidecar symlinked artifact entrypoint | 已实现并完成本地验证 | sidecar CLI 现在会先对 `process.argv[1]` 做 realpath 解析，再与 `import.meta.url` 比较，因此通过 `new-api-current` symlink 执行脚本时仍会运行 `main()`。这修复了一个只在部署态出现的 false-smoke 风险：直接 release 路径可运行，但 symlink artifact 路径无输出。 |
 | Extractor | 已实现 | 候选扫描覆盖 OpenCode 域 cookie、local/session storage 与 JSON responses；测试覆盖排序和空状态拒绝。 |
+| OAuth token 候选过滤 | 已实现并完成本地验证 | extractor 不再把泛化的 `*token` 字段当成 OpenCode API key，并且会明确拒绝 OAuth `access_token`、`id_token`、`refresh_token` 字段作为 API-key 候选。这样可以避免把授权过程产物误存成 provider API key。 |
 | 部分提取合并安全 | 已实现 | `login/extract` 现在会把非空提取字段合并进已有加密账号材料，不再用空的 partial candidate 覆盖先前已保存的 API key、workspace ID、email 或 cookie。 |
 | Channel binding 校验 | 已实现 | OpenCode account create/update 现在会在 model 边界拒绝缺失 channel binding 的账号，避免无法 activate 的账号进入持久存储。 |
 | 凭据 readiness 诊断 | 已实现 | OpenCode account 公开响应现在提供脱敏的 `credential_integrity`、`activation_ready` 与 `missing_activation_fields` 信号，让操作者能区分账号材料缺失与密文解密失败，而不看到任何原始 secret。 |
@@ -724,6 +729,8 @@ sidecar CLI 入口现在把 symlink artifact 路径作为一等部署形态处�
 
 Sidecar extractor 现在补上了原计划中的一个真实实现缺口。后端 extractor 已经接受 `json_responses`，但浏览器 sidecar 先前实际返回空数组；如果真实登录后的 API key、workspace 或 quota 只出现在 OpenCode 页面接口响应中，就会被漏掉。现在 extract 会在浏览器侧执行异步 probe，抓取页面近期加载过、看起来像账号/quota/workspace 端点的 OpenCode 同站 JSON 资源。它会刻意拒绝静态资源，以及携带 OAuth `code`、`state` 或 token payload 的 URL。这个取舍提升了提取覆盖率，同时不重放授权 callback，也不触碰非 OpenCode 资源。
 
+extractor 现在也会拒绝把 OAuth token 字段作为 API-key 候选。这比“所有以 `token` 结尾的 key 都可作为 API key”更严格：OpenCode API key 仍可通过 `api_key`、`apiKey`、`api.key` 或 `.key` 这类明确 API-key 形态的字段发现；`access_token`、`id_token`、`refresh_token` 则被视为授权过程产物，而不是 provider API key。这里的取舍是有意保守：如果未来上游只暴露泛化 bearer token 字段，连接器应该提取失败并要求补充针对性 parser，而不是静默持久化错误凭据类别。
+
 quota 解析也已经收紧。当 key 同时表达 used、usage 或 consumed 时，不能仅因为字段路径包含 quota 就把数值分类为 limit。这个修复移除了一个顺序相关故障：`quota.used` 可能被写入 `quota_limit`，从而污染 quota 展示和后续对账号容量的判断。
 
 提取流程现在会在浏览器只给出部分候选时保留已有持久账号材料。真实授权页可能先暴露 cookie/quota，稍后才暴露 API key/workspace，或者因为导航时机不同只暴露部分字段。controller 现在会把非空提取字段合并到既有解密 secret 集合并重新加密保存，而不是把缺失候选当作显式删除。
@@ -750,6 +757,7 @@ go test ./controller -run TestOpenCodeAccountResponseDoesNotExposeSecrets -count
 go test ./controller -run 'TestOpenCodeAccountResponseDoesNotExposeSecrets|TestMergeExtractedOpenCodeSecretsPreservesExistingFields' -count=1
 go test ./router -run TestOpenCodeAccountRoutesRegisterExpectedPaths -count=1
 go test ./service -run 'TestExtractOpenCodeSecretsFromBrowserState|TestActivateOpenCodeAccount' -count=1
+go test ./service -run "TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState" -count=1
 go test ./service -run TestObserveChannelAffinityUsageCacheByRelayFormat_MixedMode -count=1
 go test ./service -run 'TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState|TestActivateOpenCodeAccount|TestObserveChannelAffinityUsageCacheByRelayFormat_MixedMode' -count=1
 go test ./service -run 'TestBuildOpenCodeAuthCommandSpecPassesKeyTextThroughStdin|TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState|TestActivateOpenCodeAccount|TestObserveChannelAffinityUsageCacheByRelayFormat_MixedMode' -count=1

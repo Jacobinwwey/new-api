@@ -43,6 +43,20 @@ func TestExtractOpenCodeSecretsFromBrowserStateRejectsEmptyCandidates(t *testing
 	assert.Empty(t, extracted.Secrets.APIKey)
 }
 
+func TestExtractOpenCodeSecretsFromBrowserStateDoesNotTreatOAuthTokensAsAPIKeys(t *testing.T) {
+	state := OpenCodeBrowserState{
+		JSONResponses: []string{
+			`{"workspace_id":"workspace-oauth-token-test","access_token":"oauth-access-token-test","id_token":"oauth-id-token-test","refresh_token":"oauth-refresh-token-test"}`,
+		},
+	}
+
+	extracted, err := ExtractOpenCodeSecretsFromBrowserState(state)
+	require.NoError(t, err)
+
+	assert.Equal(t, "workspace-oauth-token-test", extracted.Secrets.WorkspaceID)
+	assert.Empty(t, extracted.Secrets.APIKey)
+}
+
 func TestExtractOpenCodeQuotaFromBrowserStateAcceptsQuotaOnlyPayload(t *testing.T) {
 	state := OpenCodeBrowserState{
 		JSONResponses: []string{

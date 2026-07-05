@@ -264,7 +264,7 @@ End-to-end verification:
 | Activation into existing channels | Implemented | Activation decrypts the selected account API key, updates the bound channel inside a transaction, marks the account active, and refreshes channel cache after commit. |
 | Activation credential contract | Implemented and locally verified | Activation now builds channel credentials according to the bound channel type. Plain OpenCode API keys remain valid for non-Codex channels, while Codex channels require JSON material containing `access_token` and `account_id`. Public readiness diagnostics now mark Codex/plain-key bindings as not activation-ready before the operator clicks activate. |
 | Remote clean artifact deployment | Done | Built pushed `main` from an isolated clean checkout, produced self-contained binary-plus-sidecar artifacts, switched the remote service to those artifacts, preserved the existing runtime data path, and verified the service is active. |
-| Latest remote rollout | Done | Pushed `main` commit `346dc24d` is now deployed on the remote service. HTTP smoke returns 200, the service is active, symlinked-artifact sidecar status returns successful `stopped`, remote Node sidecar tests pass, OpenCode extractor/quota tests pass with repeated runs, and OpenCode activation/readiness targeted Go tests pass. |
+| Latest remote rollout | Done | Pushed `main` commit `59645a65` is now deployed on the remote service. HTTP smoke returns 200, the service is active, symlinked-artifact sidecar status returns successful `stopped`, remote Node sidecar tests pass, OpenCode extractor/quota tests pass with repeated runs, OpenCode partial-extract quota preservation tests pass, and OpenCode activation/readiness targeted Go tests pass. |
 | Real OpenCode login E2E | Pending | Requires an operator-controlled OpenCode subscription account. The repository contains no real account material. |
 | Real `glm-5.2` cache-hit E2E | Pending | Should run only after a real OpenCode account has been imported and activated through New API. |
 
@@ -319,6 +319,8 @@ The latest OAuth-token filtering and quota raw stabilization changes are deploye
 Extraction now preserves durable account material when the browser only yields partial candidates. This matters because real auth pages can expose cookie/quota first and API key/workspace later, or expose different fields depending on navigation timing. The controller now merges non-empty extracted fields into the existing decrypted secret set and re-encrypts the result, instead of treating missing candidates as explicit deletion.
 
 Quota persistence now follows the same partial-extract rule. A browser extraction that contains only cookie, workspace, or API-key material should not erase the last known quota snapshot. The controller updates `quota_raw`, `quota_limit`, and `quota_used` only when quota evidence is present, and then updates the three fields as one observation. This avoids UI capacity flicker after auth-page navigations that expose credentials before quota.
+
+The latest partial-extract quota preservation change is deployed from pushed `main` commit `59645a65`. The remote clean artifact build completed, both frontend builds completed, remote Node sidecar tests passed, repeated extractor/quota tests passed, partial-extract controller tests passed, broader OpenCode Go tests passed, the service restarted as active, HTTP smoke returned 200, and sidecar `status` executed through the symlinked artifact path returned `success/stopped`.
 
 Channel binding is now validated before an OpenCode account is persisted. The frontend also uses the existing channel list API to present enabled channels as selectable options while retaining a numeric ID fallback. This keeps quick account switching ergonomic without weakening the backend invariant that every stored account must point at a channel that can later be activated.
 
@@ -690,7 +692,7 @@ web/default/src/routes/_authenticated/opencode-accounts/index.tsx
 | 激活到现有渠道 | 已实现 | 激活时解密选中账号 API key，在事务内更新绑定 channel，标记账号 active，并在 commit 后刷新 channel cache。 |
 | Activation credential contract | 已实现并完成本地验证 | 激活现在会按照绑定 channel 类型构造 channel credential。非 Codex channel 继续接受纯 OpenCode API key；Codex channel 必须提供包含 `access_token` 与 `account_id` 的 JSON 材料。公开 readiness 诊断现在会在操作者点击 activate 前，把 Codex/plain-key 绑定标记为不可激活。 |
 | 远端 clean artifact 部署 | 已完成 | 已从隔离的干净 checkout 构建已推送的 `main`，生成包含二进制与 sidecar 的 artifact，远端服务已切换到这些 artifact，并显式保留既有运行时数据路径，服务状态已验证为 active。 |
-| 最新远端上线 | 已完成 | 已推送的 `main` 提交 `346dc24d` 现在已部署到远端服务。HTTP smoke 返回 200，服务状态为 active，symlink artifact 路径下的 sidecar status 返回成功的 `stopped`，远端 Node sidecar 测试通过，OpenCode extractor/quota 测试重复运行通过，OpenCode activation/readiness 相关 Go 定向测试通过。 |
+| 最新远端上线 | 已完成 | 已推送的 `main` 提交 `59645a65` 现在已部署到远端服务。HTTP smoke 返回 200，服务状态为 active，symlink artifact 路径下的 sidecar status 返回成功的 `stopped`，远端 Node sidecar 测试通过，OpenCode extractor/quota 测试重复运行通过，OpenCode partial-extract quota preservation 测试通过，OpenCode activation/readiness 相关 Go 定向测试通过。 |
 | 真实 OpenCode 登录 E2E | 待执行 | 需要操作者控制的 OpenCode 订阅账号；仓库不包含真实账号材料。 |
 | 真实 `glm-5.2` cache-hit E2E | 待执行 | 只能在真实 OpenCode 账号经 New API 导入并激活后执行。 |
 
@@ -745,6 +747,8 @@ quota 解析也已经收紧。当 key 同时表达 used、usage 或 consumed 时
 提取流程现在会在浏览器只给出部分候选时保留已有持久账号材料。真实授权页可能先暴露 cookie/quota，稍后才暴露 API key/workspace，或者因为导航时机不同只暴露部分字段。controller 现在会把非空提取字段合并到既有解密 secret 集合并重新加密保存，而不是把缺失候选当作显式删除。
 
 quota 持久化现在遵循同样的 partial-extract 规则。浏览器提取结果如果只包含 cookie、workspace 或 API-key 材料，不应该擦掉上一份已知 quota snapshot。controller 现在只有在存在 quota 证据时才更新 `quota_raw`、`quota_limit` 与 `quota_used`，并且把三个字段作为同一次观测整体更新。这样可以避免授权页导航先暴露凭据、稍后才暴露 quota 时造成 UI 容量展示抖动。
+
+最新的 partial-extract quota preservation 修复已经从已推送的 `main` 提交 `59645a65` 部署到远端。远端 clean artifact 构建完成，两个前端构建完成，远端 Node sidecar 测试通过，extractor/quota 重复测试通过，partial-extract controller 测试通过，OpenCode Go 扩展测试通过，服务重启后为 active，HTTP smoke 返回 200，sidecar `status` 经 symlink artifact 路径执行时返回 `success/stopped`。
 
 Channel binding 现在会在 OpenCode account 持久化前校验。前端也复用现有 channel list API，将已启用 channel 展示为可选项，同时保留数字 ID fallback。这样可以提升快速切换账号时的操作确定性，同时不放松后端“不保存无法 activate 的账号”的不变量。
 

@@ -250,7 +250,7 @@ End-to-end verification:
 | Login status URL sanitization | Implemented | Status responses now strip query strings and fragments from HTTP(S) browser URLs before returning them through New API, preventing OAuth `state`, `code`, or similar authorization payloads from reaching the Admin UI/API response. |
 | Login status idempotency | Implemented | `login/status` now returns a successful `stopped` status when no sidecar state file exists, so frontend polling and page refreshes do not surface false failures before a login session has started. |
 | Browser startup diagnostics | Implemented | The sidecar now watches Chromium and Xvfb `error`/early-`exit` events during startup and returns structured JSON failures, avoiding opaque CDP timeouts when browser dependencies are missing or misconfigured. |
-| Sidecar path resolution | Implemented locally | The Go service now resolves the sidecar script from both the process working directory and the running executable directory, walking upward from each. This keeps remote browser operations stable when systemd working directory and clean artifact directory differ. |
+| Sidecar path resolution | Implemented and remotely verified | The Go service now resolves the sidecar script from both the process working directory and the running executable directory, walking upward from each. This keeps remote browser operations stable when systemd working directory and clean artifact directory differ; the pushed `main` artifact verified this path through remote build, focused tests, restart, HTTP smoke, and sidecar empty-state status. |
 | Stale browser state handling | Implemented | `login/start` now reuses an existing browser only when the recorded PID is alive and the CDP endpoint is reachable; stale PID/state combinations fall through to a fresh browser startup. |
 | Stop lifecycle cleanup | Implemented | `login/stop` now waits for recorded browser/Xvfb processes to exit after SIGTERM and falls back to a force kill, reducing stale browser process leakage before returning `stopped`. |
 | Screenshot transient retry | Implemented | `login/screenshot` now retries transient browser/CDP screenshot failures for this read-only action, matching the remote smoke finding where an immediate retry succeeded after one screenshot failure. |
@@ -265,7 +265,7 @@ End-to-end verification:
 | Activation into existing channels | Implemented | Activation decrypts the selected account API key, updates the bound channel inside a transaction, marks the account active, and refreshes channel cache after commit. |
 | Activation credential contract | Implemented and locally verified | Activation now builds channel credentials according to the bound channel type. Plain OpenCode API keys remain valid for non-Codex channels, while Codex channels require JSON material containing `access_token` and `account_id`. Public readiness diagnostics now mark Codex/plain-key bindings as not activation-ready before the operator clicks activate. |
 | Remote clean artifact deployment | Done | Built pushed `main` from an isolated clean checkout, produced self-contained binary-plus-sidecar artifacts, switched the remote service to those artifacts, preserved the existing runtime data path, and verified the service is active. |
-| Latest remote rollout | Done | Pushed `main` commit `59645a65` is now deployed on the remote service. HTTP smoke returns 200, the service is active, symlinked-artifact sidecar status returns successful `stopped`, remote Node sidecar tests pass, OpenCode extractor/quota tests pass with repeated runs, OpenCode partial-extract quota preservation tests pass, and OpenCode activation/readiness targeted Go tests pass. |
+| Latest remote rollout | Done | Pushed `main` commit `f17bf862` is now deployed on the remote service. HTTP smoke returns 200, the service is active, executable-directory sidecar resolution returns successful empty-state `stopped`, remote Node sidecar tests pass, OpenCode extractor/quota tests pass, OpenCode partial-extract quota preservation tests pass, OpenCode activation/readiness targeted Go tests pass, and the sidecar path-resolution regression test passes on the deployed source checkout. |
 | Real OpenCode login E2E | Pending | Requires an operator-controlled OpenCode subscription account. The repository contains no real account material. |
 | Real `glm-5.2` cache-hit E2E | Pending | Should run only after a real OpenCode account has been imported and activated through New API. |
 
@@ -298,6 +298,8 @@ The status endpoint is now deliberately idempotent. A missing sidecar state file
 Browser startup failures now fail early and diagnostically. Before this refinement, an invalid Chromium binary or an early Xvfb/Chromium exit could collapse into an unstructured process error or a slow CDP timeout. The sidecar now races CDP readiness against process startup failure and emits a structured JSON error that the API layer can surface to the operator.
 
 Sidecar script resolution no longer assumes the process working directory is the artifact root. The Go service now searches upward from both the current working directory and the running executable directory. This is a deployment hardening step: systemd working directories, clean artifact symlinks, and runtime data directories can legitimately diverge, while the sidecar script should remain discoverable next to the deployed binary.
+
+The latest sidecar path-resolution hardening is deployed from pushed `main` commit `f17bf862`. The remote clean artifact build completed, both frontend builds completed, remote Node sidecar tests passed, sidecar path-resolution focused Go tests passed, broader OpenCode account/controller/router Go tests passed, the service restarted as active, HTTP smoke returned 200 after readiness polling, and sidecar `status` returned `success/stopped` with an empty state directory.
 
 Existing browser reuse is now gated by CDP reachability, not by PID liveness alone. A process ID can remain alive or be reused while the recorded debugging port is dead; treating that as a reusable session makes the UI report a stopped session after a start request. The sidecar now continues into a fresh startup unless the existing session is actually reachable.
 
@@ -388,7 +390,7 @@ Sidecar smoke:
   start/status/screenshot/stop on https://opencode.ai/auth
 
 Remote clean artifact rollout:
-  clean checkout fixed to pushed main commit c95d3c0d
+  clean checkout fixed to pushed main commit f17bf862
   web/default build completed on the remote host
   web/classic build completed on the remote host
   Go binary built into an isolated artifact with the OpenCode sidecar script
@@ -413,6 +415,10 @@ Remote clean artifact rollout:
   latest JSON probe extractor artifact deployed on the remote service
   remote Node sidecar tests and OpenCode extractor targeted Go tests passed
   official OpenCode auth page start/screenshot/extract/stop smoke passed without credentials and left no browser residue for the smoke session
+  latest sidecar path-resolution artifact deployed on the remote service
+  sidecar path-resolution focused Go tests passed on the remote source checkout
+  readiness-polled HTTP smoke returned 200 after service restart
+  empty-state sidecar status returned success/stopped from the deployed artifact
 ```
 
 The `web/classic` build failure was traced to `date-fns-tz@1.3.8` resolving its peer `date-fns` to the workspace-level `date-fns@4`. That package version blocks private subpath imports such as `date-fns/_lib/cloneObject/index.js`. The fix keeps `web/default` on `date-fns@4` and adds a classic-only Rsbuild alias so Semi UI's `date-fns-tz` resolves to Semi's nested `date-fns@2.30.0`.
@@ -682,7 +688,7 @@ web/default/src/routes/_authenticated/opencode-accounts/index.tsx
 | 登录状态 URL 脱敏 | 已实现 | status 响应现在会在经 New API 返回前移除 HTTP(S) 浏览器 URL 的 query string 与 fragment，避免 OAuth `state`、`code` 或类似授权载荷进入 Admin UI/API 响应。 |
 | 登录状态幂等性 | 已实现 | 当 sidecar state 文件不存在时，`login/status` 现在返回成功的 `stopped` 状态，避免前端轮询或页面刷新在尚未启动登录会话前暴露伪失败。 |
 | 浏览器启动诊断 | 已实现 | sidecar 现在会在启动阶段监听 Chromium 与 Xvfb 的 `error` / early-`exit` 事件，并返回结构化 JSON 失败，避免浏览器依赖缺失或配置错误时退化为不透明的 CDP 超时。 |
-| Sidecar path resolution | 本地已实现 | Go 服务现在会从进程工作目录和当前可执行文件目录两个起点解析 sidecar 脚本，并分别向上查找。这样当 systemd working directory 与 clean artifact 目录不一致时，远端浏览器操作仍能稳定找到 sidecar。 |
+| Sidecar path resolution | 已实现并完成远端验证 | Go 服务现在会从进程工作目录和当前可执行文件目录两个起点解析 sidecar 脚本，并分别向上查找。这样当 systemd working directory 与 clean artifact 目录不一致时，远端浏览器操作仍能稳定找到 sidecar；已推送的 `main` artifact 已通过远端构建、定向测试、服务重启、HTTP smoke 与 sidecar 空状态检查验证该路径。 |
 | 陈旧浏览器状态处理 | 已实现 | `login/start` 现在只会在记录的 PID 存活且 CDP endpoint 可达时复用既有浏览器；陈旧 PID/state 组合会继续走新浏览器启动流程。 |
 | Stop 生命周期清理 | 已实现 | `login/stop` 现在会在 SIGTERM 后等待记录的 browser/Xvfb 进程退出，并在未退出时使用强制清理兜底，减少返回 `stopped` 前遗留浏览器进程的概率。 |
 | Screenshot 瞬时失败重试 | 已实现 | `login/screenshot` 现在会对浏览器/CDP 的瞬时截图失败执行重试；该动作是只读操作，符合远端 smoke 中 screenshot 首次失败、立即重试成功的实际现象。 |
@@ -697,7 +703,7 @@ web/default/src/routes/_authenticated/opencode-accounts/index.tsx
 | 激活到现有渠道 | 已实现 | 激活时解密选中账号 API key，在事务内更新绑定 channel，标记账号 active，并在 commit 后刷新 channel cache。 |
 | Activation credential contract | 已实现并完成本地验证 | 激活现在会按照绑定 channel 类型构造 channel credential。非 Codex channel 继续接受纯 OpenCode API key；Codex channel 必须提供包含 `access_token` 与 `account_id` 的 JSON 材料。公开 readiness 诊断现在会在操作者点击 activate 前，把 Codex/plain-key 绑定标记为不可激活。 |
 | 远端 clean artifact 部署 | 已完成 | 已从隔离的干净 checkout 构建已推送的 `main`，生成包含二进制与 sidecar 的 artifact，远端服务已切换到这些 artifact，并显式保留既有运行时数据路径，服务状态已验证为 active。 |
-| 最新远端上线 | 已完成 | 已推送的 `main` 提交 `59645a65` 现在已部署到远端服务。HTTP smoke 返回 200，服务状态为 active，symlink artifact 路径下的 sidecar status 返回成功的 `stopped`，远端 Node sidecar 测试通过，OpenCode extractor/quota 测试重复运行通过，OpenCode partial-extract quota preservation 测试通过，OpenCode activation/readiness 相关 Go 定向测试通过。 |
+| 最新远端上线 | 已完成 | 已推送的 `main` 提交 `f17bf862` 现在已部署到远端服务。HTTP smoke 返回 200，服务状态为 active，基于可执行文件目录的 sidecar 解析返回成功的空状态 `stopped`，远端 Node sidecar 测试通过，OpenCode extractor/quota 测试通过，OpenCode partial-extract quota preservation 测试通过，OpenCode activation/readiness 相关 Go 定向测试通过，且 sidecar path-resolution 回归测试已在部署源 checkout 上通过。 |
 | 真实 OpenCode 登录 E2E | 待执行 | 需要操作者控制的 OpenCode 订阅账号；仓库不包含真实账号材料。 |
 | 真实 `glm-5.2` cache-hit E2E | 待执行 | 只能在真实 OpenCode 账号经 New API 导入并激活后执行。 |
 
@@ -730,6 +736,8 @@ Admin Web
 浏览器启动失败现在会更早、更可诊断地失败。在这次收敛之前，错误的 Chromium 路径或 Xvfb/Chromium 早退可能表现为非结构化进程错误或缓慢的 CDP timeout。现在 sidecar 会将 CDP ready 与进程启动失败进行竞速，并输出 API 层可直接展示给操作者的结构化 JSON 错误。
 
 sidecar 脚本解析现在不再假设进程工作目录就是 artifact 根目录。Go 服务会同时从当前工作目录和运行中的可执行文件目录向上查找。这个改动是部署稳健性收敛：systemd working directory、clean artifact symlink、运行时数据目录可以合理分离，但 sidecar 脚本仍应该能从部署二进制旁边被发现。
+
+最新的 sidecar path-resolution 加固已经从已推送的 `main` 提交 `f17bf862` 部署到远端。远端 clean artifact 构建完成，两个前端构建完成，远端 Node sidecar 测试通过，sidecar path-resolution Go 定向测试通过，OpenCode account/controller/router 扩展 Go 测试通过，服务重启后为 active，经过 readiness polling 的 HTTP smoke 返回 200，空 state directory 下的 sidecar `status` 返回 `success/stopped`。
 
 既有浏览器复用现在以 CDP 可达性为准，而不是只看 PID 是否存活。进程 ID 可能仍存活或被复用，但记录的调试端口已经不可用；如果把这种状态当成可复用会话，前端会在 start 后看到 stopped。现在除非既有会话真实可达，否则 sidecar 会继续拉起新浏览器。
 
@@ -820,7 +828,7 @@ Sidecar smoke：
   https://opencode.ai/auth 上完成 start/status/screenshot/stop
 
 远端 clean artifact 上线：
-  clean checkout 固定到已推送 main 提交 c95d3c0d
+  clean checkout 固定到已推送 main 提交 f17bf862
   远端 web/default 构建完成
   远端 web/classic 构建完成
   Go 二进制已构建到隔离 artifact，并包含 OpenCode sidecar 脚本
@@ -845,6 +853,10 @@ Sidecar smoke：
   最新 JSON probe extractor artifact 已部署到远端服务
   远端 Node sidecar 测试与 OpenCode extractor 相关 Go 定向测试通过
   官方 OpenCode 授权页无凭证 start/screenshot/extract/stop smoke 通过，且 stop 后无该 smoke session 对应的浏览器残留进程
+  最新 sidecar path-resolution artifact 已部署到远端服务
+  sidecar path-resolution Go 定向测试已在远端源 checkout 上通过
+  服务重启后经过 readiness polling 的 HTTP smoke 返回 200
+  已部署 artifact 的空状态 sidecar status 返回 success/stopped
 ```
 
 `web/classic` 构建失败的根因已经定位为 `date-fns-tz@1.3.8` 将 peer `date-fns` 解析到了 workspace 顶层的 `date-fns@4`。该版本通过 package exports 阻断 `date-fns/_lib/cloneObject/index.js` 等 private subpath。修复方式是保持 `web/default` 使用 `date-fns@4`，只在 classic 的 Rsbuild 配置中增加局部 alias，让 Semi UI 的 `date-fns-tz` 解析到 Semi 自带的 `date-fns@2.30.0`。

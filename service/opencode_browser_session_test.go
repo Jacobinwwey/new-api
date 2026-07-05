@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -67,5 +68,40 @@ func TestOpenCodeAuthSidecarStartReportsInvalidChromiumBinary(t *testing.T) {
 	require.NoError(t, common.Unmarshal(output, &response))
 	require.False(t, response.Success, string(output))
 	assert.Contains(t, response.Message, "chromium")
+	assert.Contains(t, response.Message, "definitely-missing-opencode-browser-binary")
+}
+
+func TestOpenCodeAuthSidecarStartDoesNotReusePidWithoutCDP(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node is required for opencode auth sidecar tests")
+	}
+	scriptPath, err := filepath.Abs(filepath.Join("..", "scripts", "opencode-auth-session.mjs"))
+	require.NoError(t, err)
+	stateDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(stateDir, "account-199.json"), []byte(`{
+		"accountID": 199,
+		"port": 9,
+		"display": ":399",
+		"profile": "",
+		"browserPid": `+strconv.Itoa(os.Getpid())+`,
+		"xvfbPid": 0,
+		"startedAt": 1
+	}`), 0o600))
+
+	command := exec.Command("node",
+		scriptPath,
+		"--action", "start",
+		"--account-id", "199",
+		"--state-dir", stateDir,
+		"--url", "about:blank",
+	)
+	command.Env = append(os.Environ(), "CHROMIUM_BIN=definitely-missing-opencode-browser-binary")
+
+	output, err := command.Output()
+	require.NoError(t, err)
+
+	var response openCodeAuthSidecarResponse
+	require.NoError(t, common.Unmarshal(output, &response))
+	require.False(t, response.Success, string(output))
 	assert.Contains(t, response.Message, "definitely-missing-opencode-browser-binary")
 }

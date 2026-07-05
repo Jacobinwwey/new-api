@@ -223,8 +223,11 @@ async function startSession(args) {
   try {
     const existing = await readState(stateDir, accountID);
     if (pidRunning(existing.browserPid)) {
-      json({ success: true, status: await statusFromState(existing) });
-      return;
+      const existingStatus = await statusFromState(existing);
+      if (existingStatus.running) {
+        json({ success: true, status: existingStatus });
+        return;
+      }
     }
   } catch {
     /* no prior session */

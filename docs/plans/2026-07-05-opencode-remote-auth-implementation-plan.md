@@ -261,12 +261,12 @@ End-to-end verification:
 | Partial extract quota preservation | Implemented locally | `login/extract` now updates the stored quota tuple only when the browser extraction actually contains quota evidence. Cookie/API-key-only partial extracts no longer clear existing `quota_raw`, `quota_limit`, or `quota_used`; when quota evidence is present, the tuple is updated as one complete observation. |
 | Channel binding validation | Implemented | OpenCode account create/update now rejects missing channel bindings at the model boundary, preventing accounts that cannot be activated from entering persistent storage. |
 | Credential readiness diagnostics | Implemented | Public OpenCode account responses now expose masked `credential_integrity`, `activation_ready`, and `missing_activation_fields` signals, so operators can distinguish missing account material from decrypt failures without seeing raw secrets. |
-| Credential key-source diagnostics | Implemented locally | Public OpenCode account responses now include non-sensitive `credential_key_source`, and startup logs warn when existing OpenCode accounts are encrypted under the session-secret fallback instead of a dedicated crypto secret. This makes the strongest remaining deployment footgun visible before real account import/cache E2E. |
+| Credential key-source diagnostics | Implemented and remotely verified | Public OpenCode account responses now include non-sensitive `credential_key_source`, and startup logs warn when existing OpenCode accounts are encrypted under the session-secret fallback instead of a dedicated crypto secret. This makes the strongest remaining deployment footgun visible before real account import/cache E2E. |
 | Frontend account window | Implemented | Added Root-only admin route, sidebar entry, account list, enabled-channel selector with numeric ID fallback, remote screenshot controls, extract, quota refresh, activate, stop, and delete actions. |
 | Activation into existing channels | Implemented | Activation decrypts the selected account API key, updates the bound channel inside a transaction, marks the account active, and refreshes channel cache after commit. |
 | Activation credential contract | Implemented and locally verified | Activation now builds channel credentials according to the bound channel type. Plain OpenCode API keys remain valid for non-Codex channels, while Codex channels require JSON material containing `access_token` and `account_id`. Public readiness diagnostics now mark Codex/plain-key bindings as not activation-ready before the operator clicks activate. |
 | Remote clean artifact deployment | Done | Built pushed `main` from an isolated clean checkout, produced self-contained binary-plus-sidecar artifacts, switched the remote service to those artifacts, preserved the existing runtime data path, and verified the service is active. |
-| Latest remote rollout | Done | Pushed `main` commit `f17bf862` is now deployed on the remote service. HTTP smoke returns 200, the service is active, executable-directory sidecar resolution returns successful empty-state `stopped`, remote Node sidecar tests pass, OpenCode extractor/quota tests pass, OpenCode partial-extract quota preservation tests pass, OpenCode activation/readiness targeted Go tests pass, and the sidecar path-resolution regression test passes on the deployed source checkout. |
+| Latest remote rollout | Done | Pushed `main` commit `e76a8063` is now deployed on the remote service. HTTP smoke returns 200 after readiness polling, the service is active, executable-directory sidecar resolution returns successful empty-state `stopped`, remote default frontend typecheck/build passes, remote classic frontend build passes, remote Node sidecar tests pass, OpenCode key-source/readiness/extractor/quota/activation targeted Go tests pass, and the sidecar path-resolution regression test passes on the deployed source checkout. |
 | Real OpenCode login E2E | Pending | Requires an operator-controlled OpenCode subscription account. The repository contains no real account material. |
 | Real `glm-5.2` cache-hit E2E | Pending | Should run only after a real OpenCode account has been imported and activated through New API. |
 
@@ -338,6 +338,8 @@ The biggest deployment pitfall is `CRYPTO_SECRET`: durable imported credentials 
 
 That pitfall is now represented in code, not only in this plan. OpenCode account responses expose `credential_key_source` as either `crypto_secret` or `session_secret_fallback`, and startup emits a system warning when persisted OpenCode accounts exist while the process is using the fallback key source. The response remains non-sensitive: it discloses configuration class only, never the secret value, ciphertext, cookie, workspace ID, account email, OAuth payload, or local deployment path.
 
+The credential key-source diagnostics are deployed from pushed `main` commit `e76a8063`. The remote clean artifact build completed, default frontend typecheck/build completed, classic frontend build completed, remote Node sidecar tests passed, OpenCode key-source/readiness/extractor/quota/activation Go tests passed, service restart completed, readiness-polled HTTP smoke returned 200, and sidecar `status` returned `success/stopped` with an empty state directory.
+
 Remote deployment is now separated from the previous runtime worktree. The service runs from a clean artifact built from the pushed `main`, while the existing runtime data location is preserved explicitly. This avoids overwriting unrelated local cache/accounting work that still exists in the old runtime tree and keeps source, artifact, and runtime data as separate concerns.
 
 ### Verification Update
@@ -394,7 +396,7 @@ Sidecar smoke:
   start/status/screenshot/stop on https://opencode.ai/auth
 
 Remote clean artifact rollout:
-  clean checkout fixed to pushed main commit f17bf862
+  clean checkout fixed to pushed main commit e76a8063
   web/default build completed on the remote host
   web/classic build completed on the remote host
   Go binary built into an isolated artifact with the OpenCode sidecar script
@@ -423,6 +425,9 @@ Remote clean artifact rollout:
   sidecar path-resolution focused Go tests passed on the remote source checkout
   readiness-polled HTTP smoke returned 200 after service restart
   empty-state sidecar status returned success/stopped from the deployed artifact
+  latest credential key-source diagnostic artifact deployed on the remote service
+  default frontend typecheck/build and classic frontend build passed on the remote host
+  OpenCode key-source/readiness/extractor/quota/activation Go tests passed on the remote source checkout
 ```
 
 The `web/classic` build failure was traced to `date-fns-tz@1.3.8` resolving its peer `date-fns` to the workspace-level `date-fns@4`. That package version blocks private subpath imports such as `date-fns/_lib/cloneObject/index.js`. The fix keeps `web/default` on `date-fns@4` and adds a classic-only Rsbuild alias so Semi UI's `date-fns-tz` resolves to Semi's nested `date-fns@2.30.0`.
@@ -703,12 +708,12 @@ web/default/src/routes/_authenticated/opencode-accounts/index.tsx
 | Partial extract quota preservation | 本地已实现 | `login/extract` 现在只有在浏览器提取结果确实包含 quota 证据时，才更新已存 quota 三元组。只包含 cookie/API key 的 partial extract 不再清空既有 `quota_raw`、`quota_limit` 或 `quota_used`；当 quota 证据存在时，三元组会作为一次完整观测一起更新。 |
 | Channel binding 校验 | 已实现 | OpenCode account create/update 现在会在 model 边界拒绝缺失 channel binding 的账号，避免无法 activate 的账号进入持久存储。 |
 | 凭据 readiness 诊断 | 已实现 | OpenCode account 公开响应现在提供脱敏的 `credential_integrity`、`activation_ready` 与 `missing_activation_fields` 信号，让操作者能区分账号材料缺失与密文解密失败，而不看到任何原始 secret。 |
-| 凭据 key source 诊断 | 本地已实现 | OpenCode account 公开响应现在包含非敏感的 `credential_key_source`，并且当已有 OpenCode 账号仍使用 session-secret fallback 而不是专用 crypto secret 加密时，启动日志会给出系统告警。这样在真实账号导入与 cache E2E 前，最容易踩的部署稳定性问题会变成可见状态。 |
+| 凭据 key source 诊断 | 已实现并完成远端验证 | OpenCode account 公开响应现在包含非敏感的 `credential_key_source`，并且当已有 OpenCode 账号仍使用 session-secret fallback 而不是专用 crypto secret 加密时，启动日志会给出系统告警。这样在真实账号导入与 cache E2E 前，最容易踩的部署稳定性问题会变成可见状态。 |
 | 前端账号窗口 | 已实现 | 已增加 Root-only 管理路由、侧边栏入口、账号列表、已启用 channel 选择器与数字 ID fallback、远端截图控制、extract、quota refresh、activate、stop、delete 操作。 |
 | 激活到现有渠道 | 已实现 | 激活时解密选中账号 API key，在事务内更新绑定 channel，标记账号 active，并在 commit 后刷新 channel cache。 |
 | Activation credential contract | 已实现并完成本地验证 | 激活现在会按照绑定 channel 类型构造 channel credential。非 Codex channel 继续接受纯 OpenCode API key；Codex channel 必须提供包含 `access_token` 与 `account_id` 的 JSON 材料。公开 readiness 诊断现在会在操作者点击 activate 前，把 Codex/plain-key 绑定标记为不可激活。 |
 | 远端 clean artifact 部署 | 已完成 | 已从隔离的干净 checkout 构建已推送的 `main`，生成包含二进制与 sidecar 的 artifact，远端服务已切换到这些 artifact，并显式保留既有运行时数据路径，服务状态已验证为 active。 |
-| 最新远端上线 | 已完成 | 已推送的 `main` 提交 `f17bf862` 现在已部署到远端服务。HTTP smoke 返回 200，服务状态为 active，基于可执行文件目录的 sidecar 解析返回成功的空状态 `stopped`，远端 Node sidecar 测试通过，OpenCode extractor/quota 测试通过，OpenCode partial-extract quota preservation 测试通过，OpenCode activation/readiness 相关 Go 定向测试通过，且 sidecar path-resolution 回归测试已在部署源 checkout 上通过。 |
+| 最新远端上线 | 已完成 | 已推送的 `main` 提交 `e76a8063` 现在已部署到远端服务。经过 readiness polling 的 HTTP smoke 返回 200，服务状态为 active，基于可执行文件目录的 sidecar 解析返回成功的空状态 `stopped`，远端 default 前端 typecheck/build 通过，classic 前端 build 通过，远端 Node sidecar 测试通过，OpenCode key-source/readiness/extractor/quota/activation 相关 Go 定向测试通过，且 sidecar path-resolution 回归测试已在部署源 checkout 上通过。 |
 | 真实 OpenCode 登录 E2E | 待执行 | 需要操作者控制的 OpenCode 订阅账号；仓库不包含真实账号材料。 |
 | 真实 `glm-5.2` cache-hit E2E | 待执行 | 只能在真实 OpenCode 账号经 New API 导入并激活后执行。 |
 
@@ -780,6 +785,8 @@ Channel binding 现在会在 OpenCode account 持久化前校验。前端也复�
 
 这个坑点现在不只停留在计划文档里。OpenCode account 响应会暴露 `credential_key_source`，取值为 `crypto_secret` 或 `session_secret_fallback`；如果进程使用 fallback key source 且数据库中已经存在 OpenCode 账号，启动阶段会写出系统告警。该响应仍然是非敏感的：只暴露配置类别，不暴露 secret 值、密文、cookie、workspace ID、账号邮箱、OAuth payload 或本地部署路径。
 
+凭据 key-source 诊断已经从已推送的 `main` 提交 `e76a8063` 部署到远端。远端 clean artifact 构建完成，default 前端 typecheck/build 完成，classic 前端 build 完成，远端 Node sidecar 测试通过，OpenCode key-source/readiness/extractor/quota/activation Go 定向测试通过，服务重启完成，经过 readiness polling 的 HTTP smoke 返回 200，空 state directory 下的 sidecar `status` 返回 `success/stopped`。
+
 远端部署现在已经与旧运行工作树分离。服务从基于已推送 `main` 构建的 clean artifact 运行，同时显式保留既有运行时数据位置。这样不会覆盖旧运行树中仍存在的本地 cache/accounting 工作，也把源码、artifact 与运行时数据拆成了三个独立边界。
 
 ### 验证更新
@@ -836,7 +843,7 @@ Sidecar smoke：
   https://opencode.ai/auth 上完成 start/status/screenshot/stop
 
 远端 clean artifact 上线：
-  clean checkout 固定到已推送 main 提交 f17bf862
+  clean checkout 固定到已推送 main 提交 e76a8063
   远端 web/default 构建完成
   远端 web/classic 构建完成
   Go 二进制已构建到隔离 artifact，并包含 OpenCode sidecar 脚本
@@ -865,6 +872,9 @@ Sidecar smoke：
   sidecar path-resolution Go 定向测试已在远端源 checkout 上通过
   服务重启后经过 readiness polling 的 HTTP smoke 返回 200
   已部署 artifact 的空状态 sidecar status 返回 success/stopped
+  最新 credential key-source diagnostic artifact 已部署到远端服务
+  default 前端 typecheck/build 与 classic 前端 build 已在远端通过
+  OpenCode key-source/readiness/extractor/quota/activation Go 测试已在远端源 checkout 上通过
 ```
 
 `web/classic` 构建失败的根因已经定位为 `date-fns-tz@1.3.8` 将 peer `date-fns` 解析到了 workspace 顶层的 `date-fns@4`。该版本通过 package exports 阻断 `date-fns/_lib/cloneObject/index.js` 等 private subpath。修复方式是保持 `web/default` 使用 `date-fns@4`，只在 classic 的 Rsbuild 配置中增加局部 alias，让 Semi UI 的 `date-fns-tz` 解析到 Semi 自带的 `date-fns@2.30.0`。

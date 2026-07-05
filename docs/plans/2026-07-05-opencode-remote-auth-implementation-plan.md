@@ -245,7 +245,7 @@ End-to-end verification:
 | Reversible encryption helper | Implemented | Added AES-GCM `EncryptSecret` / `DecryptSecret` using `CRYPTO_SECRET`-derived key and versioned ciphertext. |
 | Root-only OpenCode account API | Implemented | Added CRUD, login-session, extract, quota refresh, and activate routes under `/api/opencode/accounts`. Quota refresh now accepts quota-only browser payloads and updates structured `quota_limit` / `quota_used` fields. |
 | Quota candidate classification | Implemented | Quota limit detection now excludes used/usage/consumed keys, preventing `quota.used` values from being recorded as quota limits when browser payload traversal order varies. |
-| Remote browser sidecar | Implemented and smoke-tested on the remote host without credentials | Added Node CDP + Xvfb sidecar with start/status/screenshot/click/key/extract/stop actions. Remote smoke tests covered `about:blank` and the official OpenCode authorization entrypoint without logging in. |
+| Remote browser sidecar | Implemented and smoke-tested on the remote host without credentials | Added Node CDP + Xvfb sidecar with start/status/screenshot/click/key/extract/stop actions. Remote smoke tests covered `about:blank` and the official OpenCode authorization entrypoint without logging in. Extract now probes likely OpenCode same-site JSON resources loaded by the page, excluding static assets and OAuth payload URLs, so API-key/workspace/quota candidates are not limited to browser storage. |
 | Sensitive browser input transport | Implemented | `login/key` now sends typed text to the Node sidecar through stdin instead of argv, so Google/OpenCode login text does not appear in process command lines. The sidecar rejects legacy `--text` input. |
 | Login status URL sanitization | Implemented | Status responses now strip query strings and fragments from HTTP(S) browser URLs before returning them through New API, preventing OAuth `state`, `code`, or similar authorization payloads from reaching the Admin UI/API response. |
 | Login status idempotency | Implemented | `login/status` now returns a successful `stopped` status when no sidecar state file exists, so frontend polling and page refreshes do not surface false failures before a login session has started. |
@@ -299,6 +299,8 @@ Stop now owns process cleanup more completely. It no longer returns immediately 
 Screenshot capture now retries transient browser/CDP failures. This is intentionally scoped to screenshot because it is a read-only operation; click and key input remain single-shot to avoid repeating user actions. The change addresses the observed remote behavior where authorization-page screenshot failed once but succeeded immediately on retry.
 
 The latest sidecar lifecycle, status sanitization, partial-extract merge, channel-binding, frontend channel-selector, and screenshot retry fixes are now deployed from pushed `main` commit `c95d3c0d`. The remote service was switched to the new clean artifact, restarted, and verified through an HTTP smoke test plus sidecar checks. The official OpenCode authorization page was exercised without credentials through start, status, screenshot, and stop. The screenshot step reached the OpenCode authorization domain, stop returned `stopped`, and a browser-process-specific residue check found no Chromium/Xvfb process tied to the smoke session.
+
+The sidecar extractor now closes a real implementation gap in the original plan. The backend extractor already accepted `json_responses`, but the browser sidecar previously returned an empty list, which meant account material available only through OpenCode page API responses could be missed during real login. Extract now evaluates an async browser-side probe that fetches recently loaded OpenCode same-site resources likely to be JSON account/quota/workspace endpoints. It intentionally rejects static assets and URLs carrying OAuth `code`, `state`, or token payloads. This improves extraction coverage without replaying authorization callbacks or touching non-OpenCode resources.
 
 Quota parsing has also been tightened. A quota field name is no longer enough to classify a numeric value as a limit when the key also says used, usage, or consumed. This removes an order-dependent failure mode where `quota.used` could be stored as `quota_limit`, which would corrupt quota display and any downstream reasoning about account capacity.
 
@@ -644,7 +646,7 @@ web/default/src/routes/_authenticated/opencode-accounts/index.tsx
 | 可逆加密 helper | 已实现 | 已增加 AES-GCM `EncryptSecret` / `DecryptSecret`，使用 `CRYPTO_SECRET` 派生 key，密文带版本前缀。 |
 | Root-only OpenCode account API | 已实现 | `/api/opencode/accounts` 下已包含 CRUD、登录会话、提取、quota refresh 与 activate 路由。quota refresh 现在支持只包含 quota 的浏览器 payload，并会更新结构化 `quota_limit` / `quota_used` 字段。 |
 | Quota 候选分类 | 已实现 | quota limit 检测现在会排除 used/usage/consumed 键，避免浏览器 payload 遍历顺序变化时把 `quota.used` 写入 quota limit。 |
-| 远端浏览器 sidecar | 已实现，并已在远端主机完成无凭证 smoke test | 已增加 Node CDP + Xvfb sidecar，支持 start/status/screenshot/click/key/extract/stop。远端 smoke 覆盖 `about:blank` 与官方 OpenCode 授权入口，未登录、未使用任何账号材料。 |
+| 远端浏览器 sidecar | 已实现，并已在远端主机完成无凭证 smoke test | 已增加 Node CDP + Xvfb sidecar，支持 start/status/screenshot/click/key/extract/stop。远端 smoke 覆盖 `about:blank` 与官方 OpenCode 授权入口，未登录、未使用任何账号材料。extract 现在会 probe 页面已加载的疑似 OpenCode 同站 JSON 资源，并排除静态资源与 OAuth payload URL，因此 API key、workspace、quota 候选不再只依赖浏览器 storage。 |
 | 敏感浏览器输入传输 | 已实现 | `login/key` 现在通过 stdin 向 Node sidecar 传递键入文本，不再放入 argv，因此 Google/OpenCode 登录页中的输入不会出现在进程命令行中。sidecar 会拒绝旧的 `--text` 输入。 |
 | 登录状态 URL 脱敏 | 已实现 | status 响应现在会在经 New API 返回前移除 HTTP(S) 浏览器 URL 的 query string 与 fragment，避免 OAuth `state`、`code` 或类似授权载荷进入 Admin UI/API 响应。 |
 | 登录状态幂等性 | 已实现 | 当 sidecar state 文件不存在时，`login/status` 现在返回成功的 `stopped` 状态，避免前端轮询或页面刷新在尚未启动登录会话前暴露伪失败。 |
@@ -698,6 +700,8 @@ stop 现在更完整地拥有进程清理语义。它不再发送 SIGTERM 后立
 截图捕获现在会对浏览器/CDP 的瞬时失败执行重试。这个重试刻意只用于 screenshot，因为它是只读操作；click 和 key input 仍然保持单次执行，避免重复用户动作。该修复对应远端授权页 smoke 中 screenshot 首次失败、立即重试成功的实际现象。
 
 最新的 sidecar 生命周期、状态脱敏、partial-extract merge、channel binding、前端 channel selector 和 screenshot retry 修复已经从已推送的 `main` 提交 `c95d3c0d` 部署到远端。远端服务已切换到新的 clean artifact、完成重启，并通过 HTTP smoke 与 sidecar 检查。官方 OpenCode 授权页已经在无凭证条件下执行 start、status、screenshot、stop；screenshot 阶段到达 OpenCode 授权域，stop 返回 `stopped`，按浏览器进程名约束的残留检查未发现该 smoke session 对应的 Chromium/Xvfb 进程。
+
+Sidecar extractor 现在补上了原计划中的一个真实实现缺口。后端 extractor 已经接受 `json_responses`，但浏览器 sidecar 先前实际返回空数组；如果真实登录后的 API key、workspace 或 quota 只出现在 OpenCode 页面接口响应中，就会被漏掉。现在 extract 会在浏览器侧执行异步 probe，抓取页面近期加载过、看起来像账号/quota/workspace 端点的 OpenCode 同站 JSON 资源。它会刻意拒绝静态资源，以及携带 OAuth `code`、`state` 或 token payload 的 URL。这个取舍提升了提取覆盖率，同时不重放授权 callback，也不触碰非 OpenCode 资源。
 
 quota 解析也已经收紧。当 key 同时表达 used、usage 或 consumed 时，不能仅因为字段路径包含 quota 就把数值分类为 limit。这个修复移除了一个顺序相关故障：`quota.used` 可能被写入 `quota_limit`，从而污染 quota 展示和后续对账号容量的判断。
 

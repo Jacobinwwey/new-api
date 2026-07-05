@@ -9,6 +9,8 @@ import { spawn } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
 const DEFAULT_VIEWPORT = { width: 1280, height: 900 };
+const MAX_JSON_RESPONSE_COUNT = 20;
+const MAX_JSON_RESPONSE_CHARS = 262144;
 
 function parseArgs(argv) {
   const args = {};
@@ -93,6 +95,71 @@ export async function retryTransientBrowserAction(action, options = {}) {
   }
 
   throw lastError || new Error("browser action failed");
+}
+
+export function shouldProbeOpenCodeResourceURL(rawURL, pageURL) {
+  try {
+    const isOpenCodeHost = (hostname) => {
+      const host = String(hostname || "").toLowerCase();
+      return host === "opencode.ai" || host.endsWith(".opencode.ai");
+    };
+    const isStaticBrowserResource = (pathname) =>
+      /\.(?:js|css|png|jpe?g|gif|webp|svg|ico|woff2?|ttf|map)$/i.test(String(pathname || ""));
+    const containsOAuthPayload = (search) =>
+      /[?&](?:code|state|id_token|access_token|refresh_token)=/i.test(String(search || ""));
+    const url = new URL(String(rawURL));
+    const page = new URL(String(pageURL));
+    if (!["http:", "https:"].includes(url.protocol)) return false;
+    if (!isOpenCodeHost(url.hostname) || !isOpenCodeHost(page.hostname)) return false;
+    if (isStaticBrowserResource(url.pathname)) return false;
+    if (containsOAuthPayload(url.search)) return false;
+    const target = `${url.pathname} ${url.search}`.toLowerCase();
+    return /\b(api|auth|account|workspace|quota|usage|subscription|user|me|key|token|billing|plan)\b/.test(target);
+  } catch {
+    return false;
+  }
+}
+
+export function buildOpenCodeBrowserStateExpression() {
+  return `(${async function browserStateProbe(maxResponses, maxChars) {
+    const shouldProbeOpenCodeResourceURL = SHOULD_PROBE_SOURCE;
+    const copy = (storage) => {
+      const out = {};
+      for (let i = 0; i < storage.length; i++) {
+        const key = storage.key(i);
+        out[key] = storage.getItem(key);
+      }
+      return out;
+    };
+    const resources = performance.getEntriesByType("resource")
+      .map((entry) => entry.name)
+      .filter((name, index, names) => names.indexOf(name) === index)
+      .filter((name) => shouldProbeOpenCodeResourceURL(name, window.location.href));
+    const jsonResponses = [];
+    for (const url of resources) {
+      if (jsonResponses.length >= maxResponses) break;
+      try {
+        const response = await fetch(url, {
+          credentials: "include",
+          cache: "no-store",
+          headers: { accept: "application/json, text/plain, */*" },
+        });
+        if (!response.ok) continue;
+        const contentType = response.headers.get("content-type") || "";
+        const text = (await response.text()).trim();
+        if (text.length === 0 || text.length > maxChars) continue;
+        if (contentType.includes("json") || text.startsWith("{") || text.startsWith("[")) {
+          jsonResponses.push(text);
+        }
+      } catch {
+      }
+    }
+    return {
+      localStorage: copy(window.localStorage),
+      sessionStorage: copy(window.sessionStorage),
+      jsonResponses,
+    };
+  }.toString().replace("SHOULD_PROBE_SOURCE", shouldProbeOpenCodeResourceURL.toString())})(${MAX_JSON_RESPONSE_COUNT}, ${MAX_JSON_RESPONSE_CHARS})`;
 }
 
 async function waitForProcessExit(pid, timeoutMs) {
@@ -412,20 +479,12 @@ async function keySession(args) {
 async function extractSession(args) {
   const state = await readState(args["state-dir"], Number(args["account-id"]));
   const browserState = await withPage(state, async (cdp) => {
+    await cdp.send("Network.enable");
     const cookiesResult = await cdp.send("Network.getAllCookies");
     const storageResult = await cdp.send("Runtime.evaluate", {
       returnByValue: true,
-      expression: `(() => {
-        const copy = (storage) => {
-          const out = {};
-          for (let i = 0; i < storage.length; i++) {
-            const key = storage.key(i);
-            out[key] = storage.getItem(key);
-          }
-          return out;
-        };
-        return { localStorage: copy(window.localStorage), sessionStorage: copy(window.sessionStorage) };
-      })()`,
+      awaitPromise: true,
+      expression: buildOpenCodeBrowserStateExpression(),
     });
     const storage = storageResult.result?.value || {};
     return {
@@ -434,7 +493,7 @@ async function extractSession(args) {
         .map((cookie) => ({ name: cookie.name, value: cookie.value, domain: cookie.domain })),
       local_storage: storage.localStorage || {},
       session_storage: storage.sessionStorage || {},
-      json_responses: [],
+      json_responses: storage.jsonResponses || [],
     };
   });
   json({ success: true, browser_state: browserState, status: await statusFromState(state) });

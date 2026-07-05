@@ -6,6 +6,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -68,6 +69,44 @@ func TestMergeExtractedOpenCodeSecretsPreservesExistingFields(t *testing.T) {
 	assert.Equal(t, "workspace-existing-test", merged.WorkspaceID)
 	assert.Equal(t, "opencode-api-key-existing-test", merged.APIKey)
 	assert.Equal(t, "cookie-extracted-test", merged.Cookie)
+}
+
+func TestApplyExtractedOpenCodeAccountPreservesQuotaWhenExtractHasNoQuota(t *testing.T) {
+	account := &model.OpenCodeAccount{
+		QuotaRaw:   "old quota raw",
+		QuotaLimit: 1000,
+		QuotaUsed:  250,
+	}
+
+	applyExtractedOpenCodeAccount(account, service.OpenCodeExtractedAccount{
+		Secrets: model.OpenCodeAccountSecrets{
+			Cookie: "cookie-only-partial-extract",
+		},
+	})
+
+	assert.Equal(t, "old quota raw", account.QuotaRaw)
+	assert.EqualValues(t, 1000, account.QuotaLimit)
+	assert.EqualValues(t, 250, account.QuotaUsed)
+	assert.Greater(t, account.LastExtractedAt, int64(0))
+}
+
+func TestApplyExtractedOpenCodeAccountUpdatesCompleteQuotaWhenQuotaIsPresent(t *testing.T) {
+	account := &model.OpenCodeAccount{
+		QuotaRaw:   "old quota raw",
+		QuotaLimit: 1000,
+		QuotaUsed:  250,
+	}
+
+	applyExtractedOpenCodeAccount(account, service.OpenCodeExtractedAccount{
+		QuotaRaw:   "new quota raw",
+		QuotaLimit: 2000,
+		QuotaUsed:  0,
+	})
+
+	assert.Equal(t, "new quota raw", account.QuotaRaw)
+	assert.EqualValues(t, 2000, account.QuotaLimit)
+	assert.EqualValues(t, 0, account.QuotaUsed)
+	assert.Greater(t, account.LastExtractedAt, int64(0))
 }
 
 func TestOpenCodeAccountResponseMarksCodexPlainAPIKeyNotReady(t *testing.T) {

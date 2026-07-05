@@ -257,6 +257,7 @@ End-to-end verification:
 | Extractor | Implemented | Candidate-based scanner covers OpenCode-domain cookies, local/session storage, and JSON responses; tests cover ranking and empty-state rejection. |
 | OAuth token candidate filtering | Implemented and locally verified | The extractor no longer treats generic `*token` fields as OpenCode API keys and explicitly rejects OAuth `access_token`, `id_token`, and `refresh_token` fields as API-key candidates. This prevents authorization artifacts from being stored as provider API keys. |
 | Partial extract merge safety | Implemented | `login/extract` now merges non-empty extracted fields into existing encrypted account material instead of overwriting previously stored API key, workspace ID, email, or cookie with empty partial candidates. |
+| Partial extract quota preservation | Implemented locally | `login/extract` now updates the stored quota tuple only when the browser extraction actually contains quota evidence. Cookie/API-key-only partial extracts no longer clear existing `quota_raw`, `quota_limit`, or `quota_used`; when quota evidence is present, the tuple is updated as one complete observation. |
 | Channel binding validation | Implemented | OpenCode account create/update now rejects missing channel bindings at the model boundary, preventing accounts that cannot be activated from entering persistent storage. |
 | Credential readiness diagnostics | Implemented | Public OpenCode account responses now expose masked `credential_integrity`, `activation_ready`, and `missing_activation_fields` signals, so operators can distinguish missing account material from decrypt failures without seeing raw secrets. |
 | Frontend account window | Implemented | Added Root-only admin route, sidebar entry, account list, enabled-channel selector with numeric ID fallback, remote screenshot controls, extract, quota refresh, activate, stop, and delete actions. |
@@ -317,6 +318,8 @@ The latest OAuth-token filtering and quota raw stabilization changes are deploye
 
 Extraction now preserves durable account material when the browser only yields partial candidates. This matters because real auth pages can expose cookie/quota first and API key/workspace later, or expose different fields depending on navigation timing. The controller now merges non-empty extracted fields into the existing decrypted secret set and re-encrypts the result, instead of treating missing candidates as explicit deletion.
 
+Quota persistence now follows the same partial-extract rule. A browser extraction that contains only cookie, workspace, or API-key material should not erase the last known quota snapshot. The controller updates `quota_raw`, `quota_limit`, and `quota_used` only when quota evidence is present, and then updates the three fields as one observation. This avoids UI capacity flicker after auth-page navigations that expose credentials before quota.
+
 Channel binding is now validated before an OpenCode account is persisted. The frontend also uses the existing channel list API to present enabled channels as selectable options while retaining a numeric ID fallback. This keeps quick account switching ergonomic without weakening the backend invariant that every stored account must point at a channel that can later be activated.
 
 Credential readiness is now an explicit API contract. Earlier public responses exposed only `has_*` flags, which can remain true even when stored ciphertext cannot be decrypted after an incorrect `CRYPTO_SECRET` change. The account response now separates ciphertext presence from credential integrity and activation readiness. The UI can show a masked credential-error state and disable activation before the operator reaches a failing channel update. The tradeoff is a small response-schema expansion, but it is limited to field names and booleans; no raw secret, cookie, workspace ID, account email, OAuth payload, or local deployment path is exposed.
@@ -338,6 +341,7 @@ go test ./model -run 'TestCreateOpenCodeAccount' -count=1
 go test ./model ./controller ./service -run 'TestCreateOpenCodeAccount|TestOpenCodeAccountPublicViewReportsCredentialDecryptFailure|TestOpenCodeAccountResponseDoesNotExposeSecrets|TestMergeExtractedOpenCodeSecretsPreservesExistingFields|TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState|TestActivateOpenCodeAccount|TestObserveChannelAffinityUsageCacheByRelayFormat_MixedMode' -count=1
 go test ./controller -run TestOpenCodeAccountResponseDoesNotExposeSecrets -count=1
 go test ./controller -run 'TestOpenCodeAccountResponseDoesNotExposeSecrets|TestMergeExtractedOpenCodeSecretsPreservesExistingFields' -count=1
+go test ./controller -run "TestApplyExtractedOpenCodeAccount|TestMergeExtractedOpenCodeSecrets" -count=1
 go test ./router -run TestOpenCodeAccountRoutesRegisterExpectedPaths -count=1
 go test ./service -run 'TestExtractOpenCodeSecretsFromBrowserState|TestActivateOpenCodeAccount' -count=1
 go test ./service -run "TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState" -count=20
@@ -679,6 +683,7 @@ web/default/src/routes/_authenticated/opencode-accounts/index.tsx
 | Extractor | 已实现 | 候选扫描覆盖 OpenCode 域 cookie、local/session storage 与 JSON responses；测试覆盖排序和空状态拒绝。 |
 | OAuth token 候选过滤 | 已实现并完成本地验证 | extractor 不再把泛化的 `*token` 字段当成 OpenCode API key，并且会明确拒绝 OAuth `access_token`、`id_token`、`refresh_token` 字段作为 API-key 候选。这样可以避免把授权过程产物误存成 provider API key。 |
 | 部分提取合并安全 | 已实现 | `login/extract` 现在会把非空提取字段合并进已有加密账号材料，不再用空的 partial candidate 覆盖先前已保存的 API key、workspace ID、email 或 cookie。 |
+| Partial extract quota preservation | 本地已实现 | `login/extract` 现在只有在浏览器提取结果确实包含 quota 证据时，才更新已存 quota 三元组。只包含 cookie/API key 的 partial extract 不再清空既有 `quota_raw`、`quota_limit` 或 `quota_used`；当 quota 证据存在时，三元组会作为一次完整观测一起更新。 |
 | Channel binding 校验 | 已实现 | OpenCode account create/update 现在会在 model 边界拒绝缺失 channel binding 的账号，避免无法 activate 的账号进入持久存储。 |
 | 凭据 readiness 诊断 | 已实现 | OpenCode account 公开响应现在提供脱敏的 `credential_integrity`、`activation_ready` 与 `missing_activation_fields` 信号，让操作者能区分账号材料缺失与密文解密失败，而不看到任何原始 secret。 |
 | 前端账号窗口 | 已实现 | 已增加 Root-only 管理路由、侧边栏入口、账号列表、已启用 channel 选择器与数字 ID fallback、远端截图控制、extract、quota refresh、activate、stop、delete 操作。 |
@@ -739,6 +744,8 @@ quota 解析也已经收紧。当 key 同时表达 used、usage 或 consumed 时
 
 提取流程现在会在浏览器只给出部分候选时保留已有持久账号材料。真实授权页可能先暴露 cookie/quota，稍后才暴露 API key/workspace，或者因为导航时机不同只暴露部分字段。controller 现在会把非空提取字段合并到既有解密 secret 集合并重新加密保存，而不是把缺失候选当作显式删除。
 
+quota 持久化现在遵循同样的 partial-extract 规则。浏览器提取结果如果只包含 cookie、workspace 或 API-key 材料，不应该擦掉上一份已知 quota snapshot。controller 现在只有在存在 quota 证据时才更新 `quota_raw`、`quota_limit` 与 `quota_used`，并且把三个字段作为同一次观测整体更新。这样可以避免授权页导航先暴露凭据、稍后才暴露 quota 时造成 UI 容量展示抖动。
+
 Channel binding 现在会在 OpenCode account 持久化前校验。前端也复用现有 channel list API，将已启用 channel 展示为可选项，同时保留数字 ID fallback。这样可以提升快速切换账号时的操作确定性，同时不放松后端“不保存无法 activate 的账号”的不变量。
 
 凭据 readiness 现在是明确的 API 契约。先前公开响应只有 `has_*` 标志；如果 `CRYPTO_SECRET` 配错或轮换，密文字段仍然“存在”，但实际已无法解密，操作者要到 activate 阶段才会看到失败。现在账号响应会区分密文存在、凭据完整性和是否可激活。前端因此可以显示脱敏的 credential error 状态，并在明显无法成功时禁用 activate。代价是响应 schema 小幅扩展，但只暴露字段名与布尔状态，不暴露原始 secret、cookie、workspace ID、账号邮箱、OAuth payload 或本地部署路径。
@@ -759,6 +766,7 @@ go test ./model -run TestCreateOpenCodeAccount -count=1
 go test ./model ./controller ./service -run 'TestCreateOpenCodeAccount|TestOpenCodeAccountPublicViewReportsCredentialDecryptFailure|TestOpenCodeAccountResponseDoesNotExposeSecrets|TestMergeExtractedOpenCodeSecretsPreservesExistingFields|TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState|TestActivateOpenCodeAccount|TestObserveChannelAffinityUsageCacheByRelayFormat_MixedMode' -count=1
 go test ./controller -run TestOpenCodeAccountResponseDoesNotExposeSecrets -count=1
 go test ./controller -run 'TestOpenCodeAccountResponseDoesNotExposeSecrets|TestMergeExtractedOpenCodeSecretsPreservesExistingFields' -count=1
+go test ./controller -run "TestApplyExtractedOpenCodeAccount|TestMergeExtractedOpenCodeSecrets" -count=1
 go test ./router -run TestOpenCodeAccountRoutesRegisterExpectedPaths -count=1
 go test ./service -run 'TestExtractOpenCodeSecretsFromBrowserState|TestActivateOpenCodeAccount' -count=1
 go test ./service -run "TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState" -count=20

@@ -48,6 +48,23 @@ func TestSanitizeOpenCodeLoginSessionStatusKeepsNonHTTPBrowserURL(t *testing.T) 
 	assert.Equal(t, "about:blank", status.URL)
 }
 
+func TestFindOpenCodeAuthSidecarPathSearchesExecutableDirectory(t *testing.T) {
+	tempDir := t.TempDir()
+	workingDir := filepath.Join(tempDir, "runtime")
+	executableDir := filepath.Join(tempDir, "artifact", "bin")
+	scriptDir := filepath.Join(tempDir, "artifact", "scripts")
+	scriptPath := filepath.Join(scriptDir, "opencode-auth-session.mjs")
+	require.NoError(t, os.MkdirAll(workingDir, 0o755))
+	require.NoError(t, os.MkdirAll(executableDir, 0o755))
+	require.NoError(t, os.MkdirAll(scriptDir, 0o755))
+	require.NoError(t, os.WriteFile(scriptPath, []byte(""), 0o644))
+
+	resolved, err := findOpenCodeAuthSidecarPath([]string{workingDir, executableDir})
+	require.NoError(t, err)
+
+	assert.Equal(t, scriptPath, resolved)
+}
+
 func TestOpenCodeAuthSidecarStatusTreatsMissingStateAsStopped(t *testing.T) {
 	if _, err := exec.LookPath("node"); err != nil {
 		t.Skip("node is required for opencode auth sidecar tests")

@@ -200,14 +200,44 @@ func openCodeAuthStateDir() (string, error) {
 }
 
 func openCodeAuthSidecarPath() (string, error) {
-	dir, err := os.Getwd()
-	if err != nil {
-		return "", err
+	startDirs := make([]string, 0, 2)
+	if dir, err := os.Getwd(); err == nil {
+		startDirs = append(startDirs, dir)
 	}
+	if executable, err := os.Executable(); err == nil {
+		startDirs = append(startDirs, filepath.Dir(executable))
+	}
+	return findOpenCodeAuthSidecarPath(startDirs)
+}
+
+func findOpenCodeAuthSidecarPath(startDirs []string) (string, error) {
+	seen := make(map[string]bool, len(startDirs))
+	for _, dir := range startDirs {
+		dir = strings.TrimSpace(dir)
+		if dir == "" {
+			continue
+		}
+		absDir, err := filepath.Abs(dir)
+		if err != nil {
+			continue
+		}
+		clean := filepath.Clean(absDir)
+		if seen[clean] {
+			continue
+		}
+		seen[clean] = true
+		if path, ok := findOpenCodeAuthSidecarPathAbove(clean); ok {
+			return path, nil
+		}
+	}
+	return "", errors.New("scripts/opencode-auth-session.mjs not found")
+}
+
+func findOpenCodeAuthSidecarPathAbove(dir string) (string, bool) {
 	for {
 		candidate := filepath.Join(dir, "scripts", "opencode-auth-session.mjs")
 		if _, err := os.Stat(candidate); err == nil {
-			return candidate, nil
+			return candidate, true
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
@@ -215,7 +245,7 @@ func openCodeAuthSidecarPath() (string, error) {
 		}
 		dir = parent
 	}
-	return "", errors.New("scripts/opencode-auth-session.mjs not found")
+	return "", false
 }
 
 func openCodeAuthContext(parent context.Context) (context.Context, context.CancelFunc) {

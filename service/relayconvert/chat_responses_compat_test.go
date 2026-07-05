@@ -445,6 +445,26 @@ func TestChatCompletionsResponseToResponsesPreservesTextToolCallsAndUsage(t *tes
 	assert.Equal(t, `"{\"q\":\"x\"}"`, string(resp.Output[1].Arguments))
 }
 
+func TestUsageFromChatUsagePreservesCachedTokensForBothAccountingPaths(t *testing.T) {
+	usage := UsageFromChatUsage(&dto.Usage{
+		PromptTokens:     100,
+		CompletionTokens: 7,
+		TotalTokens:      107,
+		PromptTokensDetails: dto.InputTokenDetails{
+			CachedTokens:         96,
+			CachedCreationTokens: 3,
+			TextTokens:           4,
+		},
+	})
+
+	require.NotNil(t, usage)
+	assert.Equal(t, 96, usage.PromptTokensDetails.CachedTokens)
+	assert.Equal(t, 3, usage.PromptTokensDetails.CachedCreationTokens)
+	assert.Equal(t, 4, usage.PromptTokensDetails.TextTokens)
+	require.NotNil(t, usage.InputTokensDetails)
+	assert.Equal(t, usage.PromptTokensDetails, *usage.InputTokensDetails)
+}
+
 func TestChatCompletionsResponseToResponsesMapsIncompleteFinishReasons(t *testing.T) {
 	tests := []struct {
 		name         string

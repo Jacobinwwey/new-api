@@ -240,24 +240,72 @@ End-to-end verification:
 | Authorization URL validation | Done | Public redirect chain validated. |
 | Fork `main` inspection | Done | Current extension points and gaps identified. |
 | Privacy boundary | Done | This document contains no secrets or deployment-specific account material. |
-| Cache accounting parity in fork | Not started | Remote-validated behavior still needs to be landed here. |
-| OpenCode account model | Not started | Requires encrypted secret fields. |
-| Reversible encryption helper | Not started | Must use stable `CRYPTO_SECRET`. |
-| Remote browser sidecar | Not started | Recommended CDP + Xvfb first. |
-| Frontend account window | Not started | Should be Root-only and admin-focused. |
-| Activation into existing channels | Not started | Must update channel and refresh runtime cache safely. |
+| Cache accounting parity in fork | Implemented | `UsageFromChatUsage` now preserves cached-token details in both Chat-style and Responses-style accounting fields. |
+| OpenCode account model | Implemented | Added `opencode_accounts` model, migration registration, validation, encrypted secret storage, and masked public view. |
+| Reversible encryption helper | Implemented | Added AES-GCM `EncryptSecret` / `DecryptSecret` using `CRYPTO_SECRET`-derived key and versioned ciphertext. |
+| Root-only OpenCode account API | Implemented | Added CRUD, login-session, extract, quota refresh, and activate routes under `/api/opencode/accounts`. |
+| Remote browser sidecar | Implemented, unvalidated against production browser host | Added Node CDP + Xvfb sidecar with start/status/screenshot/click/key/extract/stop actions. Syntax is validated; real remote browser smoke test is still required. |
+| Extractor | Implemented | Candidate-based scanner covers OpenCode-domain cookies, local/session storage, and JSON responses; tests cover ranking and empty-state rejection. |
+| Frontend account window | Implemented | Added Root-only admin route, sidebar entry, account list, remote screenshot controls, extract, quota refresh, activate, stop, and delete actions. |
+| Activation into existing channels | Implemented | Activation decrypts the selected account API key, updates the bound channel inside a transaction, marks the account active, and refreshes channel cache after commit. |
+| Real OpenCode login E2E | Pending | Requires an operator-controlled OpenCode subscription account. The repository contains no real account material. |
+| Real `glm-5.2` cache-hit E2E | Pending | Should run only after a real OpenCode account has been imported and activated through New API. |
+
+### Architecture Progress Update
+
+The implementation now follows the planned native New API connector shape:
+
+```text
+Admin Web
+  -> /opencode-accounts route
+  -> Root-only /api/opencode/accounts API
+  -> OpenCode account service and model
+  -> encrypted durable account fields
+  -> CDP sidecar for isolated remote authorization
+  -> extractor
+  -> atomic channel activation
+  -> existing relay and cache accounting pipeline
+```
+
+The most important architectural decision that survived implementation is ownership: browser process state stays in the sidecar/session layer, durable account metadata stays in `model.OpenCodeAccount`, and channel mutation happens only through the activation service. That keeps callers from manually stitching together partial steps such as "extract, decrypt, update channel, refresh cache"; the service owns the complete operation.
+
+The deliberate tradeoff is that the first browser bridge uses CDP screenshot/click/key primitives rather than noVNC. This is smaller, easier to permission-gate, and enough for OAuth authorization, but it is less comfortable than a full remote desktop if OpenCode or Google introduces complex browser UI. The fallback direction remains noVNC or Playwright-backed streaming only if CDP interaction becomes insufficient in real E2E.
+
+The biggest deployment pitfall is `CRYPTO_SECRET`: durable imported credentials require a stable value. If an operator runs with an auto-generated or rotated secret, stored OpenCode account material will fail closed on decrypt and must be re-imported.
+
+### Verification Update
+
+Validated successfully:
+
+```text
+go test ./common ./service/relayconvert -count=1
+go test ./model -run TestCreateOpenCodeAccount -count=1
+go test ./controller -run TestOpenCodeAccountResponseDoesNotExposeSecrets -count=1
+go test ./router -run TestOpenCodeAccountRoutesRegisterExpectedPaths -count=1
+go test ./service -run 'TestExtractOpenCodeSecretsFromBrowserState|TestActivateOpenCodeAccount' -count=1
+go test ./service -run TestObserveChannelAffinityUsageCacheByRelayFormat_MixedMode -count=1
+bun run typecheck
+bunx oxlint -c .oxlintrc.json src/features/opencode-accounts src/routes/_authenticated/opencode-accounts src/hooks/use-sidebar-data.ts src/hooks/use-sidebar-config.ts
+bun run build in web/default
+node --check scripts/opencode-auth-session.mjs
+```
+
+Known verification limits:
+
+- Full frontend lint currently fails on pre-existing files outside this change set. The OpenCode-related frontend paths pass targeted lint.
+- `go test ./common ./model ./service ./controller ./router ./service/relayconvert -count=1` currently exposes pre-existing SQLite test setup failures such as missing `users`, `tasks`, and `system_tasks` tables in unrelated tests. The OpenCode-specific backend tests pass.
+- `go build .` requires both embedded frontend builds. `web/default` builds, but `web/classic` currently fails because its dependency chain imports `date-fns` private subpaths through `date-fns-tz`; this blocks producing the embedded Go binary locally and is unrelated to the OpenCode connector.
+- Real OpenCode Google login, account extraction, channel activation against a live subscription account, and repeated `glm-5.2` cache-hit measurement still require operator-controlled credentials and must not be committed to the repository.
 
 ### Immediate Next Steps
 
-1. Land cache accounting parity tests and fixes first.
-2. Add reversible secret encryption with tests.
-3. Add `opencode_accounts` model and migration.
-4. Add Root-only account CRUD and masked responses.
-5. Add CDP sidecar/session service.
-6. Add extractor and fixture tests.
-7. Add frontend account window.
-8. Add activation path into existing channel management.
-9. Run real `glm-5.2` cache-hit validation only after the connector is wired end to end.
+1. Deploy the branch to the remote New API host with a stable `CRYPTO_SECRET`.
+2. Ensure Chromium, Xvfb, and Node are available to the New API process, or set `CHROMIUM_BIN` explicitly.
+3. Import one non-production OpenCode subscription account through `/opencode-accounts`.
+4. Activate the bound New API channel and confirm channel cache refresh.
+5. Run repeated `glm-5.2` requests through New API, then compare prompt cached-token accounting before and after warm cache.
+6. If CDP screenshot interaction proves insufficient for Google authorization, add a noVNC fallback without changing the account model or activation contract.
+7. Separately fix the existing `web/classic` dependency incompatibility so full embedded `go build .` can be restored.
 
 ## 中文
 
@@ -499,21 +547,69 @@ web/default/src/routes/_authenticated/opencode-accounts/index.tsx
 | 授权 URL 验证 | 已完成 | 已验证公开跳转链路。 |
 | fork `main` 勘察 | 已完成 | 已识别当前扩展点与缺口。 |
 | 隐私边界 | 已完成 | 本文档不包含 secret 或部署特定账号材料。 |
-| fork 内 cache accounting parity | 未开始 | 远端已验证行为仍需合入本仓库。 |
-| OpenCode account model | 未开始 | 需要加密 secret 字段。 |
-| 可逆加密 helper | 未开始 | 必须使用稳定 `CRYPTO_SECRET`。 |
-| 远端浏览器 sidecar | 未开始 | 建议先用 CDP + Xvfb。 |
-| 前端账号窗口 | 未开始 | 应为 Root-only 管理界面。 |
-| 激活到现有渠道 | 未开始 | 必须安全更新 channel 并刷新 runtime cache。 |
+| fork 内 cache accounting parity | 已实现 | `UsageFromChatUsage` 现在同时保留 Chat 风格与 Responses 风格计费字段中的 cached-token details。 |
+| OpenCode account model | 已实现 | 已增加 `opencode_accounts` model、迁移注册、校验、加密 secret 存储与 masked public view。 |
+| 可逆加密 helper | 已实现 | 已增加 AES-GCM `EncryptSecret` / `DecryptSecret`，使用 `CRYPTO_SECRET` 派生 key，密文带版本前缀。 |
+| Root-only OpenCode account API | 已实现 | `/api/opencode/accounts` 下已包含 CRUD、登录会话、提取、quota refresh 与 activate 路由。 |
+| 远端浏览器 sidecar | 已实现，尚未在生产浏览器主机实测 | 已增加 Node CDP + Xvfb sidecar，支持 start/status/screenshot/click/key/extract/stop。语法已验证，仍需要真实远端浏览器 smoke test。 |
+| Extractor | 已实现 | 候选扫描覆盖 OpenCode 域 cookie、local/session storage 与 JSON responses；测试覆盖排序和空状态拒绝。 |
+| 前端账号窗口 | 已实现 | 已增加 Root-only 管理路由、侧边栏入口、账号列表、远端截图控制、extract、quota refresh、activate、stop、delete 操作。 |
+| 激活到现有渠道 | 已实现 | 激活时解密选中账号 API key，在事务内更新绑定 channel，标记账号 active，并在 commit 后刷新 channel cache。 |
+| 真实 OpenCode 登录 E2E | 待执行 | 需要操作者控制的 OpenCode 订阅账号；仓库不包含真实账号材料。 |
+| 真实 `glm-5.2` cache-hit E2E | 待执行 | 只能在真实 OpenCode 账号经 New API 导入并激活后执行。 |
+
+### 架构推进更新
+
+当前实现已经落到计划中的 New API 原生连接器形态：
+
+```text
+Admin Web
+  -> /opencode-accounts route
+  -> Root-only /api/opencode/accounts API
+  -> OpenCode account service and model
+  -> encrypted durable account fields
+  -> CDP sidecar for isolated remote authorization
+  -> extractor
+  -> atomic channel activation
+  -> existing relay and cache accounting pipeline
+```
+
+实现中最关键且仍然成立的架构选择是职责归属：浏览器进程状态留在 sidecar/session 层，持久账号元数据留在 `model.OpenCodeAccount`，channel 变更只通过 activation service 完成。调用方不需要也不应该手工拼接“提取、解密、更新 channel、刷新 cache”这些半步操作；完整操作由 service 拥有。
+
+当前取舍是先用 CDP screenshot/click/key primitives，而不是 noVNC。它的暴露面更小、权限边界更容易收束，对 OAuth 授权通常足够；代价是如果 OpenCode 或 Google 登录页出现复杂交互，操作体验不如完整远端桌面。更稳妥的升级路径是在真实 E2E 证明 CDP 不足时再加 noVNC 或 Playwright streaming 兜底，不改变账号模型和激活契约。
+
+最大部署坑点是 `CRYPTO_SECRET`：导入的持久凭证要求该值稳定。如果运行时使用自动生成或轮换的 secret，已存 OpenCode 账号材料会解密失败并 fail closed，需要重新导入。
+
+### 验证更新
+
+已成功验证：
+
+```text
+go test ./common ./service/relayconvert -count=1
+go test ./model -run TestCreateOpenCodeAccount -count=1
+go test ./controller -run TestOpenCodeAccountResponseDoesNotExposeSecrets -count=1
+go test ./router -run TestOpenCodeAccountRoutesRegisterExpectedPaths -count=1
+go test ./service -run 'TestExtractOpenCodeSecretsFromBrowserState|TestActivateOpenCodeAccount' -count=1
+go test ./service -run TestObserveChannelAffinityUsageCacheByRelayFormat_MixedMode -count=1
+bun run typecheck
+bunx oxlint -c .oxlintrc.json src/features/opencode-accounts src/routes/_authenticated/opencode-accounts src/hooks/use-sidebar-data.ts src/hooks/use-sidebar-config.ts
+web/default 下 bun run build
+node --check scripts/opencode-auth-session.mjs
+```
+
+已知验证边界：
+
+- 全量前端 lint 目前失败在本次变更外的既有文件；OpenCode 相关前端路径的定向 lint 已通过。
+- `go test ./common ./model ./service ./controller ./router ./service/relayconvert -count=1` 当前暴露既有 SQLite 测试初始化问题，典型错误是无关测试缺少 `users`、`tasks`、`system_tasks` 表；本次 OpenCode 后端相关测试已通过。
+- `go build .` 需要两个被 embed 的前端产物。`web/default` 可构建，但 `web/classic` 当前因为依赖链通过 `date-fns-tz` 引用了 `date-fns` 私有 subpath 而失败；这阻断本地 embedded Go binary 构建，和 OpenCode 连接器本身无关。
+- 真实 OpenCode Google 登录、账号提取、订阅账号 channel 激活，以及多轮 `glm-5.2` cache-hit 统计验证仍需要操作者控制的真实凭证，不能写入仓库。
 
 ### 下一步
 
-1. 先合入 cache accounting parity 测试与修复。
-2. 增加可逆 secret 加密与测试。
-3. 增加 `opencode_accounts` model 与迁移。
-4. 增加 Root-only 账号 CRUD 和 masked response。
-5. 增加 CDP sidecar/session service。
-6. 增加 extractor 与 fixture 测试。
-7. 增加前端账号窗口。
-8. 增加激活到现有 channel management 的路径。
-9. 只有在连接器端到端打通后，再做真实 `glm-5.2` cache-hit 验证。
+1. 将分支部署到远端 New API 主机，并确认使用稳定 `CRYPTO_SECRET`。
+2. 确认 New API 进程可访问 Chromium、Xvfb、Node；必要时显式设置 `CHROMIUM_BIN`。
+3. 通过 `/opencode-accounts` 导入一个非生产 OpenCode 订阅账号。
+4. 激活绑定的 New API channel，并确认 channel cache refresh。
+5. 通过 New API 多轮调用 `glm-5.2`，比较 warm cache 前后的 prompt cached-token accounting。
+6. 如果 CDP 截图交互不足以完成 Google 授权，再加 noVNC 兜底，但不改变账号模型和 activation contract。
+7. 单独修复既有 `web/classic` 依赖不兼容问题，恢复完整 embedded `go build .`。

@@ -244,7 +244,7 @@ End-to-end verification:
 | OpenCode account model | Implemented | Added `opencode_accounts` model, migration registration, validation, encrypted secret storage, and masked public view. |
 | Reversible encryption helper | Implemented | Added AES-GCM `EncryptSecret` / `DecryptSecret` using `CRYPTO_SECRET`-derived key and versioned ciphertext. |
 | Root-only OpenCode account API | Implemented | Added CRUD, login-session, extract, quota refresh, and activate routes under `/api/opencode/accounts`. |
-| Remote browser sidecar | Implemented, unvalidated against production browser host | Added Node CDP + Xvfb sidecar with start/status/screenshot/click/key/extract/stop actions. Syntax is validated; real remote browser smoke test is still required. |
+| Remote browser sidecar | Implemented and smoke-tested on the remote host without credentials | Added Node CDP + Xvfb sidecar with start/status/screenshot/click/key/extract/stop actions. Remote smoke tests covered `about:blank` and the official OpenCode authorization entrypoint without logging in. |
 | Extractor | Implemented | Candidate-based scanner covers OpenCode-domain cookies, local/session storage, and JSON responses; tests cover ranking and empty-state rejection. |
 | Frontend account window | Implemented | Added Root-only admin route, sidebar entry, account list, remote screenshot controls, extract, quota refresh, activate, stop, and delete actions. |
 | Activation into existing channels | Implemented | Activation decrypts the selected account API key, updates the bound channel inside a transaction, marks the account active, and refreshes channel cache after commit. |
@@ -287,14 +287,32 @@ go test ./service -run TestObserveChannelAffinityUsageCacheByRelayFormat_MixedMo
 bun run typecheck
 bunx oxlint -c .oxlintrc.json src/features/opencode-accounts src/routes/_authenticated/opencode-accounts src/hooks/use-sidebar-data.ts src/hooks/use-sidebar-config.ts
 bun run build in web/default
+bun run build in web/classic
+go build .
 node --check scripts/opencode-auth-session.mjs
 ```
+
+Additional remote smoke validation:
+
+```text
+Remote host dependency check:
+  node v24.15.0
+  chromium available
+  Xvfb available
+  dbus-daemon available
+  git and bun available
+
+Sidecar smoke:
+  start/status/screenshot/extract/stop on about:blank
+  start/status/screenshot/stop on https://opencode.ai/auth
+```
+
+The `web/classic` build failure was traced to `date-fns-tz@1.3.8` resolving its peer `date-fns` to the workspace-level `date-fns@4`. That package version blocks private subpath imports such as `date-fns/_lib/cloneObject/index.js`. The fix keeps `web/default` on `date-fns@4` and adds a classic-only Rsbuild alias so Semi UI's `date-fns-tz` resolves to Semi's nested `date-fns@2.30.0`.
 
 Known verification limits:
 
 - Full frontend lint currently fails on pre-existing files outside this change set. The OpenCode-related frontend paths pass targeted lint.
 - `go test ./common ./model ./service ./controller ./router ./service/relayconvert -count=1` currently exposes pre-existing SQLite test setup failures such as missing `users`, `tasks`, and `system_tasks` tables in unrelated tests. The OpenCode-specific backend tests pass.
-- `go build .` requires both embedded frontend builds. `web/default` builds, but `web/classic` currently fails because its dependency chain imports `date-fns` private subpaths through `date-fns-tz`; this blocks producing the embedded Go binary locally and is unrelated to the OpenCode connector.
 - Real OpenCode Google login, account extraction, channel activation against a live subscription account, and repeated `glm-5.2` cache-hit measurement still require operator-controlled credentials and must not be committed to the repository.
 
 ### Immediate Next Steps
@@ -305,7 +323,6 @@ Known verification limits:
 4. Activate the bound New API channel and confirm channel cache refresh.
 5. Run repeated `glm-5.2` requests through New API, then compare prompt cached-token accounting before and after warm cache.
 6. If CDP screenshot interaction proves insufficient for Google authorization, add a noVNC fallback without changing the account model or activation contract.
-7. Separately fix the existing `web/classic` dependency incompatibility so full embedded `go build .` can be restored.
 
 ## 中文
 
@@ -551,7 +568,7 @@ web/default/src/routes/_authenticated/opencode-accounts/index.tsx
 | OpenCode account model | 已实现 | 已增加 `opencode_accounts` model、迁移注册、校验、加密 secret 存储与 masked public view。 |
 | 可逆加密 helper | 已实现 | 已增加 AES-GCM `EncryptSecret` / `DecryptSecret`，使用 `CRYPTO_SECRET` 派生 key，密文带版本前缀。 |
 | Root-only OpenCode account API | 已实现 | `/api/opencode/accounts` 下已包含 CRUD、登录会话、提取、quota refresh 与 activate 路由。 |
-| 远端浏览器 sidecar | 已实现，尚未在生产浏览器主机实测 | 已增加 Node CDP + Xvfb sidecar，支持 start/status/screenshot/click/key/extract/stop。语法已验证，仍需要真实远端浏览器 smoke test。 |
+| 远端浏览器 sidecar | 已实现，并已在远端主机完成无凭证 smoke test | 已增加 Node CDP + Xvfb sidecar，支持 start/status/screenshot/click/key/extract/stop。远端 smoke 覆盖 `about:blank` 与官方 OpenCode 授权入口，未登录、未使用任何账号材料。 |
 | Extractor | 已实现 | 候选扫描覆盖 OpenCode 域 cookie、local/session storage 与 JSON responses；测试覆盖排序和空状态拒绝。 |
 | 前端账号窗口 | 已实现 | 已增加 Root-only 管理路由、侧边栏入口、账号列表、远端截图控制、extract、quota refresh、activate、stop、delete 操作。 |
 | 激活到现有渠道 | 已实现 | 激活时解密选中账号 API key，在事务内更新绑定 channel，标记账号 active，并在 commit 后刷新 channel cache。 |
@@ -594,14 +611,32 @@ go test ./service -run TestObserveChannelAffinityUsageCacheByRelayFormat_MixedMo
 bun run typecheck
 bunx oxlint -c .oxlintrc.json src/features/opencode-accounts src/routes/_authenticated/opencode-accounts src/hooks/use-sidebar-data.ts src/hooks/use-sidebar-config.ts
 web/default 下 bun run build
+web/classic 下 bun run build
+go build .
 node --check scripts/opencode-auth-session.mjs
 ```
+
+额外远端 smoke 验证：
+
+```text
+远端依赖检查：
+  node v24.15.0
+  chromium 可用
+  Xvfb 可用
+  dbus-daemon 可用
+  git 与 bun 可用
+
+Sidecar smoke：
+  about:blank 上完成 start/status/screenshot/extract/stop
+  https://opencode.ai/auth 上完成 start/status/screenshot/stop
+```
+
+`web/classic` 构建失败的根因已经定位为 `date-fns-tz@1.3.8` 将 peer `date-fns` 解析到了 workspace 顶层的 `date-fns@4`。该版本通过 package exports 阻断 `date-fns/_lib/cloneObject/index.js` 等 private subpath。修复方式是保持 `web/default` 使用 `date-fns@4`，只在 classic 的 Rsbuild 配置中增加局部 alias，让 Semi UI 的 `date-fns-tz` 解析到 Semi 自带的 `date-fns@2.30.0`。
 
 已知验证边界：
 
 - 全量前端 lint 目前失败在本次变更外的既有文件；OpenCode 相关前端路径的定向 lint 已通过。
 - `go test ./common ./model ./service ./controller ./router ./service/relayconvert -count=1` 当前暴露既有 SQLite 测试初始化问题，典型错误是无关测试缺少 `users`、`tasks`、`system_tasks` 表；本次 OpenCode 后端相关测试已通过。
-- `go build .` 需要两个被 embed 的前端产物。`web/default` 可构建，但 `web/classic` 当前因为依赖链通过 `date-fns-tz` 引用了 `date-fns` 私有 subpath 而失败；这阻断本地 embedded Go binary 构建，和 OpenCode 连接器本身无关。
 - 真实 OpenCode Google 登录、账号提取、订阅账号 channel 激活，以及多轮 `glm-5.2` cache-hit 统计验证仍需要操作者控制的真实凭证，不能写入仓库。
 
 ### 下一步
@@ -612,4 +647,3 @@ node --check scripts/opencode-auth-session.mjs
 4. 激活绑定的 New API channel，并确认 channel cache refresh。
 5. 通过 New API 多轮调用 `glm-5.2`，比较 warm cache 前后的 prompt cached-token accounting。
 6. 如果 CDP 截图交互不足以完成 Google 授权，再加 noVNC 兜底，但不改变账号模型和 activation contract。
-7. 单独修复既有 `web/classic` 依赖不兼容问题，恢复完整 embedded `go build .`。

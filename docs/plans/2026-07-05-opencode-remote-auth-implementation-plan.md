@@ -260,7 +260,7 @@ End-to-end verification:
 | Frontend account window | Implemented | Added Root-only admin route, sidebar entry, account list, enabled-channel selector with numeric ID fallback, remote screenshot controls, extract, quota refresh, activate, stop, and delete actions. |
 | Activation into existing channels | Implemented | Activation decrypts the selected account API key, updates the bound channel inside a transaction, marks the account active, and refreshes channel cache after commit. |
 | Remote clean artifact deployment | Done | Built pushed `main` from an isolated clean checkout, produced self-contained binary-plus-sidecar artifacts, switched the remote service to those artifacts, preserved the existing runtime data path, and verified the service is active. |
-| Latest remote rollout | Done | Pushed `main` commit `5916ce47` is now deployed on the remote service. HTTP smoke returns 200, empty-state sidecar status returns successful `stopped`, remote Node sidecar tests pass, OpenCode readiness diagnostics targeted Go tests pass, and the official OpenCode authorization page lifecycle smoke passed without credentials. |
+| Latest remote rollout | Done | Pushed `main` commit `c734a4d0` is now deployed on the remote service. HTTP smoke returns 200, empty-state sidecar status returns successful `stopped`, remote Node sidecar tests pass, OpenCode extractor targeted Go tests pass, and the official OpenCode authorization page start/screenshot/extract/stop smoke passed without credentials. |
 | Real OpenCode login E2E | Pending | Requires an operator-controlled OpenCode subscription account. The repository contains no real account material. |
 | Real `glm-5.2` cache-hit E2E | Pending | Should run only after a real OpenCode account has been imported and activated through New API. |
 
@@ -382,6 +382,9 @@ Remote clean artifact rollout:
   empty-state sidecar status returned successful stopped
   official OpenCode auth page lifecycle smoke passed without credentials and left no browser residue for the smoke session
   remote Node sidecar tests and OpenCode readiness targeted Go tests passed
+  latest JSON probe extractor artifact deployed on the remote service
+  remote Node sidecar tests and OpenCode extractor targeted Go tests passed
+  official OpenCode auth page start/screenshot/extract/stop smoke passed without credentials and left no browser residue for the smoke session
 ```
 
 The `web/classic` build failure was traced to `date-fns-tz@1.3.8` resolving its peer `date-fns` to the workspace-level `date-fns@4`. That package version blocks private subpath imports such as `date-fns/_lib/cloneObject/index.js`. The fix keeps `web/default` on `date-fns@4` and adds a classic-only Rsbuild alias so Semi UI's `date-fns-tz` resolves to Semi's nested `date-fns@2.30.0`.
@@ -661,7 +664,7 @@ web/default/src/routes/_authenticated/opencode-accounts/index.tsx
 | 前端账号窗口 | 已实现 | 已增加 Root-only 管理路由、侧边栏入口、账号列表、已启用 channel 选择器与数字 ID fallback、远端截图控制、extract、quota refresh、activate、stop、delete 操作。 |
 | 激活到现有渠道 | 已实现 | 激活时解密选中账号 API key，在事务内更新绑定 channel，标记账号 active，并在 commit 后刷新 channel cache。 |
 | 远端 clean artifact 部署 | 已完成 | 已从隔离的干净 checkout 构建已推送的 `main`，生成包含二进制与 sidecar 的 artifact，远端服务已切换到这些 artifact，并显式保留既有运行时数据路径，服务状态已验证为 active。 |
-| 最新远端上线 | 已完成 | 已推送的 `main` 提交 `5916ce47` 现在已部署到远端服务。HTTP smoke 返回 200，空 state 的 sidecar status 返回成功的 `stopped`，远端 Node sidecar 测试通过，OpenCode readiness 相关 Go 定向测试通过，官方 OpenCode 授权页无凭证 lifecycle smoke 通过。 |
+| 最新远端上线 | 已完成 | 已推送的 `main` 提交 `c734a4d0` 现在已部署到远端服务。HTTP smoke 返回 200，空 state 的 sidecar status 返回成功的 `stopped`，远端 Node sidecar 测试通过，OpenCode extractor 相关 Go 定向测试通过，官方 OpenCode 授权页无凭证 start/screenshot/extract/stop smoke 通过。 |
 | 真实 OpenCode 登录 E2E | 待执行 | 需要操作者控制的 OpenCode 订阅账号；仓库不包含真实账号材料。 |
 | 真实 `glm-5.2` cache-hit E2E | 待执行 | 只能在真实 OpenCode 账号经 New API 导入并激活后执行。 |
 
@@ -783,6 +786,9 @@ Sidecar smoke：
   空 state 的 sidecar status 返回 successful stopped
   官方 OpenCode 授权页无凭证 lifecycle smoke 通过，且 stop 后无该 smoke session 对应的浏览器残留进程
   远端 Node sidecar 测试与 OpenCode readiness 相关 Go 定向测试通过
+  最新 JSON probe extractor artifact 已部署到远端服务
+  远端 Node sidecar 测试与 OpenCode extractor 相关 Go 定向测试通过
+  官方 OpenCode 授权页无凭证 start/screenshot/extract/stop smoke 通过，且 stop 后无该 smoke session 对应的浏览器残留进程
 ```
 
 `web/classic` 构建失败的根因已经定位为 `date-fns-tz@1.3.8` 将 peer `date-fns` 解析到了 workspace 顶层的 `date-fns@4`。该版本通过 package exports 阻断 `date-fns/_lib/cloneObject/index.js` 等 private subpath。修复方式是保持 `web/default` 使用 `date-fns@4`，只在 classic 的 Rsbuild 配置中增加局部 alias，让 Semi UI 的 `date-fns-tz` 解析到 Semi 自带的 `date-fns@2.30.0`。

@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
 import vm from "node:vm";
 
 import {
   buildOpenCodeBrowserStateExpression,
+  isDirectScriptExecution,
   retryTransientBrowserAction,
   shouldProbeOpenCodeResourceURL,
 } from "./opencode-auth-session.mjs";
@@ -105,4 +107,15 @@ test("buildOpenCodeBrowserStateExpression collects same-site JSON responses", as
   assert.deepEqual(fetched, ["https://opencode.ai/api/account/quota"]);
   assert.equal(result.localStorage.account, "{\"email\":\"operator@example.test\"}");
   assert.deepEqual(Array.from(result.jsonResponses), ["{\"quota\":{\"limit\":100,\"used\":1}}"]);
+});
+
+test("isDirectScriptExecution accepts symlinked argv script paths", () => {
+  const realScript = "/tmp/new-api-release/scripts/opencode-auth-session.mjs";
+  const symlinkScript = "/tmp/new-api-current/scripts/opencode-auth-session.mjs";
+  const resolvePath = (candidate) => (candidate === symlinkScript ? realScript : candidate);
+
+  assert.equal(
+    isDirectScriptExecution(pathToFileURL(realScript).href, symlinkScript, resolvePath),
+    true,
+  );
 });

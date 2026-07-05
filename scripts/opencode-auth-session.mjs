@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import fs from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import http from "node:http";
 import net from "node:net";
 import os from "node:os";
@@ -160,6 +160,15 @@ export function buildOpenCodeBrowserStateExpression() {
       jsonResponses,
     };
   }.toString().replace("SHOULD_PROBE_SOURCE", shouldProbeOpenCodeResourceURL.toString())})(${MAX_JSON_RESPONSE_COUNT}, ${MAX_JSON_RESPONSE_CHARS})`;
+}
+
+export function isDirectScriptExecution(moduleURL, argvScriptPath, resolvePath = realpathSync) {
+  if (!argvScriptPath) return false;
+  try {
+    return moduleURL === pathToFileURL(resolvePath(argvScriptPath)).href;
+  } catch {
+    return moduleURL === pathToFileURL(argvScriptPath).href;
+  }
 }
 
 async function waitForProcessExit(pid, timeoutMs) {
@@ -535,6 +544,6 @@ async function main() {
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isDirectScriptExecution(import.meta.url, process.argv[1])) {
   main();
 }

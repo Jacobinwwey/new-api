@@ -253,6 +253,7 @@ End-to-end verification:
 | Stale browser state handling | Implemented | `login/start` now reuses an existing browser only when the recorded PID is alive and the CDP endpoint is reachable; stale PID/state combinations fall through to a fresh browser startup. |
 | Stop lifecycle cleanup | Implemented | `login/stop` now waits for recorded browser/Xvfb processes to exit after SIGTERM and falls back to a force kill, reducing stale browser process leakage before returning `stopped`. |
 | Screenshot transient retry | Implemented | `login/screenshot` now retries transient browser/CDP screenshot failures for this read-only action, matching the remote smoke finding where an immediate retry succeeded after one screenshot failure. |
+| Sidecar symlinked artifact entrypoint | Implemented and locally verified | The sidecar CLI now resolves `process.argv[1]` through realpath before comparing it with `import.meta.url`, so executing the script through the `new-api-current` symlink still runs `main()`. This closes a deployment-only false-smoke risk where direct release paths worked but symlinked artifact paths produced no output. |
 | Extractor | Implemented | Candidate-based scanner covers OpenCode-domain cookies, local/session storage, and JSON responses; tests cover ranking and empty-state rejection. |
 | Partial extract merge safety | Implemented | `login/extract` now merges non-empty extracted fields into existing encrypted account material instead of overwriting previously stored API key, workspace ID, email, or cookie with empty partial candidates. |
 | Channel binding validation | Implemented | OpenCode account create/update now rejects missing channel bindings at the model boundary, preventing accounts that cannot be activated from entering persistent storage. |
@@ -298,6 +299,8 @@ Existing browser reuse is now gated by CDP reachability, not by PID liveness alo
 Stop now owns process cleanup more completely. It no longer returns immediately after sending SIGTERM; it waits for recorded browser/Xvfb processes to exit and uses a force-kill fallback when they do not. This makes lifecycle smoke tests and repeated login attempts less likely to accumulate stale headless browser processes.
 
 Screenshot capture now retries transient browser/CDP failures. This is intentionally scoped to screenshot because it is a read-only operation; click and key input remain single-shot to avoid repeating user actions. The change addresses the observed remote behavior where authorization-page screenshot failed once but succeeded immediately on retry.
+
+The sidecar CLI entrypoint now treats symlinked artifact paths as first-class. Systemd and smoke scripts execute the sidecar through the `new-api-current` symlink, while Node reports `import.meta.url` for the resolved release path. The previous literal comparison meant `main()` could silently skip under symlink execution. The fix compares realpaths and falls back to the original path only when realpath resolution fails.
 
 The latest sidecar lifecycle, status sanitization, partial-extract merge, channel-binding, frontend channel-selector, and screenshot retry fixes are now deployed from pushed `main` commit `c95d3c0d`. The remote service was switched to the new clean artifact, restarted, and verified through an HTTP smoke test plus sidecar checks. The official OpenCode authorization page was exercised without credentials through start, status, screenshot, and stop. The screenshot step reached the OpenCode authorization domain, stop returned `stopped`, and a browser-process-specific residue check found no Chromium/Xvfb process tied to the smoke session.
 
@@ -664,6 +667,7 @@ web/default/src/routes/_authenticated/opencode-accounts/index.tsx
 | 陈旧浏览器状态处理 | 已实现 | `login/start` 现在只会在记录的 PID 存活且 CDP endpoint 可达时复用既有浏览器；陈旧 PID/state 组合会继续走新浏览器启动流程。 |
 | Stop 生命周期清理 | 已实现 | `login/stop` 现在会在 SIGTERM 后等待记录的 browser/Xvfb 进程退出，并在未退出时使用强制清理兜底，减少返回 `stopped` 前遗留浏览器进程的概率。 |
 | Screenshot 瞬时失败重试 | 已实现 | `login/screenshot` 现在会对浏览器/CDP 的瞬时截图失败执行重试；该动作是只读操作，符合远端 smoke 中 screenshot 首次失败、立即重试成功的实际现象。 |
+| Sidecar symlinked artifact entrypoint | 已实现并完成本地验证 | sidecar CLI 现在会先对 `process.argv[1]` 做 realpath 解析，再与 `import.meta.url` 比较，因此通过 `new-api-current` symlink 执行脚本时仍会运行 `main()`。这修复了一个只在部署态出现的 false-smoke 风险：直接 release 路径可运行，但 symlink artifact 路径无输出。 |
 | Extractor | 已实现 | 候选扫描覆盖 OpenCode 域 cookie、local/session storage 与 JSON responses；测试覆盖排序和空状态拒绝。 |
 | 部分提取合并安全 | 已实现 | `login/extract` 现在会把非空提取字段合并进已有加密账号材料，不再用空的 partial candidate 覆盖先前已保存的 API key、workspace ID、email 或 cookie。 |
 | Channel binding 校验 | 已实现 | OpenCode account create/update 现在会在 model 边界拒绝缺失 channel binding 的账号，避免无法 activate 的账号进入持久存储。 |
@@ -709,6 +713,8 @@ Admin Web
 stop 现在更完整地拥有进程清理语义。它不再发送 SIGTERM 后立刻返回，而是等待记录的 browser/Xvfb 进程退出，并在未退出时使用强制清理兜底。这样 lifecycle smoke 与重复登录尝试更不容易堆积陈旧 headless browser 进程。
 
 截图捕获现在会对浏览器/CDP 的瞬时失败执行重试。这个重试刻意只用于 screenshot，因为它是只读操作；click 和 key input 仍然保持单次执行，避免重复用户动作。该修复对应远端授权页 smoke 中 screenshot 首次失败、立即重试成功的实际现象。
+
+sidecar CLI 入口现在把 symlink artifact 路径作为一等部署形态处理。systemd 和 smoke 脚本会通过 `new-api-current` symlink 执行 sidecar，而 Node 的 `import.meta.url` 会指向解析后的 release 真实路径。先前的字面路径比较会导致 symlink 执行时 `main()` 静默跳过。修复后先比较 realpath，并仅在 realpath 解析失败时回退到原始路径。
 
 最新的 sidecar 生命周期、状态脱敏、partial-extract merge、channel binding、前端 channel selector 和 screenshot retry 修复已经从已推送的 `main` 提交 `c95d3c0d` 部署到远端。远端服务已切换到新的 clean artifact、完成重启，并通过 HTTP smoke 与 sidecar 检查。官方 OpenCode 授权页已经在无凭证条件下执行 start、status、screenshot、stop；screenshot 阶段到达 OpenCode 授权域，stop 返回 `stopped`，按浏览器进程名约束的残留检查未发现该 smoke session 对应的 Chromium/Xvfb 进程。
 

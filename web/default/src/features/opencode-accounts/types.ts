@@ -22,6 +22,9 @@ export type OpenCodeAccount = {
   has_api_key: boolean
   has_cookie: boolean
   email_masked: string
+  credential_integrity: 'ok' | 'decrypt_failed'
+  activation_ready: boolean
+  missing_activation_fields: string[]
 }
 
 export type OpenCodeAccountRequest = {

@@ -59,7 +59,48 @@ func TestCreateOpenCodeAccountEncryptsSecretsAndMasksPublicView(t *testing.T) {
 	assert.True(t, public.HasWorkspaceID)
 	assert.True(t, public.HasAPIKey)
 	assert.True(t, public.HasCookie)
+	assert.Equal(t, "ok", public.CredentialIntegrity)
+	assert.True(t, public.ActivationReady)
+	assert.Empty(t, public.MissingActivationFields)
 	assert.NotContains(t, public.EmailMasked, "operator@example.test")
+}
+
+func TestOpenCodeAccountPublicViewReportsCredentialDecryptFailure(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	DB = db
+	require.NoError(t, db.AutoMigrate(&OpenCodeAccount{}))
+
+	originalSecret := common.CryptoSecret
+	common.CryptoSecret = "opencode-account-original-secret"
+	t.Cleanup(func() {
+		common.CryptoSecret = originalSecret
+	})
+
+	account := &OpenCodeAccount{
+		Label:     "primary-go-plan",
+		ChannelID: 7,
+	}
+	err = CreateOpenCodeAccount(account, OpenCodeAccountSecrets{
+		Email:       "operator@example.test",
+		WorkspaceID: "workspace-test-value",
+		APIKey:      "opencode-api-key-test-value",
+		Cookie:      "opencode-cookie-test-value",
+	})
+	require.NoError(t, err)
+
+	common.CryptoSecret = "opencode-account-rotated-secret"
+	var stored OpenCodeAccount
+	require.NoError(t, DB.First(&stored, account.Id).Error)
+
+	public := stored.PublicView()
+	assert.True(t, public.HasAPIKey)
+	assert.True(t, public.HasCookie)
+	assert.True(t, public.HasWorkspaceID)
+	assert.Equal(t, "decrypt_failed", public.CredentialIntegrity)
+	assert.False(t, public.ActivationReady)
+	assert.Contains(t, public.MissingActivationFields, "credentials_decryptable")
+	assert.Empty(t, public.EmailMasked)
 }
 
 func TestCreateOpenCodeAccountRejectsInvalidLabel(t *testing.T) {

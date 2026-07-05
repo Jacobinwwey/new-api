@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  AlertTriangle,
   Check,
   Download,
   MousePointerClick,
@@ -369,7 +370,10 @@ export function OpenCodeAccounts() {
               <Button
                 variant='outline'
                 onClick={() => runSelected((id) => activateMutation.mutate(id))}
-                disabled={activateMutation.isPending}
+                disabled={
+                  activateMutation.isPending ||
+                  selectedAccount?.activation_ready !== true
+                }
               >
                 <Check data-icon='inline-start' />
                 {t('Activate')}
@@ -449,6 +453,13 @@ function AccountRow(props: AccountRowProps) {
     props.account.has_cookie,
     props.account.has_workspace_id,
   ].filter(Boolean).length
+  const credentialBroken =
+    props.account.credential_integrity === 'decrypt_failed'
+  const statusLabel = formatAccountReadiness(props.account, t)
+  const statusVariant =
+    props.account.active || props.account.activation_ready
+      ? 'default'
+      : 'outline'
 
   return (
     <TableRow
@@ -466,15 +477,34 @@ function AccountRow(props: AccountRowProps) {
       </TableCell>
       <TableCell>#{props.account.channel_id}</TableCell>
       <TableCell>
-        <Badge variant={secretCount >= 3 ? 'default' : 'outline'}>
+        <Badge
+          variant={
+            secretCount >= 3 && !credentialBroken ? 'default' : 'outline'
+          }
+        >
+          {credentialBroken ? (
+            <AlertTriangle data-icon='inline-start' />
+          ) : null}
           {secretCount}/3
         </Badge>
       </TableCell>
       <TableCell>
         <div className='flex flex-wrap items-center gap-2'>
-          <Badge variant={props.account.active ? 'default' : 'outline'}>
-            {props.account.active ? t('Active') : t('Ready')}
+          <Badge variant={statusVariant}>
+            {credentialBroken ? (
+              <AlertTriangle data-icon='inline-start' />
+            ) : null}
+            {statusLabel}
           </Badge>
+          {!props.account.activation_ready &&
+          props.account.missing_activation_fields.length > 0 ? (
+            <span className='text-muted-foreground text-xs'>
+              {formatMissingActivationFields(
+                props.account.missing_activation_fields,
+                t
+              )}
+            </span>
+          ) : null}
           {props.account.quota_limit > 0 ? (
             <span className='text-muted-foreground text-xs'>
               {props.account.quota_used}/{props.account.quota_limit}
@@ -497,4 +527,40 @@ function AccountRow(props: AccountRowProps) {
       </TableCell>
     </TableRow>
   )
+}
+
+function formatMissingActivationFields(
+  fields: string[],
+  t: (key: string) => string
+) {
+  return fields
+    .map((field) => {
+      switch (field) {
+        case 'api_key':
+          return t('API key')
+        case 'channel_id':
+          return t('Channel')
+        case 'credentials_decryptable':
+          return t('Credentials')
+        default:
+          return field
+      }
+    })
+    .join(', ')
+}
+
+function formatAccountReadiness(
+  account: OpenCodeAccount,
+  t: (key: string) => string
+) {
+  if (account.credential_integrity === 'decrypt_failed') {
+    return t('Credential error')
+  }
+  if (account.active) {
+    return t('Active')
+  }
+  if (account.activation_ready) {
+    return t('Ready')
+  }
+  return t('Incomplete')
 }

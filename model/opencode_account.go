@@ -36,23 +36,26 @@ type OpenCodeAccountSecrets struct {
 }
 
 type OpenCodeAccountPublic struct {
-	Id                 int    `json:"id"`
-	Label              string `json:"label"`
-	ChannelID          int    `json:"channel_id"`
-	QuotaRaw           string `json:"quota_raw"`
-	QuotaLimit         int64  `json:"quota_limit"`
-	QuotaUsed          int64  `json:"quota_used"`
-	LoginStatus        string `json:"login_status"`
-	Active             bool   `json:"active"`
-	LastExtractedAt    int64  `json:"last_extracted_at"`
-	LastQuotaCheckedAt int64  `json:"last_quota_checked_at"`
-	CreatedAt          string `json:"created_at"`
-	UpdatedAt          string `json:"updated_at"`
-	HasEmail           bool   `json:"has_email"`
-	HasWorkspaceID     bool   `json:"has_workspace_id"`
-	HasAPIKey          bool   `json:"has_api_key"`
-	HasCookie          bool   `json:"has_cookie"`
-	EmailMasked        string `json:"email_masked"`
+	Id                      int      `json:"id"`
+	Label                   string   `json:"label"`
+	ChannelID               int      `json:"channel_id"`
+	QuotaRaw                string   `json:"quota_raw"`
+	QuotaLimit              int64    `json:"quota_limit"`
+	QuotaUsed               int64    `json:"quota_used"`
+	LoginStatus             string   `json:"login_status"`
+	Active                  bool     `json:"active"`
+	LastExtractedAt         int64    `json:"last_extracted_at"`
+	LastQuotaCheckedAt      int64    `json:"last_quota_checked_at"`
+	CreatedAt               string   `json:"created_at"`
+	UpdatedAt               string   `json:"updated_at"`
+	HasEmail                bool     `json:"has_email"`
+	HasWorkspaceID          bool     `json:"has_workspace_id"`
+	HasAPIKey               bool     `json:"has_api_key"`
+	HasCookie               bool     `json:"has_cookie"`
+	EmailMasked             string   `json:"email_masked"`
+	CredentialIntegrity     string   `json:"credential_integrity"`
+	ActivationReady         bool     `json:"activation_ready"`
+	MissingActivationFields []string `json:"missing_activation_fields"`
 }
 
 func (OpenCodeAccount) TableName() string {
@@ -153,26 +156,53 @@ func (account *OpenCodeAccount) DecryptSecrets() (OpenCodeAccountSecrets, error)
 }
 
 func (account *OpenCodeAccount) PublicView() OpenCodeAccountPublic {
-	secrets, _ := account.DecryptSecrets()
-	return OpenCodeAccountPublic{
-		Id:                 account.Id,
-		Label:              account.Label,
-		ChannelID:          account.ChannelID,
-		QuotaRaw:           account.QuotaRaw,
-		QuotaLimit:         account.QuotaLimit,
-		QuotaUsed:          account.QuotaUsed,
-		LoginStatus:        account.LoginStatus,
-		Active:             account.Active,
-		LastExtractedAt:    account.LastExtractedAt,
-		LastQuotaCheckedAt: account.LastQuotaCheckedAt,
-		CreatedAt:          account.CreatedAt.Format(time.RFC3339),
-		UpdatedAt:          account.UpdatedAt.Format(time.RFC3339),
-		HasEmail:           account.EmailCiphertext != "",
-		HasWorkspaceID:     account.WorkspaceIDCiphertext != "",
-		HasAPIKey:          account.APIKeyCiphertext != "",
-		HasCookie:          account.CookieCiphertext != "",
-		EmailMasked:        maskEmail(secrets.Email),
+	secrets, decryptErr := account.DecryptSecrets()
+	credentialIntegrity := "ok"
+	if decryptErr != nil {
+		credentialIntegrity = "decrypt_failed"
+		secrets = OpenCodeAccountSecrets{}
 	}
+	missingActivationFields := account.missingActivationFields(secrets, decryptErr)
+	return OpenCodeAccountPublic{
+		Id:                      account.Id,
+		Label:                   account.Label,
+		ChannelID:               account.ChannelID,
+		QuotaRaw:                account.QuotaRaw,
+		QuotaLimit:              account.QuotaLimit,
+		QuotaUsed:               account.QuotaUsed,
+		LoginStatus:             account.LoginStatus,
+		Active:                  account.Active,
+		LastExtractedAt:         account.LastExtractedAt,
+		LastQuotaCheckedAt:      account.LastQuotaCheckedAt,
+		CreatedAt:               account.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:               account.UpdatedAt.Format(time.RFC3339),
+		HasEmail:                account.EmailCiphertext != "",
+		HasWorkspaceID:          account.WorkspaceIDCiphertext != "",
+		HasAPIKey:               account.APIKeyCiphertext != "",
+		HasCookie:               account.CookieCiphertext != "",
+		EmailMasked:             maskEmail(secrets.Email),
+		CredentialIntegrity:     credentialIntegrity,
+		ActivationReady:         len(missingActivationFields) == 0,
+		MissingActivationFields: missingActivationFields,
+	}
+}
+
+func (account *OpenCodeAccount) missingActivationFields(secrets OpenCodeAccountSecrets, decryptErr error) []string {
+	missing := make([]string, 0, 3)
+	if account.ChannelID <= 0 {
+		missing = append(missing, "channel_id")
+	}
+	if decryptErr != nil {
+		missing = append(missing, "credentials_decryptable")
+		if account.APIKeyCiphertext == "" {
+			missing = append(missing, "api_key")
+		}
+		return missing
+	}
+	if strings.TrimSpace(secrets.APIKey) == "" {
+		missing = append(missing, "api_key")
+	}
+	return missing
 }
 
 func normalizeOpenCodeAccount(account *OpenCodeAccount) error {

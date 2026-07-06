@@ -294,7 +294,7 @@ End-to-end verification:
 | Activation credential contract | Implemented and locally verified | Activation now builds channel credentials according to the bound channel type. Plain OpenCode API keys remain valid for non-Codex channels, while Codex channels require JSON material containing `access_token` and `account_id`. Public readiness diagnostics now mark Codex/plain-key bindings as not activation-ready before the operator clicks activate. |
 | Activation error semantics | Implemented locally | Activation now returns the same sanitized account-not-found business failure for missing account IDs, and wraps missing bound channels as explicit channel-not-found failures instead of surfacing raw storage-layer `record not found` text. |
 | Remote clean artifact deployment | Done | Built pushed `main` from an isolated clean checkout, produced self-contained binary-plus-sidecar artifacts, switched the remote service to those artifacts, preserved the existing runtime data path, and verified the service is active. |
-| Clean rollout helper | Implemented in source; pending remote apply | Added `scripts/new-api-clean-rollout.mjs` plus Node tests. The helper codifies the clean-checkout gate, targeted Node/Go/frontend/build checks, systemd service contract validation, backup/install/restart, bounded HTTP readiness wait, rollback, and public-output redaction. It is verification-only by default and switches runtime artifacts only with explicit `--apply true`; it intentionally does not own SSH transport, sudo, systemd unit creation, database migration ownership, or secret provisioning. |
+| Clean rollout helper | Implemented in source; remote dry-run verified; pending apply | Added `scripts/new-api-clean-rollout.mjs` plus Node tests. The helper codifies the clean-checkout gate, targeted Node/Go/frontend/build checks, systemd service contract validation, backup/install/restart, bounded HTTP readiness wait, rollback, and public-output redaction. It is verification-only by default and switches runtime artifacts only with explicit `--apply true`; it intentionally does not own SSH transport, sudo, systemd unit creation, database migration ownership, or secret provisioning. A remote `--apply false` dry-run against pushed `main` commit `2a9baeed` verified clone, revision matching, Node/script gates, and skipped runtime mutation. |
 | Last verified remote rollout | Done | Pushed `main` commit `5e18beaa` is the last rollout verified on the remote service. The rollout used a clean checkout, passed remote Node script tests/checks, targeted OpenCode/cache Go tests, default and classic frontend builds, and Go binary build before switching runtime artifacts. The service is active, local HTTP `/api/status` smoke passes, deployed runtime scripts pass `node --check`, `glm-cache-smoke` contains both response-usage and stats contract gates, and sidecar empty-state `status` returns `stopped`. |
 | Real OpenCode login E2E | Pending | Requires an operator-controlled OpenCode subscription account. The repository contains no real account material. |
 | Real `glm-5.2` cache-hit E2E | Pending | Should run only after a real OpenCode account has been imported and activated through New API. |
@@ -396,6 +396,8 @@ The latest cache-smoke contract gates are deployed from pushed `main` commit `5e
 Remote deployment is now separated from the previous runtime worktree. The service runs from a clean artifact built from the pushed `main`, while the existing runtime data location is preserved explicitly. This avoids overwriting unrelated local cache/accounting work that still exists in the old runtime tree and keeps source, artifact, and runtime data as separate concerns.
 
 The new clean rollout helper turns that manual rollout pattern into a repeatable source-controlled gate. Its default mode is intentionally non-mutating: clone the pushed fork, verify the requested revision, run the focused script/backend/frontend/build gates, and exit with redacted diagnostics. Runtime replacement is behind explicit `--apply true`, and even then it first validates the service contract from systemd (`ExecStart`, `WorkingDirectory`, `Restart`, current PID owner, and write permissions), writes backups under the existing runtime boundary, restarts through `Restart=always`, waits for HTTP readiness, and rolls back on failure. The tradeoff is conservative scope: the helper is not a deployment platform, does not create or edit systemd units, does not run privileged operations, does not transport secrets, and should still be invoked through the existing LearnSSH alias when used on the remote host.
+
+The first remote dry-run exposed a real GitHub clone fragility on the remote host: the inner clean checkout could fail on a TLS/RPC disconnect. The helper now uses HTTP/1.1 for Git clone, retries the clone gate with bounded attempts, and waits for timed-out child processes to close before retrying. A later remote `--apply false` dry-run for commit `2a9baeed` passed `git_clone`, revision matching, and Node/script checks, then exited with `apply=skipped`; no runtime artifact was changed.
 
 ### Verification Update
 
@@ -507,6 +509,7 @@ Remote clean artifact rollout:
   deployed runtime scripts pass syntax checks
   deployed glm-cache-smoke script contains both response-usage and stats payload contract gates
   deployed sidecar empty-state status smoke returns stopped
+  clean rollout helper remote dry-run for pushed commit 2a9baeed passed git_clone/revision/node_scripts and skipped apply
 ```
 
 The `web/classic` build failure was traced to `date-fns-tz@1.3.8` resolving its peer `date-fns` to the workspace-level `date-fns@4`. That package version blocks private subpath imports such as `date-fns/_lib/cloneObject/index.js`. The fix keeps `web/default` on `date-fns@4` and adds a classic-only Rsbuild alias so Semi UI's `date-fns-tz` resolves to Semi's nested `date-fns@2.30.0`.
@@ -859,7 +862,7 @@ web/default/src/routes/_authenticated/opencode-accounts/index.tsx
 | Activation credential contract | 已实现并完成本地验证 | 激活现在会按照绑定 channel 类型构造 channel credential。非 Codex channel 继续接受纯 OpenCode API key；Codex channel 必须提供包含 `access_token` 与 `account_id` 的 JSON 材料。公开 readiness 诊断现在会在操作者点击 activate 前，把 Codex/plain-key 绑定标记为不可激活。 |
 | 激活错误语义 | 本地已实现 | activate 现在对缺失账号 ID 返回同一脱敏的账号不存在业务失败；绑定 channel 缺失时返回明确的 channel-not-found 失败，不再把存储层 `record not found` 原文暴露给操作者。 |
 | 远端 clean artifact 部署 | 已完成 | 已从隔离的干净 checkout 构建已推送的 `main`，生成包含二进制与 sidecar 的 artifact，远端服务已切换到这些 artifact，并显式保留既有运行时数据路径，服务状态已验证为 active。 |
-| Clean rollout helper | 已进入源码；待远端 apply | 已新增 `scripts/new-api-clean-rollout.mjs` 及 Node 测试。helper 将干净 checkout gate、Node/Go/前端/build 定向检查、systemd service contract 校验、backup/install/restart、有界 HTTP readiness wait、rollback 与公开输出脱敏固化为可复用流程。默认只做 verification-only，只有显式传入 `--apply true` 才会切换 runtime artifact；它不负责 SSH 传输、sudo、systemd unit 创建、数据库迁移所有权或 secret provisioning。 |
+| Clean rollout helper | 已进入源码；远端 dry-run 已验证；待 apply | 已新增 `scripts/new-api-clean-rollout.mjs` 及 Node 测试。helper 将干净 checkout gate、Node/Go/前端/build 定向检查、systemd service contract 校验、backup/install/restart、有界 HTTP readiness wait、rollback 与公开输出脱敏固化为可复用流程。默认只做 verification-only，只有显式传入 `--apply true` 才会切换 runtime artifact；它不负责 SSH 传输、sudo、systemd unit 创建、数据库迁移所有权或 secret provisioning。针对已推送 `main` 提交 `2a9baeed` 的远端 `--apply false` dry-run 已验证 clone、revision match、Node/script gate 与跳过运行时变更。 |
 | 上一次已验证远端上线 | 已完成 | 已推送的 `main` 提交 `5e18beaa` 是当前在远端服务完成验证的上线版本。本次上线使用干净 checkout，切换运行 artifact 前已通过远端 Node 脚本测试/语法检查、OpenCode/cache Go 定向测试、default 与 classic 前端构建，以及 Go 二进制构建。服务状态为 active，本机 HTTP `/api/status` smoke 通过，已部署 runtime 脚本通过 `node --check`，`glm-cache-smoke` 包含 response-usage 与 stats 两个 contract gate，sidecar 空状态 `status` 返回 `stopped`。 |
 | 真实 OpenCode 登录 E2E | 待执行 | 需要操作者控制的 OpenCode 订阅账号；仓库不包含真实账号材料。 |
 | 真实 `glm-5.2` cache-hit E2E | 待执行 | 只能在真实 OpenCode 账号经 New API 导入并激活后执行。 |
@@ -961,6 +964,8 @@ delete 现在会在产生外部副作用前验证所有权。缺失账号 ID 是
 远端部署现在已经与旧运行工作树分离。服务从基于已推送 `main` 构建的 clean artifact 运行，同时显式保留既有运行时数据位置。这样不会覆盖旧运行树中仍存在的本地 cache/accounting 工作，也把源码、artifact 与运行时数据拆成了三个独立边界。
 
 新的 clean rollout helper 把这套手工上线模式收敛为可重复、可审计的源码内 gate。默认模式刻意不产生副作用：克隆已推送 fork、校验指定 revision、运行聚焦的脚本/后端/前端/build gate，然后只输出脱敏诊断。运行时替换必须显式传入 `--apply true`；即使进入 apply，也会先从 systemd 校验 service contract（`ExecStart`、`WorkingDirectory`、`Restart`、当前 PID owner 与写权限），在既有运行时边界内写入备份，通过 `Restart=always` 重启，等待 HTTP readiness，并在失败时回滚。这里的取舍是有意保守：helper 不是部署平台，不创建或修改 systemd unit，不执行提权操作，不传输 secret；在远端使用时仍应由现有 LearnSSH alias 调用。
+
+第一次远端 dry-run 暴露了一个真实的远端 GitHub clone 脆弱点：内部 clean checkout 可能因为 TLS/RPC 断流失败。helper 现在对 Git clone 使用 HTTP/1.1，对 clone gate 做有界重试，并且在命令超时时等待子进程 close 后再重试。后续针对提交 `2a9baeed` 的远端 `--apply false` dry-run 已通过 `git_clone`、revision match 与 Node/script checks，最后以 `apply=skipped` 退出；没有切换运行 artifact。
 
 ### 验证更新
 
@@ -1072,6 +1077,7 @@ Sidecar smoke：
   已部署 runtime 脚本通过语法检查
   已部署 glm-cache-smoke 脚本包含 response-usage 与 stats payload 两个 contract gate
   已部署 sidecar 空状态 status smoke 返回 stopped
+  clean rollout helper 针对已推送提交 2a9baeed 的远端 dry-run 通过 git_clone/revision/node_scripts，并跳过 apply
 ```
 
 `web/classic` 构建失败的根因已经定位为 `date-fns-tz@1.3.8` 将 peer `date-fns` 解析到了 workspace 顶层的 `date-fns@4`。该版本通过 package exports 阻断 `date-fns/_lib/cloneObject/index.js` 等 private subpath。修复方式是保持 `web/default` 使用 `date-fns@4`，只在 classic 的 Rsbuild 配置中增加局部 alias，让 Semi UI 的 `date-fns-tz` 解析到 Semi 自带的 `date-fns@2.30.0`。

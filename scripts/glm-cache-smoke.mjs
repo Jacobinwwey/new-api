@@ -20,6 +20,9 @@ const SECRET_ASSIGNMENT_PATTERN =
 const OAUTH_QUERY_PATTERN = /([?&](?:code|state|access_token|refresh_token|id_token)=)[^&\s]+/gi;
 const BEARER_TOKEN_PATTERN = /\bBearer\s+[A-Za-z0-9._~+/=-]{12,}/gi;
 const EMAIL_PATTERN = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
+const WINDOWS_ABSOLUTE_PATH_PATTERN = /\b[A-Za-z]:\\[^\s"'<>]+/g;
+const POSIX_ABSOLUTE_PATH_PATTERN =
+  /(^|[\s"'(])\/(?:home|root|opt|var|srv|etc|mnt|tmp|data)\/[^\s"'<>)]*/g;
 
 export function cacheKeyFingerprint(value) {
   const raw = String(value || "").trim();
@@ -517,6 +520,8 @@ function sanitizeText(text, config) {
   result = result.replace(OAUTH_QUERY_PATTERN, "$1<redacted>");
   result = result.replace(SECRET_ASSIGNMENT_PATTERN, (_match, key) => `${key}=<redacted>`);
   result = result.replace(EMAIL_PATTERN, "<redacted-email>");
+  result = result.replace(WINDOWS_ABSOLUTE_PATH_PATTERN, "<redacted-path>");
+  result = result.replace(POSIX_ABSOLUTE_PATH_PATTERN, (_match, prefix) => `${prefix}<redacted-path>`);
   return result;
 }
 

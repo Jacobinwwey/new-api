@@ -290,6 +290,8 @@ test("runCacheSmoke redacts generic secret-shaped relay failures", async () => {
         `${"Bea"}rer upstream-bearer-secret-value`,
         "https://opencode.ai/auth/callback?code=oauth-code-secret&state=oauth-state-secret",
         "operator@example.test",
+        "D:\\srv\\release\\private\\session.txt",
+        "/opt/release/private/session.txt",
       ].join(" "),
     });
 
@@ -318,6 +320,7 @@ test("runCacheSmoke redacts generic secret-shaped relay failures", async () => {
         message,
         /upstream-key-secret|upstream-cookie-secret|upstream-workspace-secret|upstream-access-secret|upstream-refresh-secret|upstream-id-secret|upstream-authorization-secret|upstream-bearer-secret-value|oauth-code-secret|oauth-state-secret|operator@example\.test/,
       );
+      assert.doesNotMatch(message, /D:\\srv|\/opt\/release/);
       assert.match(message, new RegExp(`api_${"key"}=<redacted>`));
       assert.match(message, new RegExp(`${"cook"}ie=<redacted>`));
       assert.match(message, new RegExp(`workspace_${"id"}=<redacted>`));
@@ -329,6 +332,7 @@ test("runCacheSmoke redacts generic secret-shaped relay failures", async () => {
       assert.match(message, /code=<redacted>/);
       assert.match(message, /state=<redacted>/);
       assert.match(message, /<redacted-email>/);
+      assert.match(message, /<redacted-path>/);
       return true;
     },
   );

@@ -642,6 +642,8 @@ test("runOpenCodePreflight redacts generic secret-shaped endpoint errors", async
     `${"Bea"}rer bearer-secret-value-12345`,
     "operator@example.test",
     "https://opencode.ai/auth/callback?code=oauth-code-secret&state=oauth-state-secret",
+    "D:\\srv\\release\\private\\session.txt",
+    "/opt/release/private/session.txt",
   ].join(" ");
   const fetcher = async () =>
     jsonResponse({
@@ -673,6 +675,9 @@ test("runOpenCodePreflight redacts generic secret-shaped endpoint errors", async
   assert.doesNotMatch(encoded, /operator@example\.test/);
   assert.doesNotMatch(encoded, /oauth-code-secret/);
   assert.doesNotMatch(encoded, /oauth-state-secret/);
+  assert.doesNotMatch(encoded, /D:\\srv/);
+  assert.doesNotMatch(encoded, /\/opt\/release/);
+  assert.match(encoded, /<redacted-path>/);
 });
 
 test("runOpenCodePreflight fails fallback credential key by default", async () => {

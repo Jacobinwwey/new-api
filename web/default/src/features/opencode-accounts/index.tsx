@@ -265,7 +265,7 @@ export function OpenCodeAccounts() {
         >
           {usesFallbackCredentialKey ? <CredentialKeySourceWarning /> : null}
           <div className='grid min-h-0 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(480px,0.9fr)]'>
-            <section className='bg-background min-w-0 rounded-lg border'>
+            <section className='bg-background grid min-w-0 grid-rows-[auto_minmax(0,1fr)] rounded-lg border'>
               <div className='grid gap-3 border-b p-3 md:grid-cols-[minmax(0,1fr)_minmax(220px,280px)_120px_auto]'>
                 <Input
                   value={label}
@@ -311,40 +311,42 @@ export function OpenCodeAccounts() {
                   {t('Create')}
                 </Button>
               </div>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>{t('Label')}</TableHead>
-                    <TableHead>{t('Channel')}</TableHead>
-                    <TableHead>{t('Secrets')}</TableHead>
-                    <TableHead>{t('Status')}</TableHead>
-                    <TableHead className='w-16 text-right'>
-                      {t('Actions')}
-                    </TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {accounts.map((account) => (
-                    <AccountRow
-                      key={account.id}
-                      account={account}
-                      selected={account.id === selectedID}
-                      onSelect={() => setSelectedID(account.id)}
-                      onDelete={() => deleteMutation.mutate(account.id)}
-                    />
-                  ))}
-                  {accounts.length === 0 ? (
+              <div className='min-h-0 overflow-auto'>
+                <Table>
+                  <TableHeader>
                     <TableRow>
-                      <TableCell
-                        colSpan={5}
-                        className='text-muted-foreground h-24 text-center'
-                      >
-                        {t('No OpenCode accounts')}
-                      </TableCell>
+                      <TableHead>{t('Label')}</TableHead>
+                      <TableHead>{t('Channel')}</TableHead>
+                      <TableHead>{t('Secrets')}</TableHead>
+                      <TableHead>{t('Status')}</TableHead>
+                      <TableHead className='w-16 text-right'>
+                        {t('Actions')}
+                      </TableHead>
                     </TableRow>
-                  ) : null}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {accounts.map((account) => (
+                      <AccountRow
+                        key={account.id}
+                        account={account}
+                        selected={account.id === selectedID}
+                        onSelect={() => setSelectedID(account.id)}
+                        onDelete={() => deleteMutation.mutate(account.id)}
+                      />
+                    ))}
+                    {accounts.length === 0 ? (
+                      <TableRow>
+                        <TableCell
+                          colSpan={5}
+                          className='text-muted-foreground h-24 text-center'
+                        >
+                          {t('No OpenCode accounts')}
+                        </TableCell>
+                      </TableRow>
+                    ) : null}
+                  </TableBody>
+                </Table>
+              </div>
             </section>
 
             <section className='bg-background grid min-w-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-3 rounded-lg border p-3'>

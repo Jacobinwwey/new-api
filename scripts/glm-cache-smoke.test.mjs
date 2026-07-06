@@ -338,6 +338,77 @@ test("runCacheSmoke redacts generic secret-shaped relay failures", async () => {
   );
 });
 
+test("runCacheSmoke accepts numeric-string response usage counters", async () => {
+  const fetcher = async () =>
+    jsonResponse({
+      usage: {
+        prompt_tokens: "20",
+        completion_tokens: "3",
+        total_tokens: "23",
+        input_tokens_details: { cached_tokens: "12" },
+      },
+    });
+
+  const summary = await runCacheSmoke({
+    baseURL: "https://new-api.example.test",
+    apiKey: "fixture-relay-secret",
+    adminToken: "",
+    adminCookie: "",
+    adminUserID: "",
+    model: "glm-5.2",
+    promptCacheKey: "session-secret",
+    input: "cache smoke prompt",
+    maxOutputTokens: 16,
+    requestCount: 2,
+    requestDelayMs: 0,
+    usingGroup: "default",
+    ruleName: "codex cli trace",
+    timeoutMs: 1000,
+    fetcher,
+  });
+
+  assert.deepEqual(summary.requests, {
+    total: 2,
+    hit: 2,
+    cached_tokens: 24,
+    prompt_cache_hit_tokens: 0,
+    prompt_tokens: 40,
+    completion_tokens: 6,
+    total_tokens: 46,
+  });
+});
+
+test("runCacheSmoke rejects malformed response usage counters", async () => {
+  const fetcher = async () =>
+    jsonResponse({
+      usage: {
+        prompt_tokens: "not-a-number",
+        prompt_tokens_details: { cached_tokens: -1 },
+      },
+    });
+
+  await assert.rejects(
+    runCacheSmoke({
+      baseURL: "https://new-api.example.test",
+      apiKey: "fixture-relay-secret",
+      adminToken: "",
+      adminCookie: "",
+      adminUserID: "",
+      model: "glm-5.2",
+      promptCacheKey: "session-secret",
+      input: "cache smoke prompt",
+      maxOutputTokens: 16,
+      requestCount: 2,
+      requestDelayMs: 0,
+      usingGroup: "default",
+      ruleName: "codex cli trace",
+      timeoutMs: 1000,
+      fetcher,
+    }),
+    /response usage payload malformed: usage\.prompt_tokens_details\.cached_tokens,usage\.prompt_tokens/,
+  );
+});
+
 test("runCacheSmoke reports usage-cache deltas for the current smoke run", async () => {
   let statsReads = 0;
   const fetcher = async (url) => {

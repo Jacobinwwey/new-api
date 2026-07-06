@@ -34,6 +34,16 @@ const STATS_NUMERIC_FIELDS = [
   "window_seconds",
   "last_seen_at",
 ];
+const RESPONSE_USAGE_NUMERIC_PATHS = [
+  { field: "prompt_cached_tokens", path: ["prompt_tokens_details", "cached_tokens"] },
+  { field: "input_cached_tokens", path: ["input_tokens_details", "cached_tokens"] },
+  { field: "prompt_cache_hit_tokens", path: ["prompt_cache_hit_tokens"] },
+  { field: "prompt_tokens", path: ["prompt_tokens"] },
+  { field: "input_tokens", path: ["input_tokens"] },
+  { field: "completion_tokens", path: ["completion_tokens"] },
+  { field: "output_tokens", path: ["output_tokens"] },
+  { field: "total_tokens", path: ["total_tokens"] },
+];
 
 export function cacheKeyFingerprint(value) {
   const raw = String(value || "").trim();
@@ -485,17 +495,17 @@ async function parseJSONResponse(response, config) {
 }
 
 function summarizeResponse(payload) {
-  const usage = payload?.usage || {};
-  const cachedTokens =
-    Number(usage?.prompt_tokens_details?.cached_tokens || 0) ||
-    Number(usage?.input_tokens_details?.cached_tokens || 0);
-  const promptCacheHitTokens = Number(usage?.prompt_cache_hit_tokens || 0);
+  const { usage, malformedFields } = sanitizeResponseUsage(payload?.usage);
+  if (malformedFields.length > 0) {
+    throw new Error(`response usage payload malformed: ${malformedFields.join(",")}`);
+  }
+  const cachedTokens = usage.prompt_cached_tokens || usage.input_cached_tokens;
   return {
     cached_tokens: cachedTokens,
-    prompt_cache_hit_tokens: promptCacheHitTokens,
-    prompt_tokens: Number(usage?.prompt_tokens || usage?.input_tokens || 0),
-    completion_tokens: Number(usage?.completion_tokens || usage?.output_tokens || 0),
-    total_tokens: Number(usage?.total_tokens || 0),
+    prompt_cache_hit_tokens: usage.prompt_cache_hit_tokens,
+    prompt_tokens: usage.prompt_tokens || usage.input_tokens,
+    completion_tokens: usage.completion_tokens || usage.output_tokens,
+    total_tokens: usage.total_tokens,
   };
 }
 
@@ -523,6 +533,65 @@ function sanitizeStats(stats) {
   }
   normalized.cached_token_rate_mode = String(stats.cached_token_rate_mode || "");
   return { stats: normalized, malformedFields };
+}
+
+function sanitizeResponseUsage(rawUsage) {
+  const malformedFields = [];
+  const usage = emptyResponseUsage();
+  if (rawUsage === undefined || rawUsage === null) {
+    return { usage, malformedFields };
+  }
+  if (!isObjectRecord(rawUsage)) {
+    return { usage, malformedFields: ["usage"] };
+  }
+  for (const item of RESPONSE_USAGE_NUMERIC_PATHS) {
+    usage[item.field] = readUsageNumberAtPath(rawUsage, item.path, malformedFields);
+  }
+  return { usage, malformedFields };
+}
+
+function emptyResponseUsage() {
+  return RESPONSE_USAGE_NUMERIC_PATHS.reduce((usage, item) => {
+    usage[item.field] = 0;
+    return usage;
+  }, {});
+}
+
+function readUsageNumberAtPath(root, path, malformedFields) {
+  let parent = root;
+  const parentPath = [];
+  for (let index = 0; index < path.length - 1; index += 1) {
+    const segment = path[index];
+    parentPath.push(segment);
+    if (!Object.prototype.hasOwnProperty.call(parent, segment) || parent[segment] === null) {
+      return 0;
+    }
+    if (!isObjectRecord(parent[segment])) {
+      malformedFields.push(`usage.${parentPath.join(".")}`);
+      return 0;
+    }
+    parent = parent[segment];
+  }
+
+  const field = path[path.length - 1];
+  const fieldPath = `usage.${path.join(".")}`;
+  if (
+    !Object.prototype.hasOwnProperty.call(parent, field) ||
+    parent[field] === undefined ||
+    parent[field] === null
+  ) {
+    return 0;
+  }
+  if (typeof parent[field] === "string" && parent[field].trim() === "") {
+    malformedFields.push(fieldPath);
+    return 0;
+  }
+  const value = Number(parent[field]);
+  if (!Number.isFinite(value) || value < 0) {
+    malformedFields.push(fieldPath);
+    return 0;
+  }
+  return value;
 }
 
 function readStatsNumber(stats, field, malformedFields) {

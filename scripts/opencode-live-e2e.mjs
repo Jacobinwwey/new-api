@@ -165,10 +165,10 @@ function shouldStop(stageSummary, config) {
 
 async function runStage(name, execute, config) {
   try {
-    return await execute();
+    return sanitizeStageSummary(await execute(), config);
   } catch (error) {
     const message = sanitizeLiveText(error.message || `${name} failed`, config);
-    return {
+    return sanitizeStageSummary({
       error: { message },
       checks: {
         status: "failed",
@@ -182,7 +182,7 @@ async function runStage(name, execute, config) {
           },
         ],
       },
-    };
+    }, config);
   }
 }
 
@@ -217,6 +217,24 @@ function sanitizeLiveText(text, config) {
   result = result.replace(WINDOWS_ABSOLUTE_PATH_PATTERN, "<redacted-path>");
   result = result.replace(POSIX_ABSOLUTE_PATH_PATTERN, (_match, prefix) => `${prefix}<redacted-path>`);
   return result;
+}
+
+function sanitizeStageSummary(value, config) {
+  if (typeof value === "string") {
+    return sanitizeLiveText(value, config);
+  }
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeStageSummary(item, config));
+  }
+  return Object.fromEntries(
+    Object.entries(value).map(([key, item]) => [
+      sanitizeLiveText(key, config),
+      sanitizeStageSummary(item, config),
+    ]),
+  );
 }
 
 function sensitiveFragments(config) {

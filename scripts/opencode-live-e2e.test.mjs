@@ -274,6 +274,65 @@ test("runOpenCodeLiveE2E redacts stage exceptions and keeps fail-fast semantics"
   assert.equal(summary.cache_smoke, null);
 });
 
+test("runOpenCodeLiveE2E redacts successful stage summaries defensively", async () => {
+  const summary = await runOpenCodeLiveE2E({
+    continueOnFailure: true,
+    tailscale: { target: "private-tailnet-host" },
+    opencode: {
+      baseURL: "https://new-api.example.test",
+      adminToken: "root-token-secret",
+      adminCookie: "session=admin-cookie-secret",
+    },
+    cacheSmoke: {
+      baseURL: "https://new-api.example.test",
+      apiKey: "relay-key-secret",
+      promptCacheKey: "stable-cache-key",
+      input: "private prompt text for live e2e",
+    },
+    runners: {
+      runTailscaleLinkPreflight: async () =>
+        passedStage({
+          diagnostic: "private-tailnet-host via https://new-api.example.test",
+        }),
+      runOpenCodePreflight: async () =>
+        passedStage({
+          account: {
+            ["root-token-secret"]: "secret key name",
+            email: "user@example.test",
+            path: "C:\\Users\\operator\\secret",
+            token: "root-token-secret",
+            notes: ["relay-key-secret", "stable-cache-key", "private prompt text for live e2e"],
+          },
+        }),
+      runCacheSmoke: async () =>
+        passedStage({
+          usage: {
+            total: 6,
+            message: "Bearer " + "abcdefghijklmnop " + "api_" + "key=x",
+          },
+        }),
+    },
+  });
+
+  assert.equal(summary.checks.status, "passed");
+  assert.equal(summary.cache_smoke.usage.total, 6);
+  const serialized = JSON.stringify(summary);
+  for (const fragment of [
+    "root-token-secret",
+    "relay-key-secret",
+    "stable-cache-key",
+    "private-tailnet-host",
+    "new-api.example.test",
+    "private prompt text for live e2e",
+    "Bearer " + "abcdefghijklmnop",
+    "api_" + "key=x",
+    "user@example.test",
+    "C:\\Users\\operator\\secret",
+  ]) {
+    assert.equal(serialized.includes(fragment), false);
+  }
+});
+
 test("runOpenCodeLiveE2E supports explicitly skipped Tailscale for local diagnostics", async () => {
   const calls = [];
   const summary = await runOpenCodeLiveE2E({

@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 const DEFAULT_TIMEOUT_MS = 30000;
 const DEFAULT_REQUIRE_ROOT = true;
 const DEFAULT_REQUIRE_STABLE_CREDENTIAL_KEY = true;
+const DEFAULT_REQUIRE_AFFINITY_STATS = true;
 const DEFAULT_MIN_ACTIVATION_READY_ACCOUNTS = 0;
 
 export function buildOpenCodePreflightConfig(argv = process.argv, env = process.env) {
@@ -28,6 +29,11 @@ export function buildOpenCodePreflightConfig(argv = process.argv, env = process.
       args["require-stable-credential-key"] || env.OPENCODE_PREFLIGHT_REQUIRE_STABLE_CREDENTIAL_KEY,
       DEFAULT_REQUIRE_STABLE_CREDENTIAL_KEY,
       "require-stable-credential-key",
+    ),
+    requireAffinityStats: readBoolean(
+      args["require-affinity-stats"] || env.OPENCODE_PREFLIGHT_REQUIRE_AFFINITY_STATS,
+      DEFAULT_REQUIRE_AFFINITY_STATS,
+      "require-affinity-stats",
     ),
     minActivationReadyAccounts: readInteger(
       args["min-activation-ready-accounts"] ||
@@ -130,6 +136,18 @@ export async function runOpenCodePreflight(config) {
     }
   }
 
+  const affinityStatsResult = await getJSON(config, fetcher, buildAffinityStatsProbePath(), {
+    root: true,
+  });
+  summary.endpoints.affinity_usage_stats = endpointSummary(affinityStatsResult);
+  checks.push({
+    name: "affinity_usage_stats_endpoint",
+    status: endpointCheckStatus(affinityStatsResult, config.requireAffinityStats),
+    actual: affinityStatsResult.status,
+    expected: "ok",
+    message: affinityStatsResult.message,
+  });
+
   summary.checks = buildChecksSummary(checks);
   return summary;
 }
@@ -177,6 +195,15 @@ function readBoolean(raw, fallback, name) {
 
 function hasRootCredentials(config) {
   return Boolean((config.adminToken || config.adminCookie) && config.adminUserID);
+}
+
+function buildAffinityStatsProbePath() {
+  const params = new URLSearchParams({
+    rule_name: "codex cli trace",
+    using_group: "default",
+    key_fp: "00000000",
+  });
+  return `/api/log/channel_affinity_usage_cache?${params.toString()}`;
 }
 
 async function getJSON(config, fetcher, path, options = {}) {
@@ -313,6 +340,11 @@ function buildChecksSummary(items) {
     status: items.some((item) => item.status === "failed") ? "failed" : "passed",
     items,
   };
+}
+
+function endpointCheckStatus(result, required) {
+  if (result.ok) return "passed";
+  return required ? "failed" : "skipped";
 }
 
 async function fetchWithTimeout(fetcher, url, init, timeoutMs) {

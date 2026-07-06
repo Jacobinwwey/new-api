@@ -25,6 +25,8 @@ test("buildOpenCodePreflightConfig reads root auth from environment only", () =>
       "true",
       "--require-stable-credential-key",
       "false",
+      "--require-affinity-stats",
+      "false",
       "--min-activation-ready-accounts",
       "2",
     ],
@@ -39,6 +41,7 @@ test("buildOpenCodePreflightConfig reads root auth from environment only", () =>
   assert.equal(config.adminUserID, "1");
   assert.equal(config.requireRoot, true);
   assert.equal(config.requireStableCredentialKey, false);
+  assert.equal(config.requireAffinityStats, false);
   assert.equal(config.minActivationReadyAccounts, 2);
 });
 
@@ -110,6 +113,18 @@ test("runOpenCodePreflight passes stable diagnostics and summarizes accounts wit
         ],
       });
     }
+    if (String(url).includes("/api/log/channel_affinity_usage_cache")) {
+      return jsonResponse({
+        success: true,
+        data: {
+          rule_name: "codex cli trace",
+          using_group: "default",
+          key_fp: "00000000",
+          hit: 0,
+          total: 0,
+        },
+      });
+    }
     return jsonResponse({ success: false, message: "not found" }, { status: 404 });
   };
 
@@ -121,6 +136,7 @@ test("runOpenCodePreflight passes stable diagnostics and summarizes accounts wit
     timeoutMs: 1000,
     requireRoot: true,
     requireStableCredentialKey: true,
+    requireAffinityStats: true,
     minActivationReadyAccounts: 1,
     fetcher,
   });
@@ -144,6 +160,7 @@ test("runOpenCodePreflight passes stable diagnostics and summarizes accounts wit
     },
   });
   assert.equal(Object.hasOwn(summary, "base_url"), false);
+  assert.equal(summary.endpoints.affinity_usage_stats.status, "ok");
   assert.equal(calls[1].headers.Authorization, "root-token-secret");
   assert.equal(calls[1].headers["New-Api-User"], "1");
   const encoded = JSON.stringify(summary);
@@ -151,6 +168,50 @@ test("runOpenCodePreflight passes stable diagnostics and summarizes accounts wit
   assert.doesNotMatch(encoded, /u\*\*\*@example\.test/);
   assert.doesNotMatch(encoded, /api_key/);
   assert.doesNotMatch(encoded, /new-api\.example\.test/);
+});
+
+test("runOpenCodePreflight fails when required affinity stats endpoint is unavailable", async () => {
+  const fetcher = async (url) => {
+    if (String(url).endsWith("/api/status")) {
+      return jsonResponse({ version: "test" });
+    }
+    if (String(url).endsWith("/api/opencode/accounts/diagnostics")) {
+      return jsonResponse({
+        success: true,
+        data: {
+          credential_key_source: "crypto_secret",
+          uses_fallback_credential_key: false,
+        },
+      });
+    }
+    if (String(url).endsWith("/api/opencode/accounts")) {
+      return jsonResponse({ success: true, data: [] });
+    }
+    if (String(url).includes("/api/log/channel_affinity_usage_cache")) {
+      return jsonResponse({ success: false, message: "stats disabled" });
+    }
+    return jsonResponse({ success: false, message: "not found" }, { status: 404 });
+  };
+
+  const summary = await runOpenCodePreflight({
+    baseURL: "https://new-api.example.test",
+    adminToken: "root-token-secret",
+    adminCookie: "",
+    adminUserID: "1",
+    timeoutMs: 1000,
+    requireRoot: true,
+    requireStableCredentialKey: true,
+    requireAffinityStats: true,
+    minActivationReadyAccounts: 0,
+    fetcher,
+  });
+
+  assert.equal(summary.checks.status, "failed");
+  const statsCheck = summary.checks.items.find(
+    (item) => item.name === "affinity_usage_stats_endpoint",
+  );
+  assert.equal(statsCheck.status, "failed");
+  assert.equal(statsCheck.actual, "business_error");
 });
 
 test("runOpenCodePreflight redacts deployment URL parts from endpoint errors", async () => {
@@ -166,6 +227,7 @@ test("runOpenCodePreflight redacts deployment URL parts from endpoint errors", a
     timeoutMs: 1000,
     requireRoot: false,
     requireStableCredentialKey: true,
+    requireAffinityStats: true,
     minActivationReadyAccounts: 0,
     fetcher,
   });
@@ -200,6 +262,7 @@ test("runOpenCodePreflight fails fallback credential key by default", async () =
     timeoutMs: 1000,
     requireRoot: true,
     requireStableCredentialKey: true,
+    requireAffinityStats: true,
     minActivationReadyAccounts: 0,
     fetcher,
   });
@@ -237,6 +300,11 @@ test("CLI exits non-zero and redacts root auth when preflight checks fail", asyn
     if (request.url === "/api/opencode/accounts") {
       response.writeHead(200, { "Content-Type": "application/json" });
       response.end(JSON.stringify({ success: true, data: [] }));
+      return;
+    }
+    if (request.url?.startsWith("/api/log/channel_affinity_usage_cache")) {
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ success: true, data: {} }));
       return;
     }
     response.writeHead(404, { "Content-Type": "application/json" });

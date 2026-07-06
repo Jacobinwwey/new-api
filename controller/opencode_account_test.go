@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -333,4 +334,99 @@ console.log(JSON.stringify({ success: true, status: { account_id: 404, running: 
 	require.Equal(t, http.StatusOK, recorder.Code)
 	assert.Contains(t, recorder.Body.String(), "未找到该 OpenCode 账号")
 	assert.NoFileExists(t, markerPath)
+}
+
+func TestOpenCodeLoginSessionActionsSkipSidecarWhenAccountMissing(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	originalDB := model.DB
+	model.DB = db
+	t.Cleanup(func() {
+		model.DB = originalDB
+	})
+	require.NoError(t, db.AutoMigrate(&model.OpenCodeAccount{}))
+
+	tempRoot := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(tempRoot, "scripts"), 0o700))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tempRoot, "scripts", "opencode-auth-session.mjs"),
+		[]byte(`import fs from "node:fs";
+fs.writeFileSync(process.env.OPENCODE_LOGIN_ACTION_MARKER, process.argv.join("\n"));
+console.log(JSON.stringify({ success: true, status: { account_id: 404, running: false, status: "stopped" } }));
+`),
+		0o700,
+	))
+	previousWorkingDirectory, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(tempRoot))
+	t.Cleanup(func() {
+		require.NoError(t, os.Chdir(previousWorkingDirectory))
+	})
+
+	tests := []struct {
+		name    string
+		method  string
+		path    string
+		body    string
+		handler gin.HandlerFunc
+	}{
+		{
+			name:    "start",
+			method:  http.MethodPost,
+			path:    "/api/opencode/accounts/404/login/start",
+			handler: StartOpenCodeAccountLogin,
+		},
+		{
+			name:    "status",
+			method:  http.MethodGet,
+			path:    "/api/opencode/accounts/404/login/status",
+			handler: GetOpenCodeAccountLoginStatus,
+		},
+		{
+			name:    "screenshot",
+			method:  http.MethodGet,
+			path:    "/api/opencode/accounts/404/login/screenshot",
+			handler: GetOpenCodeAccountLoginScreenshot,
+		},
+		{
+			name:    "click",
+			method:  http.MethodPost,
+			path:    "/api/opencode/accounts/404/login/click",
+			body:    `{"x":12,"y":34}`,
+			handler: ClickOpenCodeAccountLogin,
+		},
+		{
+			name:    "key",
+			method:  http.MethodPost,
+			path:    "/api/opencode/accounts/404/login/key",
+			body:    `{"text":"typed-text"}`,
+			handler: KeyOpenCodeAccountLogin,
+		},
+		{
+			name:    "stop",
+			method:  http.MethodPost,
+			path:    "/api/opencode/accounts/404/login/stop",
+			handler: StopOpenCodeAccountLogin,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			markerPath := filepath.Join(tempRoot, tt.name+"-marker.txt")
+			t.Setenv("OPENCODE_LOGIN_ACTION_MARKER", markerPath)
+
+			recorder := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(recorder)
+			ctx.Params = gin.Params{{Key: "id", Value: "404"}}
+			ctx.Request = httptest.NewRequest(tt.method, tt.path, bytes.NewBufferString(tt.body))
+			ctx.Request.Header.Set("Content-Type", "application/json")
+
+			tt.handler(ctx)
+
+			require.Equal(t, http.StatusOK, recorder.Code)
+			assert.Contains(t, recorder.Body.String(), "未找到该 OpenCode 账号")
+			assert.NoFileExists(t, markerPath)
+		})
+	}
 }

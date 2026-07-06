@@ -169,8 +169,7 @@ func DeleteOpenCodeAccount(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if _, err := model.GetOpenCodeAccountById(id); err != nil {
-		common.ApiErrorMsg(c, "未找到该 OpenCode 账号")
+	if !ensureOpenCodeAccountExists(c, id) {
 		return
 	}
 	if _, err := service.PurgeOpenCodeLoginSession(c.Request.Context(), id); err != nil {
@@ -189,6 +188,9 @@ func StartOpenCodeAccountLogin(c *gin.Context) {
 	if !ok {
 		return
 	}
+	if !ensureOpenCodeAccountExists(c, id) {
+		return
+	}
 	status, err := service.StartOpenCodeLoginSession(c.Request.Context(), id)
 	if err != nil {
 		common.ApiError(c, err)
@@ -200,6 +202,9 @@ func StartOpenCodeAccountLogin(c *gin.Context) {
 func GetOpenCodeAccountLoginStatus(c *gin.Context) {
 	id, ok := parseOpenCodeAccountID(c)
 	if !ok {
+		return
+	}
+	if !ensureOpenCodeAccountExists(c, id) {
 		return
 	}
 	status, err := service.GetOpenCodeLoginSessionStatus(c.Request.Context(), id)
@@ -215,6 +220,9 @@ func GetOpenCodeAccountLoginScreenshot(c *gin.Context) {
 	if !ok {
 		return
 	}
+	if !ensureOpenCodeAccountExists(c, id) {
+		return
+	}
 	screenshot, err := service.CaptureOpenCodeLoginScreenshot(c.Request.Context(), id)
 	if err != nil {
 		common.ApiError(c, err)
@@ -226,6 +234,9 @@ func GetOpenCodeAccountLoginScreenshot(c *gin.Context) {
 func ClickOpenCodeAccountLogin(c *gin.Context) {
 	id, ok := parseOpenCodeAccountID(c)
 	if !ok {
+		return
+	}
+	if !ensureOpenCodeAccountExists(c, id) {
 		return
 	}
 	var req service.OpenCodeLoginClick
@@ -244,6 +255,9 @@ func ClickOpenCodeAccountLogin(c *gin.Context) {
 func KeyOpenCodeAccountLogin(c *gin.Context) {
 	id, ok := parseOpenCodeAccountID(c)
 	if !ok {
+		return
+	}
+	if !ensureOpenCodeAccountExists(c, id) {
 		return
 	}
 	var req service.OpenCodeLoginKeyInput
@@ -295,6 +309,9 @@ func ExtractOpenCodeAccountLogin(c *gin.Context) {
 func StopOpenCodeAccountLogin(c *gin.Context) {
 	id, ok := parseOpenCodeAccountID(c)
 	if !ok {
+		return
+	}
+	if !ensureOpenCodeAccountExists(c, id) {
 		return
 	}
 	status, err := service.StopOpenCodeLoginSession(c.Request.Context(), id)
@@ -361,6 +378,14 @@ func parseOpenCodeAccountID(c *gin.Context) (int, bool) {
 		return 0, false
 	}
 	return id, true
+}
+
+func ensureOpenCodeAccountExists(c *gin.Context, id int) bool {
+	if _, err := model.GetOpenCodeAccountById(id); err != nil {
+		common.ApiErrorMsg(c, "未找到该 OpenCode 账号")
+		return false
+	}
+	return true
 }
 
 func mergeExtractedOpenCodeSecrets(existing model.OpenCodeAccountSecrets, extracted model.OpenCodeAccountSecrets) model.OpenCodeAccountSecrets {

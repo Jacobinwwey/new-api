@@ -41,6 +41,27 @@ test("buildOpenCodeLiveE2EConfig applies strict live defaults", () => {
   assert.equal(config.cacheSmoke.minCacheSignalTokens, 1);
 });
 
+test("buildOpenCodeLiveE2EConfig defaults Tailscale ports to the New API service", () => {
+  const config = buildOpenCodeLiveE2EConfig(
+    [
+      "node",
+      "scripts/opencode-live-e2e.mjs",
+      "--target",
+      "remote-box",
+      "--base-url",
+      "https://new-api.example.test",
+    ],
+    {
+      NEW_API_KEY: "relay-key-secret",
+      NEW_API_ADMIN_TOKEN: "root-token-secret",
+      NEW_API_ADMIN_USER_ID: "1",
+      GLM_CACHE_SMOKE_KEY: "stable-cache-key",
+    },
+  );
+
+  assert.deepEqual(config.tailscale.ports, [3000]);
+});
+
 test("runOpenCodeLiveE2E passes when all gates pass", async () => {
   const calls = [];
   const summary = await runOpenCodeLiveE2E({

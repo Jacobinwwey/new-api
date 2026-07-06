@@ -36,6 +36,7 @@ const LIVE_E2E_DEFAULT_ARGS = {
   "min-request-hit-rate": "0.8",
   "min-stats-hit-rate": "0.8",
   "min-cache-signal-tokens": "1",
+  ports: "3000",
 };
 
 export function buildOpenCodeLiveE2EConfig(argv = process.argv, env = process.env) {

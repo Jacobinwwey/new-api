@@ -13,6 +13,8 @@ const DEFAULT_TIMEOUT_MS = 120000;
 const DEFAULT_MAX_OUTPUT_TOKENS = 64;
 const DEFAULT_MIN_HIT_RATE = 0;
 const DEFAULT_MIN_CACHE_SIGNAL_TOKENS = 0;
+const MIN_INPUT_REDACTION_PREFIX_LENGTH = 32;
+const MAX_INPUT_REDACTION_PREFIX_LENGTH = 512;
 
 export function cacheKeyFingerprint(value) {
   const raw = String(value || "").trim();
@@ -504,15 +506,25 @@ function sensitiveTextFragments(config) {
 function inputTextFragments(input) {
   const raw = String(input || "");
   if (!raw) return [];
-  const fragments = [raw];
+  const fragments = [raw, ...inputPrefixFragments(raw)];
   try {
     const encoded = JSON.stringify(raw);
     fragments.push(encoded);
     if (encoded.length >= 2) {
-      fragments.push(encoded.slice(1, -1));
+      const encodedInner = encoded.slice(1, -1);
+      fragments.push(encodedInner, ...inputPrefixFragments(encodedInner));
     }
   } catch {
     // JSON.stringify on a string is expected to succeed; keep raw redaction if it ever does not.
+  }
+  return fragments;
+}
+
+function inputPrefixFragments(value) {
+  const maxLength = Math.min(value.length - 1, MAX_INPUT_REDACTION_PREFIX_LENGTH);
+  const fragments = [];
+  for (let length = maxLength; length >= MIN_INPUT_REDACTION_PREFIX_LENGTH; length -= 1) {
+    fragments.push(value.slice(0, length));
   }
   return fragments;
 }

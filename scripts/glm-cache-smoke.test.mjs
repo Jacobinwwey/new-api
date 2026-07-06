@@ -231,12 +231,14 @@ test("runCacheSmoke never returns raw secrets in the summary", async () => {
 });
 
 test("runCacheSmoke rejects business failures from relay responses with redaction", async () => {
-  const prompt = "customer-private-line\nsecond-secret-line";
+  const prompt =
+    "customer-private-alpha stable prefix that may appear in truncated upstream errors\nsecond-secret-line";
+  const promptEcho = JSON.stringify(prompt).slice(1, 96);
   const fetcher = async () =>
     jsonResponse({
       success: false,
       message:
-        `relay rejected fixture-relay-secret for session-secret and ${JSON.stringify(prompt)} at https://new-api.example.test/v1/responses`,
+        `relay rejected fixture-relay-secret for session-secret and truncated body ${promptEcho} at https://new-api.example.test/v1/responses`,
     });
 
   await assert.rejects(
@@ -263,7 +265,7 @@ test("runCacheSmoke rejects business failures from relay responses with redactio
       assert.doesNotMatch(message, /response is not JSON/);
       assert.doesNotMatch(message, /fixture-relay-secret/);
       assert.doesNotMatch(message, /session-secret/);
-      assert.doesNotMatch(message, /customer-private-line/);
+      assert.doesNotMatch(message, /customer-private-alpha/);
       assert.doesNotMatch(message, /second-secret-line/);
       assert.doesNotMatch(message, /new-api\.example\.test/);
       return true;

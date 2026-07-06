@@ -82,7 +82,7 @@ The current fork now represents the Responses usage compatibility fix that previ
 
 - `UsageFromChatUsage` preserves cache details in both `PromptTokensDetails` and `InputTokensDetails`.
 - Channel-affinity usage-cache stats record cached-token and prompt-cache-hit counters with relay-format-aware rate modes.
-- Tests cover both the compatibility conversion and usage-cache observation paths.
+- Tests cover both the compatibility conversion and usage-cache observation paths. The channel-affinity usage-cache tests now allocate deterministic per-test cache keys, so repeated fast runs cannot merge counters through coarse clock resolution.
 
 The remaining cache question is not a repository representation issue; it is a live upstream behavior question. Real `glm-5.2` warm-cache verification still requires an imported OpenCode subscription account and repeated calls through New API. A separate replay/cache-key hardening patch from the old remote working tree has not been mapped to a current fork path, so it should be validated during the live E2E instead of assumed complete.
 
@@ -242,6 +242,7 @@ End-to-end verification:
 | Fork `main` inspection | Done | Current extension points and gaps identified. |
 | Privacy boundary | Done | This document contains no secrets or deployment-specific account material. |
 | Cache accounting parity in fork | Implemented | `UsageFromChatUsage` now preserves cached-token details in both Chat-style and Responses-style accounting fields. |
+| Cache accounting test isolation | Implemented locally | Channel-affinity usage-cache tests now use deterministic per-test cache keys instead of wall-clock nanosecond keys. This removes cross-test counter bleed in fast repeated runs and makes cache-hit accounting verification stronger before real `glm-5.2` E2E. |
 | OpenCode account model | Implemented | Added `opencode_accounts` model, migration registration, validation, encrypted secret storage, and masked public view. |
 | Reversible encryption helper | Implemented | Added AES-GCM `EncryptSecret` / `DecryptSecret` using `CRYPTO_SECRET`-derived key and versioned ciphertext. |
 | Root-only OpenCode account API | Implemented | Added CRUD, login-session, extract, quota refresh, and activate routes under `/api/opencode/accounts`. Quota refresh now accepts quota-only browser payloads and updates structured `quota_limit` / `quota_used` fields. |
@@ -255,6 +256,7 @@ End-to-end verification:
 | Stale browser state handling | Implemented | `login/start` now reuses an existing browser only when the recorded PID is alive and the CDP endpoint is reachable; stale PID/state combinations fall through to a fresh browser startup. |
 | Stop lifecycle cleanup | Implemented | `login/stop` now waits for recorded browser/Xvfb processes to exit after SIGTERM and falls back to a force kill, reducing stale browser process leakage before returning `stopped`. |
 | Delete lifecycle cleanup | Implemented locally | Deleting an OpenCode account now purges the account's browser session artifacts before deleting the database row: the sidecar stops recorded processes and removes the account state file plus browser profile directory. If purge fails, the account is preserved so the operator can retry cleanup instead of losing the durable handle while browser artifacts may still exist. |
+| Delete missing-account guard | Implemented locally | Delete now confirms the durable OpenCode account row exists before invoking sidecar purge. Missing account IDs return the same sanitized business error used by update/extract/quota flows and do not trigger browser artifact cleanup for an unowned account ID. |
 | Sidecar state corruption handling | Implemented locally | Missing state remains an idempotent `stopped` session, but unreadable or invalid state now returns a structured sidecar failure. Start/status/stop/purge no longer treat corrupt state as "no session", so account deletion fails closed instead of deleting the durable row while an orphaned browser profile or process may remain. |
 | Screenshot transient retry | Implemented | `login/screenshot` now retries transient browser/CDP screenshot failures for this read-only action, matching the remote smoke finding where an immediate retry succeeded after one screenshot failure. |
 | Sidecar symlinked artifact entrypoint | Implemented and locally verified | The sidecar CLI now resolves `process.argv[1]` through realpath before comparing it with `import.meta.url`, so executing the script through the `new-api-current` symlink still runs `main()`. This closes a deployment-only false-smoke risk where direct release paths worked but symlinked artifact paths produced no output. |
@@ -314,6 +316,8 @@ Existing browser reuse is now gated by CDP reachability, not by PID liveness alo
 Stop now owns process cleanup more completely. It no longer returns immediately after sending SIGTERM; it waits for recorded browser/Xvfb processes to exit and uses a force-kill fallback when they do not. This makes lifecycle smoke tests and repeated login attempts less likely to accumulate stale headless browser processes.
 
 Account deletion now participates in the same lifecycle boundary. The controller purges the account's browser session before deleting the durable row; the sidecar stops recorded processes and removes the account state file plus browser profile directory. If purge fails, deletion fails closed and leaves the account available for retry. The tradeoff is that a broken sidecar can temporarily block deletion, but that is safer than deleting the only durable account handle while remote browser artifacts may still exist.
+
+Delete now validates ownership before side effects. A missing account ID is a durable-state problem, not a sidecar cleanup request, so the controller returns the sanitized account-not-found business failure before invoking purge. This keeps external browser cleanup scoped to accounts that New API still owns and makes stale UI/API calls retry-safe without deleting arbitrary account-numbered browser artifacts.
 
 This delete-purge hardening is currently local and repository-verified only. It should not be treated as live on the remote service until the remote Tailscale peer key issue is resolved and a clean artifact rollout plus HTTP/sidecar smoke validation is repeated.
 
@@ -397,6 +401,9 @@ go test ./model ./controller ./service ./router -run "TestDeleteOpenCodeAccountP
 go test ./model ./controller ./service ./router -run "TestCreateOpenCodeAccount|TestOpenCodeAccountPublicViewReportsCredentialDecryptFailure|TestOpenCodeAccountResponse|TestMergeExtractedOpenCodeSecretsPreservesExistingFields|TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState|TestActivateOpenCodeAccount|TestBuildOpenCodeAuthCommandSpecPassesKeyTextThroughStdin|TestOpenCodeAuthSidecarStatusTreatsMissingStateAsStopped|TestOpenCodeAccountRoutesRegisterExpectedPaths" -count=1
 go test ./model ./controller ./service ./router -run "TestOpenCodeAccountDiagnosticsReportsCredentialKeySource|TestCreateOpenCodeAccount|TestOpenCodeAccountPublicViewReportsCredentialDecryptFailure|TestOpenCodeAccountResponse|TestOpenCodeAccountPublicViewReportsCredentialKeySource|TestMergeExtractedOpenCodeSecrets|TestApplyExtractedOpenCodeAccount|TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState|TestActivateOpenCodeAccount|TestBuildOpenCodeAuthCommandSpecPassesKeyTextThroughStdin|TestFindOpenCodeAuthSidecarPathSearchesExecutableDirectory|TestOpenCodeAuthSidecarStatusTreatsMissingStateAsStopped|TestOpenCodeAccountRoutesRegisterExpectedPaths" -count=1
 go test ./common ./model ./controller ./service ./router -run "TestOpenCodeAccountPublicViewReportsCredentialKeySource|TestCreateOpenCodeAccount|TestOpenCodeAccountPublicViewReportsCredentialDecryptFailure|TestOpenCodeAccountResponse|TestMergeExtractedOpenCodeSecrets|TestApplyExtractedOpenCodeAccount|TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState|TestActivateOpenCodeAccount|TestBuildOpenCodeAuthCommandSpecPassesKeyTextThroughStdin|TestFindOpenCodeAuthSidecarPathSearchesExecutableDirectory|TestOpenCodeAuthSidecarStatusTreatsMissingStateAsStopped|TestOpenCodeAccountRoutesRegisterExpectedPaths" -count=1
+go test ./controller -run "TestDeleteOpenCodeAccountPurgesLoginSessionBeforeDeleting|TestDeleteOpenCodeAccountPreservesAccountWhenPurgeFails|TestDeleteOpenCodeAccountSkipsPurgeWhenAccountMissing|TestGetOpenCodeAccountDiagnosticsReturnsNonSecretPayload|TestOpenCodeAccountDiagnosticsReportsCredentialKeySource" -count=1
+go test ./service -run "TestObserveChannelAffinityUsageCacheByRelayFormat" -count=20
+go test ./model ./controller ./service ./router ./service/relayconvert -run "TestDeleteOpenCodeAccountPurgesLoginSessionBeforeDeleting|TestDeleteOpenCodeAccountPreservesAccountWhenPurgeFails|TestDeleteOpenCodeAccountSkipsPurgeWhenAccountMissing|TestGetOpenCodeAccountDiagnosticsReturnsNonSecretPayload|TestOpenCodeAccountDiagnosticsReportsCredentialKeySource|TestCreateOpenCodeAccount|TestOpenCodeAccountPublicViewReportsCredentialDecryptFailure|TestOpenCodeAccountResponse|TestOpenCodeAccountPublicViewReportsCredentialKeySource|TestMergeExtractedOpenCodeSecrets|TestApplyExtractedOpenCodeAccount|TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState|TestActivateOpenCodeAccount|TestBuildOpenCodeAuthCommandSpecPassesKeyTextThroughStdin|TestFindOpenCodeAuthSidecarPathSearchesExecutableDirectory|TestOpenCodeAuthSidecarStatusTreatsMissingStateAsStopped|TestOpenCodeAccountRoutesRegisterExpectedPaths|TestUsageFromChatUsagePreservesCachedTokensForBothAccountingPaths|TestObserveChannelAffinityUsageCacheByRelayFormat" -count=1
 bun run typecheck
 bun test src/features/opencode-accounts/lib.test.ts
 bunx oxlint -c .oxlintrc.json src/features/opencode-accounts src/routes/_authenticated/opencode-accounts src/hooks/use-sidebar-data.ts src/hooks/use-sidebar-config.ts
@@ -558,7 +565,7 @@ https://opencode.ai/auth
 
 - `UsageFromChatUsage` 会在 `PromptTokensDetails` 与 `InputTokensDetails` 中同时保留 cache details。
 - channel-affinity usage-cache stats 会按 relay format 记录 cached-token 与 prompt-cache-hit 计数。
-- 仓库测试已经覆盖 compatibility conversion 与 usage-cache observation 路径。
+- 仓库测试已经覆盖 compatibility conversion 与 usage-cache observation 路径。channel-affinity usage-cache 测试现在会分配确定性的 per-test cache key，因此快速重复运行不会因为时钟分辨率粗糙而把不同测试的计数合并。
 
 剩余 cache 问题不再是“仓库是否已有代码表示”，而是真实上游行为验证问题。真实 `glm-5.2` warm-cache 验证仍需要导入 OpenCode 订阅账号，并通过 New API 多轮调用。旧远端工作树中的 replay/cache-key 加固补丁尚未映射到当前 fork 的具体路径，因此应在真实 E2E 中验证 request-body cache key 稳定性，而不是假定已经完成。
 
@@ -718,6 +725,7 @@ web/default/src/routes/_authenticated/opencode-accounts/index.tsx
 | fork `main` 勘察 | 已完成 | 已识别当前扩展点与缺口。 |
 | 隐私边界 | 已完成 | 本文档不包含 secret 或部署特定账号材料。 |
 | fork 内 cache accounting parity | 已实现 | `UsageFromChatUsage` 现在同时保留 Chat 风格与 Responses 风格计费字段中的 cached-token details。 |
+| Cache accounting 测试隔离 | 本地已实现 | channel-affinity usage-cache 测试现在使用确定性的 per-test cache key，不再依赖 wall-clock nanosecond key。这样快速重复运行时不会发生跨测试 counter 串扰，在真实 `glm-5.2` E2E 前提升 cache-hit accounting 验证可信度。 |
 | OpenCode account model | 已实现 | 已增加 `opencode_accounts` model、迁移注册、校验、加密 secret 存储与 masked public view。 |
 | 可逆加密 helper | 已实现 | 已增加 AES-GCM `EncryptSecret` / `DecryptSecret`，使用 `CRYPTO_SECRET` 派生 key，密文带版本前缀。 |
 | Root-only OpenCode account API | 已实现 | `/api/opencode/accounts` 下已包含 CRUD、登录会话、提取、quota refresh 与 activate 路由。quota refresh 现在支持只包含 quota 的浏览器 payload，并会更新结构化 `quota_limit` / `quota_used` 字段。 |
@@ -731,6 +739,7 @@ web/default/src/routes/_authenticated/opencode-accounts/index.tsx
 | 陈旧浏览器状态处理 | 已实现 | `login/start` 现在只会在记录的 PID 存活且 CDP endpoint 可达时复用既有浏览器；陈旧 PID/state 组合会继续走新浏览器启动流程。 |
 | Stop 生命周期清理 | 已实现 | `login/stop` 现在会在 SIGTERM 后等待记录的 browser/Xvfb 进程退出，并在未退出时使用强制清理兜底，减少返回 `stopped` 前遗留浏览器进程的概率。 |
 | Delete 生命周期清理 | 本地已实现 | 删除 OpenCode 账号现在会先 purge 该账号的浏览器会话 artifact，再删除数据库记录：sidecar 会停止记录的进程，并删除账号 state 文件与浏览器 profile 目录。如果 purge 失败，账号会保留，操作者可以重试清理，避免在可能仍有浏览器 artifact 存在时丢失持久化操作句柄。 |
+| 删除缺失账号保护 | 本地已实现 | delete 现在会先确认持久 OpenCode account 行存在，再调用 sidecar purge。缺失账号 ID 会返回与 update/extract/quota 流程一致的脱敏业务错误，并且不会为一个 New API 不再拥有的账号 ID 触发浏览器 artifact 清理。 |
 | Sidecar state 损坏处理 | 本地已实现 | state 文件缺失仍然是幂等的 `stopped` 会话，但 state 不可读或 JSON 无效现在会返回结构化 sidecar 失败。start/status/stop/purge 不再把损坏 state 当成“没有会话”，因此账号删除会 fail closed，避免在可能仍有孤立浏览器 profile 或进程时删除持久账号行。 |
 | Screenshot 瞬时失败重试 | 已实现 | `login/screenshot` 现在会对浏览器/CDP 的瞬时截图失败执行重试；该动作是只读操作，符合远端 smoke 中 screenshot 首次失败、立即重试成功的实际现象。 |
 | Sidecar symlinked artifact entrypoint | 已实现并完成本地验证 | sidecar CLI 现在会先对 `process.argv[1]` 做 realpath 解析，再与 `import.meta.url` 比较，因此通过 `new-api-current` symlink 执行脚本时仍会运行 `main()`。这修复了一个只在部署态出现的 false-smoke 风险：直接 release 路径可运行，但 symlink artifact 路径无输出。 |
@@ -835,6 +844,8 @@ default 前端现在把这个诊断消费为页面级告警。使用 fallback ke
 
 账号删除现在有与后端语义一致的 UI guard。由于 delete 会在删除持久账号行前 purge 浏览器 state/profile artifact，它不再是普通表格行操作。default 前端现在会打开现有 destructive 确认对话框，在删除请求执行时禁用重复确认，并避免操作者删除其它账号时清空当前浏览器面板。这只是确认层，不是新的后端模式：server-side purge/fail-closed 契约仍然负责硬正确性。
 
+delete 现在会在产生外部副作用前验证所有权。缺失账号 ID 是持久状态问题，不是 sidecar cleanup 请求，所以 controller 会先返回脱敏的“账号不存在”业务失败，不再调用 purge。这样外部浏览器清理只作用于 New API 仍然拥有的账号，也让 stale UI/API 调用保持可重试，不会删除任意按账号数字命名的浏览器 artifact。
+
 前端 API 边界现在会拒绝 New API 的业务失败响应，而不是把 HTTP 200 直接当作成功。这里很关键：`common.ApiError` 会以 200 返回 `{success:false}`，如果不在 wrapper 层拦截，React Query 会对失败的 purge/delete、extract、quota refresh、activation 或浏览器会话操作继续执行 success handler。这个 wrapper 保留全局错误 toast 行为，但阻止失败操作误弹成功提示，也避免后端刻意保留账号以便重试时前端错误清空状态。
 
 凭据 key-source 诊断已经从已推送的 `main` 提交 `e76a8063` 部署到远端。远端 clean artifact 构建完成，default 前端 typecheck/build 完成，classic 前端 build 完成，远端 Node sidecar 测试通过，OpenCode key-source/readiness/extractor/quota/activation Go 定向测试通过，服务重启完成，经过 readiness polling 的 HTTP smoke 返回 200，空 state directory 下的 sidecar `status` 返回 `success/stopped`。
@@ -872,6 +883,9 @@ go test ./model ./controller ./service ./router -run "TestDeleteOpenCodeAccountP
 go test ./model ./controller ./service ./router -run "TestCreateOpenCodeAccount|TestOpenCodeAccountPublicViewReportsCredentialDecryptFailure|TestOpenCodeAccountResponse|TestMergeExtractedOpenCodeSecretsPreservesExistingFields|TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState|TestActivateOpenCodeAccount|TestBuildOpenCodeAuthCommandSpecPassesKeyTextThroughStdin|TestOpenCodeAuthSidecarStatusTreatsMissingStateAsStopped|TestOpenCodeAccountRoutesRegisterExpectedPaths" -count=1
 go test ./model ./controller ./service ./router -run "TestOpenCodeAccountDiagnosticsReportsCredentialKeySource|TestCreateOpenCodeAccount|TestOpenCodeAccountPublicViewReportsCredentialDecryptFailure|TestOpenCodeAccountResponse|TestOpenCodeAccountPublicViewReportsCredentialKeySource|TestMergeExtractedOpenCodeSecrets|TestApplyExtractedOpenCodeAccount|TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState|TestActivateOpenCodeAccount|TestBuildOpenCodeAuthCommandSpecPassesKeyTextThroughStdin|TestFindOpenCodeAuthSidecarPathSearchesExecutableDirectory|TestOpenCodeAuthSidecarStatusTreatsMissingStateAsStopped|TestOpenCodeAccountRoutesRegisterExpectedPaths" -count=1
 go test ./common ./model ./controller ./service ./router -run "TestOpenCodeAccountPublicViewReportsCredentialKeySource|TestCreateOpenCodeAccount|TestOpenCodeAccountPublicViewReportsCredentialDecryptFailure|TestOpenCodeAccountResponse|TestMergeExtractedOpenCodeSecrets|TestApplyExtractedOpenCodeAccount|TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState|TestActivateOpenCodeAccount|TestBuildOpenCodeAuthCommandSpecPassesKeyTextThroughStdin|TestFindOpenCodeAuthSidecarPathSearchesExecutableDirectory|TestOpenCodeAuthSidecarStatusTreatsMissingStateAsStopped|TestOpenCodeAccountRoutesRegisterExpectedPaths" -count=1
+go test ./controller -run "TestDeleteOpenCodeAccountPurgesLoginSessionBeforeDeleting|TestDeleteOpenCodeAccountPreservesAccountWhenPurgeFails|TestDeleteOpenCodeAccountSkipsPurgeWhenAccountMissing|TestGetOpenCodeAccountDiagnosticsReturnsNonSecretPayload|TestOpenCodeAccountDiagnosticsReportsCredentialKeySource" -count=1
+go test ./service -run "TestObserveChannelAffinityUsageCacheByRelayFormat" -count=20
+go test ./model ./controller ./service ./router ./service/relayconvert -run "TestDeleteOpenCodeAccountPurgesLoginSessionBeforeDeleting|TestDeleteOpenCodeAccountPreservesAccountWhenPurgeFails|TestDeleteOpenCodeAccountSkipsPurgeWhenAccountMissing|TestGetOpenCodeAccountDiagnosticsReturnsNonSecretPayload|TestOpenCodeAccountDiagnosticsReportsCredentialKeySource|TestCreateOpenCodeAccount|TestOpenCodeAccountPublicViewReportsCredentialDecryptFailure|TestOpenCodeAccountResponse|TestOpenCodeAccountPublicViewReportsCredentialKeySource|TestMergeExtractedOpenCodeSecrets|TestApplyExtractedOpenCodeAccount|TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState|TestActivateOpenCodeAccount|TestBuildOpenCodeAuthCommandSpecPassesKeyTextThroughStdin|TestFindOpenCodeAuthSidecarPathSearchesExecutableDirectory|TestOpenCodeAuthSidecarStatusTreatsMissingStateAsStopped|TestOpenCodeAccountRoutesRegisterExpectedPaths|TestUsageFromChatUsagePreservesCachedTokensForBothAccountingPaths|TestObserveChannelAffinityUsageCacheByRelayFormat" -count=1
 bun run typecheck
 bun test src/features/opencode-accounts/lib.test.ts
 bunx oxlint -c .oxlintrc.json src/features/opencode-accounts src/routes/_authenticated/opencode-accounts src/hooks/use-sidebar-data.ts src/hooks/use-sidebar-config.ts

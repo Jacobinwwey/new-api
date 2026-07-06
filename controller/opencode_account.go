@@ -169,6 +169,10 @@ func DeleteOpenCodeAccount(c *gin.Context) {
 	if !ok {
 		return
 	}
+	if _, err := model.GetOpenCodeAccountById(id); err != nil {
+		common.ApiErrorMsg(c, "未找到该 OpenCode 账号")
+		return
+	}
 	if _, err := service.PurgeOpenCodeLoginSession(c.Request.Context(), id); err != nil {
 		common.ApiError(c, err)
 		return

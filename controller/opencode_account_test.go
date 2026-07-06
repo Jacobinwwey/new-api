@@ -292,3 +292,45 @@ func TestDeleteOpenCodeAccountPreservesAccountWhenPurgeFails(t *testing.T) {
 	require.NoError(t, db.First(&account, 78).Error)
 	assert.Equal(t, "delete-purge-fails", account.Label)
 }
+
+func TestDeleteOpenCodeAccountSkipsPurgeWhenAccountMissing(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	originalDB := model.DB
+	model.DB = db
+	t.Cleanup(func() {
+		model.DB = originalDB
+	})
+	require.NoError(t, db.AutoMigrate(&model.OpenCodeAccount{}))
+
+	tempRoot := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(tempRoot, "scripts"), 0o700))
+	markerPath := filepath.Join(tempRoot, "purge-marker.txt")
+	t.Setenv("OPENCODE_DELETE_STOP_MARKER", markerPath)
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tempRoot, "scripts", "opencode-auth-session.mjs"),
+		[]byte(`import fs from "node:fs";
+fs.writeFileSync(process.env.OPENCODE_DELETE_STOP_MARKER, "purge was called");
+console.log(JSON.stringify({ success: true, status: { account_id: 404, running: false, status: "stopped" } }));
+`),
+		0o700,
+	))
+	previousWorkingDirectory, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(tempRoot))
+	t.Cleanup(func() {
+		require.NoError(t, os.Chdir(previousWorkingDirectory))
+	})
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Params = gin.Params{{Key: "id", Value: "404"}}
+	ctx.Request = httptest.NewRequest(http.MethodDelete, "/api/opencode/accounts/404", nil)
+
+	DeleteOpenCodeAccount(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), "未找到该 OpenCode 账号")
+	assert.NoFileExists(t, markerPath)
+}

@@ -262,6 +262,7 @@ End-to-end verification:
 | Channel binding validation | Implemented | OpenCode account create/update now rejects missing channel bindings at the model boundary, preventing accounts that cannot be activated from entering persistent storage. |
 | Credential readiness diagnostics | Implemented | Public OpenCode account responses now expose masked `credential_integrity`, `activation_ready`, and `missing_activation_fields` signals, so operators can distinguish missing account material from decrypt failures without seeing raw secrets. |
 | Credential key-source diagnostics | Implemented and remotely verified | Public OpenCode account responses now include non-sensitive `credential_key_source`, and startup logs warn when existing OpenCode accounts are encrypted under the session-secret fallback instead of a dedicated crypto secret. This makes the strongest remaining deployment footgun visible before real account import/cache E2E. |
+| Frontend key-source warning | Implemented locally | The OpenCode account table now marks accounts using the fallback credential key source, and the selected-account browser panel shows an inline warning before production account import. This turns the backend diagnostic into an operator-visible decision point without exposing any credential material. |
 | Frontend account window | Implemented | Added Root-only admin route, sidebar entry, account list, enabled-channel selector with numeric ID fallback, remote screenshot controls, extract, quota refresh, activate, stop, and delete actions. |
 | Activation into existing channels | Implemented | Activation decrypts the selected account API key, updates the bound channel inside a transaction, marks the account active, and refreshes channel cache after commit. |
 | Activation credential contract | Implemented and locally verified | Activation now builds channel credentials according to the bound channel type. Plain OpenCode API keys remain valid for non-Codex channels, while Codex channels require JSON material containing `access_token` and `account_id`. Public readiness diagnostics now mark Codex/plain-key bindings as not activation-ready before the operator clicks activate. |
@@ -337,6 +338,8 @@ Activation now has a channel credential contract instead of blindly copying extr
 The biggest deployment pitfall is `CRYPTO_SECRET`: durable imported credentials require a stable value. If an operator runs with an auto-generated or rotated secret, stored OpenCode account material will fail closed on decrypt and must be re-imported.
 
 That pitfall is now represented in code, not only in this plan. OpenCode account responses expose `credential_key_source` as either `crypto_secret` or `session_secret_fallback`, and startup emits a system warning when persisted OpenCode accounts exist while the process is using the fallback key source. The response remains non-sensitive: it discloses configuration class only, never the secret value, ciphertext, cookie, workspace ID, account email, OAuth payload, or local deployment path.
+
+The default frontend now consumes that diagnostic. Accounts using the fallback key source receive a compact `Fallback key` badge in the account table, and the selected-account browser panel shows an inline warning before the operator imports production OpenCode accounts. The UI deliberately avoids a modal or blocking flow: activation readiness and backend validation still own hard correctness, while the warning makes the deployment tradeoff visible at the point of account operation.
 
 The credential key-source diagnostics are deployed from pushed `main` commit `e76a8063`. The remote clean artifact build completed, default frontend typecheck/build completed, classic frontend build completed, remote Node sidecar tests passed, OpenCode key-source/readiness/extractor/quota/activation Go tests passed, service restart completed, readiness-polled HTTP smoke returned 200, and sidecar `status` returned `success/stopped` with an empty state directory.
 
@@ -709,6 +712,7 @@ web/default/src/routes/_authenticated/opencode-accounts/index.tsx
 | Channel binding 校验 | 已实现 | OpenCode account create/update 现在会在 model 边界拒绝缺失 channel binding 的账号，避免无法 activate 的账号进入持久存储。 |
 | 凭据 readiness 诊断 | 已实现 | OpenCode account 公开响应现在提供脱敏的 `credential_integrity`、`activation_ready` 与 `missing_activation_fields` 信号，让操作者能区分账号材料缺失与密文解密失败，而不看到任何原始 secret。 |
 | 凭据 key source 诊断 | 已实现并完成远端验证 | OpenCode account 公开响应现在包含非敏感的 `credential_key_source`，并且当已有 OpenCode 账号仍使用 session-secret fallback 而不是专用 crypto secret 加密时，启动日志会给出系统告警。这样在真实账号导入与 cache E2E 前，最容易踩的部署稳定性问题会变成可见状态。 |
+| 前端 key-source 告警 | 本地已实现 | OpenCode account 列表现在会标记使用 fallback credential key source 的账号，右侧选中账号浏览器面板会在生产账号导入前显示内联告警。这样后端诊断会变成操作者可见的决策点，同时不暴露任何凭据材料。 |
 | 前端账号窗口 | 已实现 | 已增加 Root-only 管理路由、侧边栏入口、账号列表、已启用 channel 选择器与数字 ID fallback、远端截图控制、extract、quota refresh、activate、stop、delete 操作。 |
 | 激活到现有渠道 | 已实现 | 激活时解密选中账号 API key，在事务内更新绑定 channel，标记账号 active，并在 commit 后刷新 channel cache。 |
 | Activation credential contract | 已实现并完成本地验证 | 激活现在会按照绑定 channel 类型构造 channel credential。非 Codex channel 继续接受纯 OpenCode API key；Codex channel 必须提供包含 `access_token` 与 `account_id` 的 JSON 材料。公开 readiness 诊断现在会在操作者点击 activate 前，把 Codex/plain-key 绑定标记为不可激活。 |
@@ -784,6 +788,8 @@ Channel binding 现在会在 OpenCode account 持久化前校验。前端也复�
 最大部署坑点是 `CRYPTO_SECRET`：导入的持久凭证要求该值稳定。如果运行时使用自动生成或轮换的 secret，已存 OpenCode 账号材料会解密失败并 fail closed，需要重新导入。
 
 这个坑点现在不只停留在计划文档里。OpenCode account 响应会暴露 `credential_key_source`，取值为 `crypto_secret` 或 `session_secret_fallback`；如果进程使用 fallback key source 且数据库中已经存在 OpenCode 账号，启动阶段会写出系统告警。该响应仍然是非敏感的：只暴露配置类别，不暴露 secret 值、密文、cookie、workspace ID、账号邮箱、OAuth payload 或本地部署路径。
+
+default 前端现在会消费这个诊断。使用 fallback key source 的账号会在列表中显示紧凑的 `Fallback key` 标记，选中账号的浏览器面板会在操作者导入生产 OpenCode 账号前显示内联告警。UI 刻意不做 modal 或硬阻断：activation readiness 和后端校验继续负责硬正确性，前端告警负责在账号操作点暴露部署取舍。
 
 凭据 key-source 诊断已经从已推送的 `main` 提交 `e76a8063` 部署到远端。远端 clean artifact 构建完成，default 前端 typecheck/build 完成，classic 前端 build 完成，远端 Node sidecar 测试通过，OpenCode key-source/readiness/extractor/quota/activation Go 定向测试通过，服务重启完成，经过 readiness polling 的 HTTP smoke 返回 200，空 state directory 下的 sidecar `status` 返回 `success/stopped`。
 

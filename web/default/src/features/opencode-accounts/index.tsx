@@ -322,15 +322,28 @@ export function OpenCodeAccounts() {
           </section>
 
           <section className='bg-background grid min-w-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-3 rounded-lg border p-3'>
-            <div className='flex min-w-0 flex-wrap items-center gap-2'>
-              <Badge variant={loginStatus?.running ? 'default' : 'outline'}>
-                {loginStatus?.running ? t('Running') : t('Stopped')}
-              </Badge>
-              <span className='text-muted-foreground min-w-0 truncate text-sm'>
-                {loginStatus?.url ||
-                  selectedAccount?.label ||
-                  t('No account selected')}
-              </span>
+            <div className='grid min-w-0 gap-2'>
+              <div className='flex min-w-0 flex-wrap items-center gap-2'>
+                <Badge variant={loginStatus?.running ? 'default' : 'outline'}>
+                  {loginStatus?.running ? t('Running') : t('Stopped')}
+                </Badge>
+                <span className='text-muted-foreground min-w-0 truncate text-sm'>
+                  {loginStatus?.url ||
+                    selectedAccount?.label ||
+                    t('No account selected')}
+                </span>
+              </div>
+              {selectedAccount &&
+              accountUsesSessionSecretFallback(selectedAccount) ? (
+                <div className='border-warning/40 bg-warning/10 text-warning flex items-start gap-2 rounded-md border px-3 py-2 text-sm'>
+                  <AlertTriangle className='mt-0.5 size-4 shrink-0' />
+                  <span className='min-w-0'>
+                    {t(
+                      'Credential encryption is using session-secret fallback. Set a stable crypto secret before importing production OpenCode accounts.'
+                    )}
+                  </span>
+                </div>
+              ) : null}
             </div>
             <div className='flex flex-wrap items-center gap-2'>
               <Button
@@ -510,6 +523,12 @@ function AccountRow(props: AccountRowProps) {
               {props.account.quota_used}/{props.account.quota_limit}
             </span>
           ) : null}
+          {accountUsesSessionSecretFallback(props.account) ? (
+            <Badge variant='outline'>
+              <AlertTriangle data-icon='inline-start' />
+              {t('Fallback key')}
+            </Badge>
+          ) : null}
         </div>
       </TableCell>
       <TableCell className='text-right'>
@@ -565,4 +584,8 @@ function formatAccountReadiness(
     return t('Ready')
   }
   return t('Incomplete')
+}
+
+function accountUsesSessionSecretFallback(account: OpenCodeAccount) {
+  return account.credential_key_source === 'session_secret_fallback'
 }

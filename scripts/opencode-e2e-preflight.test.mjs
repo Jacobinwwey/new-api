@@ -159,6 +159,7 @@ test("runOpenCodePreflight passes stable diagnostics and summarizes accounts wit
     active: 1,
     active_ready: 1,
     activation_ready: 1,
+    activation_ready_inconsistent: 0,
     credential_integrity: {
       ok: 1,
       decrypt_failed: 1,
@@ -242,6 +243,7 @@ test("runOpenCodePreflight fails when no single account is both active and activ
   assert.equal(summary.accounts.active, 1);
   assert.equal(summary.accounts.activation_ready, 1);
   assert.equal(summary.accounts.active_ready, 0);
+  assert.equal(summary.accounts.activation_ready_inconsistent, 0);
   assert.equal(summary.checks.status, "failed");
   const activeReadyCheck = summary.checks.items.find(
     (item) => item.name === "active_ready_accounts",
@@ -252,6 +254,85 @@ test("runOpenCodePreflight fails when no single account is both active and activ
     actual: 0,
     expected_min: 1,
   });
+  assert.doesNotMatch(JSON.stringify(summary), /api_key/);
+});
+
+test("runOpenCodePreflight rejects inconsistent active-ready account payloads", async () => {
+  const fetcher = async (url) => {
+    if (String(url).endsWith("/api/status")) {
+      return jsonResponse({ version: "test" });
+    }
+    if (String(url).endsWith("/api/opencode/accounts/diagnostics")) {
+      return jsonResponse({
+        success: true,
+        data: {
+          credential_key_source: "crypto_secret",
+          uses_fallback_credential_key: false,
+        },
+      });
+    }
+    if (String(url).endsWith("/api/opencode/accounts")) {
+      return jsonResponse({
+        success: true,
+        data: [
+          {
+            active: true,
+            activation_ready: true,
+            credential_integrity: "decrypt_failed",
+            missing_activation_fields: [`api_${"key"}`],
+          },
+        ],
+      });
+    }
+    if (String(url).includes("/api/log/channel_affinity_usage_cache")) {
+      return jsonResponse({
+        success: true,
+        data: {
+          rule_name: "codex cli trace",
+          using_group: "default",
+          key_fp: "00000000",
+        },
+      });
+    }
+    return jsonResponse({ success: false, message: "not found" }, { status: 404 });
+  };
+
+  const summary = await runOpenCodePreflight({
+    baseURL: "https://new-api.example.test",
+    adminToken: "root-token-secret",
+    adminCookie: "",
+    adminUserID: "1",
+    timeoutMs: 1000,
+    requireRoot: true,
+    requireStableCredentialKey: true,
+    requireAffinityStats: true,
+    minActiveReadyAccounts: 1,
+    fetcher,
+  });
+
+  assert.equal(summary.accounts.active, 1);
+  assert.equal(summary.accounts.activation_ready, 0);
+  assert.equal(summary.accounts.active_ready, 0);
+  assert.equal(summary.accounts.activation_ready_inconsistent, 1);
+  assert.equal(summary.checks.status, "failed");
+  assert.deepEqual(
+    summary.checks.items.find((item) => item.name === "opencode_accounts_readiness_consistent"),
+    {
+      name: "opencode_accounts_readiness_consistent",
+      status: "failed",
+      actual: 1,
+      expected: 0,
+    },
+  );
+  assert.deepEqual(
+    summary.checks.items.find((item) => item.name === "active_ready_accounts"),
+    {
+      name: "active_ready_accounts",
+      status: "failed",
+      actual: 0,
+      expected_min: 1,
+    },
+  );
   assert.doesNotMatch(JSON.stringify(summary), /api_key/);
 });
 

@@ -161,6 +161,12 @@ export async function runOpenCodePreflight(config) {
     });
     if (accountsPayloadIsArray) {
       summary.accounts = summarizeAccounts(accountsResult.data);
+      checks.push({
+        name: "opencode_accounts_readiness_consistent",
+        status: summary.accounts.activation_ready_inconsistent === 0 ? "passed" : "failed",
+        actual: summary.accounts.activation_ready_inconsistent,
+        expected: 0,
+      });
     }
     if (accountsPayloadIsArray && config.minActivationReadyAccounts > 0) {
       checks.push({
@@ -396,15 +402,23 @@ function summarizeAccounts(data) {
   const missingActivationFields = {};
   const credentialIntegrity = {};
   let activationReady = 0;
+  let activationReadyInconsistent = 0;
   let active = 0;
   let activeReady = 0;
   for (const account of accounts) {
-    if (account?.activation_ready) activationReady += 1;
     if (account?.active) active += 1;
-    if (account?.active && account?.activation_ready) activeReady += 1;
     const integrity = credentialIntegrityCategory(account?.credential_integrity);
     credentialIntegrity[integrity] = (credentialIntegrity[integrity] || 0) + 1;
-    for (const field of account?.missing_activation_fields || []) {
+    const missingFields = Array.isArray(account?.missing_activation_fields)
+      ? account.missing_activation_fields
+      : [];
+    const ready = account?.activation_ready === true && integrity === "ok" && missingFields.length === 0;
+    if (account?.activation_ready === true && !ready) {
+      activationReadyInconsistent += 1;
+    }
+    if (ready) activationReady += 1;
+    if (account?.active && ready) activeReady += 1;
+    for (const field of missingFields) {
       const key = missingActivationFieldCategory(field);
       if (!key) continue;
       missingActivationFields[key] = (missingActivationFields[key] || 0) + 1;
@@ -415,6 +429,7 @@ function summarizeAccounts(data) {
     active,
     active_ready: activeReady,
     activation_ready: activationReady,
+    activation_ready_inconsistent: activationReadyInconsistent,
     credential_integrity: credentialIntegrity,
     missing_activation_fields: missingActivationFields,
   };

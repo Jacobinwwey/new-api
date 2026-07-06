@@ -65,19 +65,31 @@ export async function runOpenCodeLiveE2E(config) {
     summary.tailscale = await runners.runTailscaleLinkPreflight(config.tailscale);
     checks.push(stageCheck("tailscale_link", summary.tailscale?.checks?.status));
     if (shouldStop(summary.tailscale, config)) {
-      checks.push(stageCheck("opencode_preflight", "skipped", "blocked_by_tailscale"));
-      checks.push(stageCheck("glm_cache_smoke", "skipped", "blocked_by_tailscale"));
+      checks.push(
+        stageCheck("opencode_preflight", "skipped", "blocked_by_tailscale", {
+          allowSkipped: true,
+        }),
+      );
+      checks.push(
+        stageCheck("glm_cache_smoke", "skipped", "blocked_by_tailscale", {
+          allowSkipped: true,
+        }),
+      );
       summary.checks = buildChecksSummary(checks);
       return summary;
     }
   } else {
-    checks.push(stageCheck("tailscale_link", "skipped", "disabled"));
+    checks.push(stageCheck("tailscale_link", "skipped", "disabled", { allowSkipped: true }));
   }
 
   summary.opencode = await runners.runOpenCodePreflight(config.opencode);
   checks.push(stageCheck("opencode_preflight", summary.opencode?.checks?.status));
   if (shouldStop(summary.opencode, config)) {
-    checks.push(stageCheck("glm_cache_smoke", "skipped", "blocked_by_opencode_preflight"));
+    checks.push(
+      stageCheck("glm_cache_smoke", "skipped", "blocked_by_opencode_preflight", {
+        allowSkipped: true,
+      }),
+    );
     summary.checks = buildChecksSummary(checks);
     return summary;
   }
@@ -127,11 +139,12 @@ function readBoolean(raw, fallback, name) {
 }
 
 function shouldStop(stageSummary, config) {
-  return !config.continueOnFailure && stageSummary?.checks?.status === "failed";
+  return !config.continueOnFailure && stageSummary?.checks?.status !== "passed";
 }
 
-function stageCheck(name, status, reason = "") {
-  const normalized = status === "passed" || status === "skipped" ? status : "failed";
+function stageCheck(name, status, reason = "", options = {}) {
+  const normalized =
+    status === "passed" || (status === "skipped" && options.allowSkipped) ? status : "failed";
   return {
     name,
     status: normalized,

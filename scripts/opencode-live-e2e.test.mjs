@@ -160,6 +160,66 @@ test("runOpenCodeLiveE2E can continue after failures for diagnostics", async () 
   );
 });
 
+test("runOpenCodeLiveE2E fails when OpenCode readiness is skipped unexpectedly", async () => {
+  const summary = await runOpenCodeLiveE2E({
+    continueOnFailure: false,
+    tailscale: { target: "remote-box" },
+    opencode: {},
+    cacheSmoke: {},
+    runners: {
+      runTailscaleLinkPreflight: async () => passedStage(),
+      runOpenCodePreflight: async () => skippedStage(),
+      runCacheSmoke: async () => passedStage(),
+    },
+  });
+
+  assert.equal(summary.checks.status, "failed");
+  assert.deepEqual(summary.checks.items, [
+    {
+      name: "tailscale_link",
+      status: "passed",
+      actual: "passed",
+      expected: "passed_or_explicitly_skipped",
+      reason: "",
+    },
+    {
+      name: "opencode_preflight",
+      status: "failed",
+      actual: "skipped",
+      expected: "passed",
+      reason: "",
+    },
+    {
+      name: "glm_cache_smoke",
+      status: "skipped",
+      actual: "skipped",
+      expected: "passed",
+      reason: "blocked_by_opencode_preflight",
+    },
+  ]);
+});
+
+test("runOpenCodeLiveE2E fails when cache smoke checks are skipped unexpectedly", async () => {
+  const summary = await runOpenCodeLiveE2E({
+    continueOnFailure: false,
+    tailscale: { target: "remote-box" },
+    opencode: {},
+    cacheSmoke: {},
+    runners: {
+      runTailscaleLinkPreflight: async () => passedStage(),
+      runOpenCodePreflight: async () => passedStage(),
+      runCacheSmoke: async () => skippedStage(),
+    },
+  });
+
+  assert.equal(summary.checks.status, "failed");
+  assert.deepEqual(summary.checks.items.map((item) => [item.name, item.status, item.actual]), [
+    ["tailscale_link", "passed", "passed"],
+    ["opencode_preflight", "passed", "passed"],
+    ["glm_cache_smoke", "failed", "skipped"],
+  ]);
+});
+
 test("runOpenCodeLiveE2E supports explicitly skipped Tailscale for local diagnostics", async () => {
   const calls = [];
   const summary = await runOpenCodeLiveE2E({
@@ -206,6 +266,17 @@ function failedStage(extra = {}) {
     ...extra,
     checks: {
       status: "failed",
+      items: [],
+      ...(extra.checks || {}),
+    },
+  };
+}
+
+function skippedStage(extra = {}) {
+  return {
+    ...extra,
+    checks: {
+      status: "skipped",
       items: [],
       ...(extra.checks || {}),
     },

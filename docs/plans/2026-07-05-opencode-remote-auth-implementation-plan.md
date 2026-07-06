@@ -240,6 +240,7 @@ End-to-end verification:
 - Activate a bound channel.
 - Run repeated `glm-5.2` calls through New API.
 - Confirm cache-hit accounting remains visible in New API logs.
+- Run `scripts/opencode-live-e2e.mjs` as the final orchestration gate, keeping the default Tailscale fail-fast behavior unless explicitly diagnosing a broken environment.
 
 ### Progress
 
@@ -257,6 +258,7 @@ End-to-end verification:
 | Cache smoke response usage contract gate | Implemented locally | `scripts/glm-cache-smoke.mjs` now rejects malformed request-side `usage` counters from `/v1/responses` while preserving missing-field compatibility and accepting numeric strings. This prevents malformed relay usage from reaching request summaries as `NaN` or JSON `null` evidence during live `glm-5.2` smoke runs. |
 | Cache smoke stats contract gate | Implemented locally | `scripts/glm-cache-smoke.mjs` now rejects usage-cache stats responses that omit the `data` object or provide non-finite/negative values for present numeric counters. This closes a proof-quality gap where `--require-stats` could previously accept a malformed stats payload as available evidence when no stricter threshold was configured. |
 | OpenCode E2E preflight runner | Implemented locally | Added `scripts/opencode-e2e-preflight.mjs` plus Node tests. The runner performs non-mutating GET checks for `/api/status`, root-only OpenCode diagnostics, OpenCode account readiness summary, and the channel-affinity usage stats endpoint required by the later cache smoke. It reads root auth only from environment variables, emits only endpoint status, credential key-source class, account counts, fixed credential-integrity category counts, missing-field category counts, safe affinity-stats identity, and the count of accounts that are both active and consistently activation-ready. It exits non-zero when required root auth, stable credential key, diagnostics payload contract, account-list array contract, account readiness consistency, affinity stats readability, affinity stats identity, minimum activation-ready account counts, minimum active account counts, or minimum active-ready account counts are not satisfied. The active-ready gate prevents a false pass where one account is active while a different account is activation-ready, and the contract gates prevent malformed diagnostics/accounts/stats payloads from being treated as deployable. The readiness gate also refuses account payloads that claim `activation_ready` while credential integrity is not `ok` or missing fields are still present. Credential-integrity values from account payloads are mapped into fixed categories before summary output, so a malformed backend string is not echoed. Endpoint errors redact the configured deployment URL plus generic secret-shaped fragments such as bearer tokens, OAuth `code`/`state`, API keys, cookies, workspace IDs, emails, and local absolute paths. This turns the first post-rollout verification step into a machine gate without printing root tokens, cookies, raw emails, workspace IDs, raw missing-field names, account secrets, deployment URLs, or local deployment paths. |
+| OpenCode live E2E orchestration gate | Implemented locally | Added `scripts/opencode-live-e2e.mjs` plus Node tests. The runner composes `tailscale-link-preflight`, `opencode-e2e-preflight`, and `glm-cache-smoke` with strict production-oriented defaults: at least one active-ready OpenCode account, stable credential key source, readable affinity stats, two warm-up calls, six measured calls, request and stats hit-rate thresholds of `0.8`, and at least one cache-signal token. Tailscale failure stops the run before credentialed OpenCode/cache gates by default, so a known-broken tailnet does not consume live API quota or produce misleading cache evidence. `--continue-on-failure true` and `--skip-tailscale true` are explicit diagnostic overrides, not production acceptance modes. The clean rollout helper now includes this script's tests and syntax check in its Node gate. |
 | Channel-affinity raw key privacy | Implemented locally | Channel-affinity cache suffixes now use a stable SHA1-derived key part for the affinity value rather than embedding raw `prompt_cache_key` or request-header values. Regression coverage proves the cache suffix keeps rule/model/group context while omitting the original affinity value. This intentionally invalidates old in-memory/Redis affinity entries, which is acceptable because the cache is opportunistic and will re-warm. |
 | Channel-affinity cache-stats UI quality gate | Implemented locally | The cache-stats dialog row-building logic is now a pure helper with regression tests for hit-rate, cached-token, target fallback, and empty-state rows. The dialog no longer depends on a promise chain or nested ternary rendering, and the full `src/features/system-settings/general/channel-affinity` frontend directory now passes targeted oxlint. This improves cache observability quality before real `glm-5.2` E2E, but it does not replace live upstream cache-hit verification. |
 | OpenCode account model | Implemented | Added `opencode_accounts` model, migration registration, validation, encrypted secret storage, and masked public view. |
@@ -404,6 +406,8 @@ The helper has now been exercised as the actual rollout path. Commit `3cbf0e5f` 
 
 Tailscale health now has its own source-controlled preflight instead of remaining a manual interpretation of `tailscale ping`. The script intentionally outputs only categories and anonymized hashes, not peer names, IPs, account names, or raw node keys. Its default gates are strict enough for the requested Deskflow/New API path: the target peer must be present, not expired, online, directly reachable rather than DERP-only, TUN pingable, and TCP-open on the configured ports. This catches the current failure mode precisely: the managed target resolves to an expired/offline node identity and the tailnet data path for the relevant ports is not usable. The tradeoff is that DERP-only can be allowed with flags for diagnosis, but it should not be treated as the final "fast and robust" state for interactive desktop use.
 
+The new live E2E runner closes the remaining orchestration gap between infrastructure readiness and cache-hit proof. It deliberately orders gates as Tailscale link -> OpenCode deployment/account readiness -> `glm-5.2` cache smoke. That ordering is conservative: when the required Tailscale path is broken, the runner refuses to spend real relay/API credentials or generate a cache-hit result that cannot represent the requested production path. The tradeoff is that cache measurement is now blocked by network correctness unless `--skip-tailscale true` is set for local diagnostics; that is the right failure mode because the user requirement explicitly says the robust path must go through Tailscale.
+
 ### Verification Update
 
 Validated successfully:
@@ -520,6 +524,7 @@ Remote clean artifact rollout:
   clean rollout helper full remote apply for pushed commit 3cbf0e5f passed git_clone/revision/node_scripts/go_targeted/web_default_build/web_classic_build/go_build/service_contract/backup/install/restart/http_smoke
   independent post-apply smoke confirmed service active, local HTTP status OK, runtime script syntax OK, cache contract gate markers present, and sidecar empty-state status OK
   local Tailscale link preflight now fails the stale managed target with redacted evidence: target present but expired/offline, zero Tailscale/TUN pongs, and TCP timeout on the New API and Deskflow ports
+  local OpenCode live E2E runner tests and syntax check pass; clean rollout helper now includes that gate before future artifact switches
 ```
 
 The `web/classic` build failure was traced to `date-fns-tz@1.3.8` resolving its peer `date-fns` to the workspace-level `date-fns@4`. That package version blocks private subpath imports such as `date-fns/_lib/cloneObject/index.js`. The fix keeps `web/default` on `date-fns@4` and adds a classic-only Rsbuild alias so Semi UI's `date-fns-tz` resolves to Semi's nested `date-fns@2.30.0`.
@@ -530,6 +535,7 @@ Known verification limits:
 - The broader `src/features/channels/components/dialogs/param-override-editor-dialog.tsx` file still exposes pre-existing oxlint style findings such as `curly`, `no-nested-ternary`, and `no-useless-spread`. This change only relies on that file for the Codex preset payload; typecheck, formatting, and default frontend build pass, but this is not claimed as a lint-clean file.
 - `go test ./common ./model ./service ./controller ./router ./service/relayconvert -count=1` currently exposes pre-existing SQLite test setup failures such as missing `users`, `tasks`, and `system_tasks` tables in unrelated tests. The OpenCode-specific backend tests pass.
 - The clean rollout helper improves rollout repeatability but is not live-account evidence. `--apply false` proves source/build/service gates only; `--apply true` still changes runtime artifacts and should be treated as an intentional rollout, not a smoke check.
+- The live E2E runner is orchestration evidence until executed with a real activated account and production Tailscale path. A local test pass proves fail-fast and composition behavior, not upstream OpenCode quota/cache billing correctness.
 - Tailscale still is not production-robust. The old configured target name resolves locally to an expired/offline peer, while the remote host's current Tailscale identity is online under a different node identity. Counted Tailscale-layer pings to the current identity can return through DERP, but no direct path was established and ICMP/TUN plus TCP checks through the tailnet timed out. After the rollout, the configured LearnSSH alias also timed out through the stale tailnet address. This needs node identity cleanup or alias retargeting before the "must use Tailscale" requirement can be considered satisfied.
 - Real OpenCode Google login, account extraction, channel activation against a live subscription account, and repeated `glm-5.2` cache-hit measurement still require operator-controlled credentials and must not be committed to the repository.
 
@@ -566,7 +572,20 @@ node scripts/opencode-e2e-preflight.mjs
 5. Complete the official OpenCode/Google authorization in the remote browser session with an operator-controlled OpenCode subscription account.
 6. Extract account material and verify only masked indicators are visible in the UI.
 7. Activate the bound New API channel, confirm channel cache refresh, then rerun preflight with `--min-active-ready-accounts 1`. Keep `--min-activation-ready-accounts 1 --min-active-accounts 1` only as supplemental diagnostics; the live cache smoke gate should require a single account that satisfies both states.
-8. Run repeated `glm-5.2` requests through New API with the secret-redacted smoke runner:
+8. After Tailscale is healthy and an OpenCode account is active-ready, prefer the combined live E2E gate as the final acceptance path. If it fails, fall back to the individual preflight and smoke runners above to isolate the failed boundary:
+
+```bash
+NEW_API_BASE_URL=https://<deployed-new-api> \
+NEW_API_KEY=<relay-api-key> \
+NEW_API_ADMIN_TOKEN=<admin-access-token> \
+NEW_API_ADMIN_USER_ID=<admin-user-id> \
+GLM_CACHE_SMOKE_KEY=<stable-session-key> \
+node scripts/opencode-live-e2e.mjs \
+  --target <stable-tailnet-name> \
+  --ports 3000,24800
+```
+
+9. Run repeated `glm-5.2` requests through New API with the secret-redacted smoke runner when diagnosing cache behavior separately from Tailscale/OpenCode readiness:
 
 ```bash
 NEW_API_BASE_URL=https://<deployed-new-api> \
@@ -584,8 +603,8 @@ node scripts/glm-cache-smoke.mjs \
   --min-cache-signal-tokens 1
 ```
 
-9. Compare warm-cache behavior through the runner summary, New API channel-affinity usage stats, and upstream/OpenCode quota/accounting. For this smoke, the default input is already a stable cache-probe prefix; pass `--input` only when intentionally testing a different workload. The runner redacts the configured input from failure output, including JSON-escaped and truncated-prefix echoes, but the safer default is still to use the deterministic probe unless the live workload itself is the variable under test. Treat `warmup` as cache priming, request usage as evidence only after the response-usage contract gate, `stats.delta` as measured-run evidence only when `stats.status` is `ok` after the payload-contract and identity gates, `checks.status` as the machine gate, and `stats.data` as the final accumulated snapshot. If `reset_detected` is true, the runner now fails the machine gate by default; repeat the run after the cache window stabilizes instead of interpreting the clamped delta. The runner proves request and stats plumbing; it does not by itself prove upstream prompt-cache billing correctness.
-10. If CDP screenshot interaction proves insufficient for Google authorization, add a noVNC fallback without changing the account model or activation contract.
+10. Compare warm-cache behavior through the runner summary, New API channel-affinity usage stats, and upstream/OpenCode quota/accounting. For this smoke, the default input is already a stable cache-probe prefix; pass `--input` only when intentionally testing a different workload. The runner redacts the configured input from failure output, including JSON-escaped and truncated-prefix echoes, but the safer default is still to use the deterministic probe unless the live workload itself is the variable under test. Treat `warmup` as cache priming, request usage as evidence only after the response-usage contract gate, `stats.delta` as measured-run evidence only when `stats.status` is `ok` after the payload-contract and identity gates, `checks.status` as the machine gate, and `stats.data` as the final accumulated snapshot. If `reset_detected` is true, the runner now fails the machine gate by default; repeat the run after the cache window stabilizes instead of interpreting the clamped delta. The runner proves request and stats plumbing; it does not by itself prove upstream prompt-cache billing correctness.
+11. If CDP screenshot interaction proves insufficient for Google authorization, add a noVNC fallback without changing the account model or activation contract.
 
 ## 中文
 
@@ -827,6 +846,7 @@ web/default/src/routes/_authenticated/opencode-accounts/index.tsx
 - 激活绑定渠道。
 - 通过 New API 多轮调用 `glm-5.2`。
 - 确认 New API 日志中 cache-hit accounting 仍可见。
+- 将 `scripts/opencode-live-e2e.mjs` 作为最终编排 gate；除非明确在诊断坏环境，否则保留默认的 Tailscale fail-fast 行为。
 
 ### 当前进度
 
@@ -844,6 +864,7 @@ web/default/src/routes/_authenticated/opencode-accounts/index.tsx
 | Cache smoke response usage contract gate | 本地已实现 | `scripts/glm-cache-smoke.mjs` 现在会拒绝 `/v1/responses` 请求侧 `usage` 中畸形的 counter，同时保留缺失字段兼容并接受数字字符串。这避免真实 `glm-5.2` smoke 时把畸形 relay usage 写进请求摘要，形成 `NaN` 或 JSON `null` 证据。 |
 | Cache smoke stats contract gate | 本地已实现 | `scripts/glm-cache-smoke.mjs` 现在会拒绝缺少 `data` 对象的 usage-cache stats 响应，也会拒绝已出现但不是有限非负数字的 counter 字段。这补上了一个证据质量缺口：先前在只配置 `--require-stats`、未配置更严格阈值时，畸形 stats payload 可能被误当成可用统计证据。 |
 | OpenCode E2E preflight runner | 本地已实现 | 已新增 `scripts/opencode-e2e-preflight.mjs` 及 Node 测试。runner 会对 `/api/status`、root-only OpenCode diagnostics、OpenCode 账号 readiness 汇总，以及后续 cache smoke 依赖的 channel-affinity usage stats endpoint 执行非破坏性 GET 检查。它只从环境变量读取 root auth，输出只包含 endpoint 状态、credential key-source 类别、账号计数、固定 credential-integrity 类别计数、missing-field 类别计数、安全的 affinity-stats identity，以及同时处于 active 与一致 activation-ready 状态的账号数；当 root auth、稳定 credential key、diagnostics payload 契约、账号列表数组契约、账号 readiness 一致性、affinity stats 可读性、affinity stats identity、最小 activation-ready 账号数、最小 active 账号数或最小 active-ready 账号数不满足要求时非零退出。active-ready gate 可避免一个账号 active、另一个账号 activation-ready 时误判为可执行真实 cache smoke；payload/identity gate 可避免畸形 diagnostics/accounts/stats 响应被误当成可上线状态。readiness gate 还会拒绝声称 `activation_ready`、但 credential integrity 不是 `ok` 或仍存在 missing fields 的账号 payload。账号 payload 中的 credential-integrity 值会先映射为固定类别再进入摘要，因此畸形后端字符串不会被原样回显。endpoint 错误会脱敏已配置部署 URL，以及 bearer token、OAuth `code`/`state`、API key、cookie、workspace ID、邮箱和本地绝对路径等通用敏感形态。这样远端 rollout 后的第一步验证可以变成机器门，同时不打印 root token、cookie、原始邮箱、workspace ID、原始 missing-field 名称、账号 secret、部署 URL 或本地部署路径。 |
+| OpenCode live E2E 编排 gate | 本地已实现 | 已新增 `scripts/opencode-live-e2e.mjs` 及 Node 测试。runner 会用面向生产的严格默认值串联 `tailscale-link-preflight`、`opencode-e2e-preflight` 与 `glm-cache-smoke`：至少一个 active-ready OpenCode 账号、稳定 credential key source、可读 affinity stats、2 次 warm-up、6 次测量请求、request 与 stats 命中率阈值 `0.8`，以及至少一个 cache-signal token。默认情况下 Tailscale 失败会在进入带真实凭据的 OpenCode/cache gate 前停止，因此已知坏的 tailnet 不会继续消耗真实 API quota，也不会生成误导性的 cache 证据。`--continue-on-failure true` 与 `--skip-tailscale true` 是显式诊断开关，不是生产验收模式。clean rollout helper 现在会在 Node gate 中覆盖该脚本的测试与语法检查。 |
 | Channel-affinity 原始 key 隐私 | 本地已实现 | channel-affinity cache suffix 现在对 affinity value 使用稳定 SHA1 派生 key part，而不是嵌入原始 `prompt_cache_key` 或请求头值。回归测试证明 cache suffix 会保留 rule/model/group 上下文，同时不包含原始 affinity value。该变更会让旧的内存/Redis affinity entry 失效；这是可接受的，因为 affinity cache 是机会性缓存，会自动重新预热。 |
 | Channel-affinity cache-stats UI 质量门 | 本地已实现 | cache-stats dialog 的行构造逻辑现在抽成纯 helper，并用回归测试覆盖命中率、cached-token、目标字段兜底与空状态行。dialog 不再依赖 promise chain 或嵌套三元渲染，完整 `src/features/system-settings/general/channel-affinity` 前端目录现在已通过 targeted oxlint。这提升了真实 `glm-5.2` E2E 前的 cache 可观察性质量，但不能替代真实上游 cache-hit 验证。 |
 | OpenCode account model | 已实现 | 已增加 `opencode_accounts` model、迁移注册、校验、加密 secret 存储与 masked public view。 |
@@ -991,6 +1012,8 @@ helper 现在已经作为真实上线通道执行过。提交 `3cbf0e5f` 通过�
 
 Tailscale 健康现在也有源码内 preflight，而不再依赖手工解释 `tailscale ping` 输出。该脚本刻意只输出类别与匿名 hash，不输出 peer 名称、IP、账号名或原始 node key。默认 gate 对当前 Deskflow/New API 路径足够严格：目标 peer 必须存在、未过期、在线、走 direct path 而不是 DERP-only、TUN ping 可达，并且配置端口 TCP open。这能精确抓住当前故障模式：托管目标解析到 expired/offline node identity，并且相关端口的 tailnet 数据面不可用。这里的取舍是：DERP-only 可以通过参数放宽用于诊断，但不能被当作交互式桌面使用的最终“fast and robust”状态。
 
+新的 live E2E runner 补齐了基础设施 readiness 与 cache-hit 证明之间的编排缺口。它刻意按 Tailscale link -> OpenCode 部署/账号 readiness -> `glm-5.2` cache smoke 的顺序执行 gate。这个顺序偏保守：当必须使用的 Tailscale 路径已经坏掉时，runner 不会继续消耗真实 relay/API 凭据，也不会产出一个不能代表目标生产路径的 cache-hit 结果。代价是除非用 `--skip-tailscale true` 做本地诊断，否则 cache 测量会被网络正确性阻塞；这是正确的失败模式，因为用户需求明确要求 robust path 必须走 Tailscale。
+
 ### 验证更新
 
 已成功验证：
@@ -1107,6 +1130,7 @@ Sidecar smoke：
   clean rollout helper 针对已推送提交 3cbf0e5f 的远端完整 apply 通过 git_clone/revision/node_scripts/go_targeted/web_default_build/web_classic_build/go_build/service_contract/backup/install/restart/http_smoke
   apply 后独立 smoke 确认服务 active、本机 HTTP status OK、runtime 脚本语法 OK、cache contract gate 标记存在、sidecar 空状态 status OK
   本地 Tailscale link preflight 现在会用脱敏证据让陈旧托管目标失败：目标存在但 expired/offline，Tailscale/TUN pong 为 0，New API 与 Deskflow 端口 TCP timeout
+  本地 OpenCode live E2E runner 测试与语法检查通过；clean rollout helper 后续切换 artifact 前会覆盖该 gate
 ```
 
 `web/classic` 构建失败的根因已经定位为 `date-fns-tz@1.3.8` 将 peer `date-fns` 解析到了 workspace 顶层的 `date-fns@4`。该版本通过 package exports 阻断 `date-fns/_lib/cloneObject/index.js` 等 private subpath。修复方式是保持 `web/default` 使用 `date-fns@4`，只在 classic 的 Rsbuild 配置中增加局部 alias，让 Semi UI 的 `date-fns-tz` 解析到 Semi 自带的 `date-fns@2.30.0`。
@@ -1117,6 +1141,7 @@ Sidecar smoke：
 - 更大的 `src/features/channels/components/dialogs/param-override-editor-dialog.tsx` 文件仍然存在既有 oxlint 风格问题，例如 `curly`、`no-nested-ternary` 和 `no-useless-spread`。本次只依赖该文件中的 Codex preset payload；typecheck、格式检查与 default 前端构建通过，但不声称该文件已经 lint-clean。
 - `go test ./common ./model ./service ./controller ./router ./service/relayconvert -count=1` 当前暴露既有 SQLite 测试初始化问题，典型错误是无关测试缺少 `users`、`tasks`、`system_tasks` 表；本次 OpenCode 后端相关测试已通过。
 - Clean rollout helper 提升的是上线可重复性，不是真实账号证据。`--apply false` 只能证明 source/build/service gate；`--apply true` 仍然会替换运行 artifact，应该被视为一次明确上线，而不是普通 smoke check。
+- live E2E runner 在真正使用已激活账号和生产 Tailscale 路径执行前，只能证明编排行为。当前本地测试通过证明 fail-fast 与组合逻辑，不证明上游 OpenCode quota/cache 计费正确。
 - Tailscale 仍不具备生产级稳健性。本地旧目标名解析到一个 expired/offline peer，而远端主机当前 Tailscale identity 是另一个在线且未过期的节点身份。对当前 identity 做计数型 Tailscale-layer ping 可以通过 DERP 返回，但没有形成 direct path，ICMP/TUN 与 tailnet TCP 检查均 timeout。rollout 后，已配置的 LearnSSH alias 也开始通过陈旧 tailnet 地址超时。必须先清理节点身份或重定向 alias，才能认为“必须走 Tailscale”的要求被满足。
 - 真实 OpenCode Google 登录、账号提取、订阅账号 channel 激活，以及多轮 `glm-5.2` cache-hit 统计验证仍需要操作者控制的真实凭证，不能写入仓库。
 
@@ -1153,7 +1178,20 @@ node scripts/opencode-e2e-preflight.mjs
 5. 使用操作者控制的 OpenCode 订阅账号，在远端浏览器会话中完成官方 OpenCode/Google 授权。
 6. 提取账号材料，并确认 UI 只显示 masked indicator。
 7. 激活绑定的 New API channel，确认 channel cache refresh，然后用 `--min-active-ready-accounts 1` 重跑 preflight。`--min-activation-ready-accounts 1 --min-active-accounts 1` 只能作为补充诊断；真实 cache smoke gate 应要求同一个账号同时满足两个状态。
-8. 用输出脱敏的 smoke runner 通过 New API 多轮调用 `glm-5.2`：
+8. Tailscale 健康且 OpenCode 账号达到 active-ready 后，优先使用组合 live E2E gate 作为最终验收路径。如果它失败，再回退到上面的独立 preflight 与 smoke runner 定位具体边界：
+
+```bash
+NEW_API_BASE_URL=https://<deployed-new-api> \
+NEW_API_KEY=<relay-api-key> \
+NEW_API_ADMIN_TOKEN=<admin-access-token> \
+NEW_API_ADMIN_USER_ID=<admin-user-id> \
+GLM_CACHE_SMOKE_KEY=<stable-session-key> \
+node scripts/opencode-live-e2e.mjs \
+  --target <stable-tailnet-name> \
+  --ports 3000,24800
+```
+
+9. 需要把 cache 行为与 Tailscale/OpenCode readiness 分开诊断时，再用输出脱敏的 smoke runner 通过 New API 多轮调用 `glm-5.2`：
 
 ```bash
 NEW_API_BASE_URL=https://<deployed-new-api> \
@@ -1171,5 +1209,5 @@ node scripts/glm-cache-smoke.mjs \
   --min-cache-signal-tokens 1
 ```
 
-9. 结合 runner 摘要、New API channel-affinity usage stats 与上游/OpenCode quota/accounting 比较 warm-cache 行为。默认输入已经是稳定 cache-probe prefix；只有在刻意验证其它 workload 时才传 `--input`。runner 会从失败输出中脱敏已配置 input，包括 JSON-escaped 与 truncated-prefix 回显；但更安全的默认做法仍是使用确定性 probe，除非真实 workload 本身就是待验证变量。本轮 smoke 应把 `warmup` 视为 cache 预热，只在 response-usage contract gate 之后把 request usage 当作证据，只在 `stats.status` 经过 payload-contract 与 identity gate 后为 `ok` 时把 `stats.delta` 作为测量阶段证据，把 `checks.status` 作为机器验收门，把 `stats.data` 只作为 final 累计快照。如果 `reset_detected` 为 true，runner 现在会默认让机器门失败；应等 cache 窗口稳定后重跑，而不是解释被 clamp 的 delta。runner 证明请求链路与统计读取链路可重复，不单独证明上游 prompt-cache 计费正确。
-10. 如果 CDP 截图交互不足以完成 Google 授权，再加 noVNC 兜底，但不改变账号模型和 activation contract。
+10. 结合 runner 摘要、New API channel-affinity usage stats 与上游/OpenCode quota/accounting 比较 warm-cache 行为。默认输入已经是稳定 cache-probe prefix；只有在刻意验证其它 workload 时才传 `--input`。runner 会从失败输出中脱敏已配置 input，包括 JSON-escaped 与 truncated-prefix 回显；但更安全的默认做法仍是使用确定性 probe，除非真实 workload 本身就是待验证变量。本轮 smoke 应把 `warmup` 视为 cache 预热，只在 response-usage contract gate 之后把 request usage 当作证据，只在 `stats.status` 经过 payload-contract 与 identity gate 后为 `ok` 时把 `stats.delta` 作为测量阶段证据，把 `checks.status` 作为机器验收门，把 `stats.data` 只作为 final 累计快照。如果 `reset_detected` 为 true，runner 现在会默认让机器门失败；应等 cache 窗口稳定后重跑，而不是解释被 clamp 的 delta。runner 证明请求链路与统计读取链路可重复，不单独证明上游 prompt-cache 计费正确。
+11. 如果 CDP 截图交互不足以完成 Google 授权，再加 noVNC 兜底，但不改变账号模型和 activation contract。

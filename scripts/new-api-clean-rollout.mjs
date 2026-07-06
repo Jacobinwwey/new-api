@@ -125,12 +125,13 @@ export async function runCleanRollout(config) {
         "node_scripts",
         [
           `cd ${shellQuote(srcDir)}`,
-          "node --test scripts/glm-cache-smoke.test.mjs scripts/opencode-e2e-preflight.test.mjs scripts/opencode-auth-session.test.mjs scripts/new-api-clean-rollout.test.mjs scripts/tailscale-link-preflight.test.mjs",
+          "node --test scripts/glm-cache-smoke.test.mjs scripts/opencode-e2e-preflight.test.mjs scripts/opencode-auth-session.test.mjs scripts/new-api-clean-rollout.test.mjs scripts/tailscale-link-preflight.test.mjs scripts/opencode-live-e2e.test.mjs",
           "node --check scripts/glm-cache-smoke.mjs",
           "node --check scripts/opencode-e2e-preflight.mjs",
           "node --check scripts/opencode-auth-session.mjs",
           "node --check scripts/new-api-clean-rollout.mjs",
           "node --check scripts/tailscale-link-preflight.mjs",
+          "node --check scripts/opencode-live-e2e.mjs",
         ].join(" && "),
         stepTimeoutMs,
       );

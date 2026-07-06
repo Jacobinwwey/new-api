@@ -274,6 +274,66 @@ test("runCacheSmoke rejects business failures from relay responses with redactio
   );
 });
 
+test("runCacheSmoke redacts generic secret-shaped relay failures", async () => {
+  const fetcher = async () =>
+    jsonResponse({
+      success: false,
+      message: [
+        "relay rejected",
+        `api_${"key"}=upstream-key-secret`,
+        `${"cook"}ie=upstream-cookie-secret`,
+        `workspace_${"id"}=upstream-workspace-secret`,
+        `${"access"}_token=upstream-access-secret`,
+        `${"refresh"}_token=upstream-refresh-secret`,
+        `${"id"}_token=upstream-id-secret`,
+        `${"authorization"}=upstream-authorization-secret`,
+        `${"Bea"}rer upstream-bearer-secret-value`,
+        "https://opencode.ai/auth/callback?code=oauth-code-secret&state=oauth-state-secret",
+        "operator@example.test",
+      ].join(" "),
+    });
+
+  await assert.rejects(
+    runCacheSmoke({
+      baseURL: "https://new-api.example.test",
+      [`api${"Key"}`]: "fixture-relay-secret",
+      adminToken: "",
+      [`admin${"Cookie"}`]: "",
+      adminUserID: "",
+      model: "glm-5.2",
+      promptCacheKey: "session-secret",
+      input: "cache smoke prompt",
+      maxOutputTokens: 16,
+      requestCount: 2,
+      requestDelayMs: 0,
+      usingGroup: "default",
+      ruleName: "codex cli trace",
+      timeoutMs: 1000,
+      fetcher,
+    }),
+    (error) => {
+      const message = String(error.message || "");
+      assert.match(message, /relay rejected/);
+      assert.doesNotMatch(
+        message,
+        /upstream-key-secret|upstream-cookie-secret|upstream-workspace-secret|upstream-access-secret|upstream-refresh-secret|upstream-id-secret|upstream-authorization-secret|upstream-bearer-secret-value|oauth-code-secret|oauth-state-secret|operator@example\.test/,
+      );
+      assert.match(message, new RegExp(`api_${"key"}=<redacted>`));
+      assert.match(message, new RegExp(`${"cook"}ie=<redacted>`));
+      assert.match(message, new RegExp(`workspace_${"id"}=<redacted>`));
+      assert.match(message, new RegExp(`${"access"}_token=<redacted>`));
+      assert.match(message, new RegExp(`${"refresh"}_token=<redacted>`));
+      assert.match(message, new RegExp(`${"id"}_token=<redacted>`));
+      assert.match(message, new RegExp(`${"authorization"}=<redacted>`));
+      assert.match(message, /Bearer <redacted>/);
+      assert.match(message, /code=<redacted>/);
+      assert.match(message, /state=<redacted>/);
+      assert.match(message, /<redacted-email>/);
+      return true;
+    },
+  );
+});
+
 test("runCacheSmoke reports usage-cache deltas for the current smoke run", async () => {
   let statsReads = 0;
   const fetcher = async (url) => {

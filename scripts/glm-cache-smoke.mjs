@@ -15,6 +15,11 @@ const DEFAULT_MIN_HIT_RATE = 0;
 const DEFAULT_MIN_CACHE_SIGNAL_TOKENS = 0;
 const MIN_INPUT_REDACTION_PREFIX_LENGTH = 32;
 const MAX_INPUT_REDACTION_PREFIX_LENGTH = 512;
+const SECRET_ASSIGNMENT_PATTERN =
+  /\b(api[_-]?key|cookie|workspace[_-]?id|access[_-]?token|refresh[_-]?token|id[_-]?token|authorization)\s*[:=]\s*["']?[^"',\s&}]+/gi;
+const OAUTH_QUERY_PATTERN = /([?&](?:code|state|access_token|refresh_token|id_token)=)[^&\s]+/gi;
+const BEARER_TOKEN_PATTERN = /\bBearer\s+[A-Za-z0-9._~+/=-]{12,}/gi;
+const EMAIL_PATTERN = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
 
 export function cacheKeyFingerprint(value) {
   const raw = String(value || "").trim();
@@ -508,6 +513,10 @@ function sanitizeText(text, config) {
     if (!fragment) continue;
     result = result.split(fragment).join("<redacted>");
   }
+  result = result.replace(BEARER_TOKEN_PATTERN, "Bearer <redacted>");
+  result = result.replace(OAUTH_QUERY_PATTERN, "$1<redacted>");
+  result = result.replace(SECRET_ASSIGNMENT_PATTERN, (_match, key) => `${key}=<redacted>`);
+  result = result.replace(EMAIL_PATTERN, "<redacted-email>");
   return result;
 }
 

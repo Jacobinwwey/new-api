@@ -23,6 +23,12 @@ export const WEB_DEFAULT_CHECK_COMMANDS = [
   "bunx oxlint -c .oxlintrc.json src/features/opencode-accounts src/routes/_authenticated/opencode-accounts",
   "bun run typecheck",
 ];
+export const GO_ROLLOUT_CHECK_COMMANDS = [
+  "go test ./service/relayconvert -run TestUsageFromChatUsagePreservesCachedTokensForBothAccountingPaths -count=1",
+  "go test ./service -run 'TestObserveChannelAffinityUsageCacheByRelayFormat|TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState|TestActivateOpenCodeAccount|TestBuildOpenCodeAuthCommandSpecPassesKeyTextThroughStdin|TestOpenCodeAuthSidecarStatusTreatsMissingStateAsStopped' -count=1",
+  "go test ./controller -run 'TestGetOpenCodeAccountDiagnosticsReturnsNonSecretPayload|TestOpenCodeAccountDiagnosticsReportsCredentialKeySource|TestOpenCodeAccountResponseDoesNotExposeSecrets' -count=1",
+  "go test ./common ./model ./service ./controller ./router ./service/relayconvert -count=1",
+];
 
 const SECRET_ASSIGNMENT_PATTERN =
   /\b(api[_-]?key|cookie|workspace[_-]?id|access[_-]?token|refresh[_-]?token|id[_-]?token|authorization)\s*[:=]\s*["']?[^"',\s&}]+/gi;
@@ -149,9 +155,7 @@ export async function runCleanRollout(config) {
         "go_targeted",
         [
           `cd ${shellQuote(srcDir)}`,
-          "go test ./service/relayconvert -run TestUsageFromChatUsagePreservesCachedTokensForBothAccountingPaths -count=1",
-          "go test ./service -run 'TestObserveChannelAffinityUsageCacheByRelayFormat|TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState|TestActivateOpenCodeAccount|TestBuildOpenCodeAuthCommandSpecPassesKeyTextThroughStdin|TestOpenCodeAuthSidecarStatusTreatsMissingStateAsStopped' -count=1",
-          "go test ./controller -run 'TestGetOpenCodeAccountDiagnosticsReturnsNonSecretPayload|TestOpenCodeAccountDiagnosticsReportsCredentialKeySource|TestOpenCodeAccountResponseDoesNotExposeSecrets' -count=1",
+          ...GO_ROLLOUT_CHECK_COMMANDS,
         ].join(" && "),
         stepTimeoutMs,
       );

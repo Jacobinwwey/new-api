@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  GO_ROLLOUT_CHECK_COMMANDS,
   RUNTIME_SCRIPTS,
   WEB_DEFAULT_CHECK_COMMANDS,
   buildRolloutConfig,
@@ -152,5 +153,14 @@ test("web default checks cover OpenCode account UI behavior before rollout build
     "bun test src/features/opencode-accounts/lib.test.ts",
     "bunx oxlint -c .oxlintrc.json src/features/opencode-accounts src/routes/_authenticated/opencode-accounts",
     "bun run typecheck",
+  ]);
+});
+
+test("go rollout checks include the cross-package isolation gate", () => {
+  assert.deepEqual(GO_ROLLOUT_CHECK_COMMANDS, [
+    "go test ./service/relayconvert -run TestUsageFromChatUsagePreservesCachedTokensForBothAccountingPaths -count=1",
+    "go test ./service -run 'TestObserveChannelAffinityUsageCacheByRelayFormat|TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState|TestActivateOpenCodeAccount|TestBuildOpenCodeAuthCommandSpecPassesKeyTextThroughStdin|TestOpenCodeAuthSidecarStatusTreatsMissingStateAsStopped' -count=1",
+    "go test ./controller -run 'TestGetOpenCodeAccountDiagnosticsReturnsNonSecretPayload|TestOpenCodeAccountDiagnosticsReportsCredentialKeySource|TestOpenCodeAccountResponseDoesNotExposeSecrets' -count=1",
+    "go test ./common ./model ./service ./controller ./router ./service/relayconvert -count=1",
   ]);
 });

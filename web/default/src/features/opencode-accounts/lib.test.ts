@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
 import {
+  canConfirmOpenCodeAccountDelete,
+  isOpenCodeAccountDeleteDialogOpen,
   isOpenCodeAccountPageRefreshing,
   openCodeAccountWorkspaceGridRows,
   refreshOpenCodeAccountPageData,
@@ -71,5 +73,27 @@ describe('OpenCode account page helpers', () => {
       openCodeAccountWorkspaceGridRows(true),
       'grid-rows-[auto_minmax(0,1fr)]'
     )
+  })
+
+  test('opens delete confirmation only when an account is targeted', () => {
+    assert.equal(isOpenCodeAccountDeleteDialogOpen(null), false)
+    assert.equal(
+      isOpenCodeAccountDeleteDialogOpen({
+        id: 7,
+        label: 'production opencode',
+      }),
+      true
+    )
+  })
+
+  test('allows delete confirmation only while a target exists and delete is idle', () => {
+    const target = {
+      id: 7,
+      label: 'production opencode',
+    }
+
+    assert.equal(canConfirmOpenCodeAccountDelete(null, false), false)
+    assert.equal(canConfirmOpenCodeAccountDelete(target, true), false)
+    assert.equal(canConfirmOpenCodeAccountDelete(target, false), true)
   })
 })

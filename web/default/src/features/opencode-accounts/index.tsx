@@ -13,6 +13,7 @@ import { type MouseEvent, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
+import { ConfirmDialog } from '@/components/confirm-dialog'
 import { SectionPageLayout } from '@/components/layout'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -54,9 +55,12 @@ import {
   stopOpenCodeLogin,
 } from './api'
 import {
+  canConfirmOpenCodeAccountDelete,
+  isOpenCodeAccountDeleteDialogOpen,
   isOpenCodeAccountPageRefreshing,
   openCodeAccountWorkspaceGridRows,
   refreshOpenCodeAccountPageData,
+  type OpenCodeAccountDeleteTarget,
 } from './lib'
 import type { OpenCodeAccount } from './types'
 
@@ -71,6 +75,8 @@ export function OpenCodeAccounts() {
   const [channelID, setChannelID] = useState('')
   const [textInput, setTextInput] = useState('')
   const [screenshot, setScreenshot] = useState('')
+  const [deleteTarget, setDeleteTarget] =
+    useState<OpenCodeAccountDeleteTarget>(null)
 
   const accountsQuery = useQuery({
     queryKey: ['opencode-accounts'],
@@ -131,10 +137,13 @@ export function OpenCodeAccounts() {
 
   const deleteMutation = useMutation({
     mutationFn: deleteOpenCodeAccount,
-    onSuccess: async () => {
+    onSuccess: async (_response, deletedID) => {
       await refreshAccounts()
-      setSelectedID(null)
-      setScreenshot('')
+      if (selectedID === deletedID) {
+        setSelectedID(null)
+        setScreenshot('')
+      }
+      setDeleteTarget(null)
       toast.success(t('OpenCode account deleted'))
     },
   })
@@ -330,8 +339,14 @@ export function OpenCodeAccounts() {
                         key={account.id}
                         account={account}
                         selected={account.id === selectedID}
+                        deleteDisabled={deleteMutation.isPending}
                         onSelect={() => setSelectedID(account.id)}
-                        onDelete={() => deleteMutation.mutate(account.id)}
+                        onDelete={() =>
+                          setDeleteTarget({
+                            id: account.id,
+                            label: account.label,
+                          })
+                        }
                       />
                     ))}
                     {accounts.length === 0 ? (
@@ -352,9 +367,7 @@ export function OpenCodeAccounts() {
             <section className='bg-background grid min-w-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-3 rounded-lg border p-3'>
               <div className='grid min-w-0 gap-2'>
                 <div className='flex min-w-0 flex-wrap items-center gap-2'>
-                  <Badge
-                    variant={loginStatus?.running ? 'default' : 'outline'}
-                  >
+                  <Badge variant={loginStatus?.running ? 'default' : 'outline'}>
                     {loginStatus?.running ? t('Running') : t('Stopped')}
                   </Badge>
                   <span className='text-muted-foreground min-w-0 truncate text-sm'>
@@ -460,6 +473,31 @@ export function OpenCodeAccounts() {
             </section>
           </div>
         </div>
+        <ConfirmDialog
+          open={isOpenCodeAccountDeleteDialogOpen(deleteTarget)}
+          onOpenChange={(open) => {
+            if (deleteMutation.isPending) return
+            if (!open) setDeleteTarget(null)
+          }}
+          title={t('Delete OpenCode account')}
+          desc={t(
+            'Delete OpenCode account "{{label}}"? Browser session state and profile will be purged before the account is removed. This action cannot be undone.',
+            { label: deleteTarget?.label ?? '' }
+          )}
+          confirmText={t('Delete')}
+          destructive
+          isLoading={deleteMutation.isPending}
+          disabled={
+            !canConfirmOpenCodeAccountDelete(
+              deleteTarget,
+              deleteMutation.isPending
+            )
+          }
+          handleConfirm={() => {
+            if (!deleteTarget) return
+            deleteMutation.mutate(deleteTarget.id)
+          }}
+        />
       </SectionPageLayout.Content>
     </SectionPageLayout>
   )
@@ -494,6 +532,7 @@ function formatChannelOption(channel: Channel, t: (key: string) => string) {
 type AccountRowProps = {
   account: OpenCodeAccount
   selected: boolean
+  deleteDisabled: boolean
   onSelect: () => void
   onDelete: () => void
 }
@@ -534,9 +573,7 @@ function AccountRow(props: AccountRowProps) {
             secretCount >= 3 && !credentialBroken ? 'default' : 'outline'
           }
         >
-          {credentialBroken ? (
-            <AlertTriangle data-icon='inline-start' />
-          ) : null}
+          {credentialBroken ? <AlertTriangle data-icon='inline-start' /> : null}
           {secretCount}/3
         </Badge>
       </TableCell>
@@ -575,6 +612,7 @@ function AccountRow(props: AccountRowProps) {
           variant='ghost'
           size='icon-sm'
           aria-label={t('Delete')}
+          disabled={props.deleteDisabled}
           onClick={(event) => {
             event.stopPropagation()
             props.onDelete()

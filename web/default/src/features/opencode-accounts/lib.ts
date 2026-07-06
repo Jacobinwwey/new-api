@@ -9,6 +9,11 @@ type OpenCodePageRefreshSources = {
   diagnostics: OpenCodePageRefreshSource
 }
 
+export type OpenCodeAccountDeleteTarget = {
+  id: number
+  label: string
+} | null
+
 export function refreshOpenCodeAccountPageData(
   sources: OpenCodePageRefreshSources
 ) {
@@ -33,4 +38,17 @@ export function openCodeAccountWorkspaceGridRows(
   return usesFallbackCredentialKey
     ? 'grid-rows-[auto_minmax(0,1fr)]'
     : 'grid-rows-[minmax(0,1fr)]'
+}
+
+export function isOpenCodeAccountDeleteDialogOpen(
+  target: OpenCodeAccountDeleteTarget
+) {
+  return target !== null
+}
+
+export function canConfirmOpenCodeAccountDelete(
+  target: OpenCodeAccountDeleteTarget,
+  isDeleting: boolean
+) {
+  return target !== null && !isDeleting
 }

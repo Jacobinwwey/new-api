@@ -22,6 +22,8 @@ const EMAIL_PATTERN = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
 const WINDOWS_ABSOLUTE_PATH_PATTERN = /\b[A-Za-z]:\\[^\s"'<>]+/g;
 const POSIX_ABSOLUTE_PATH_PATTERN =
   /(^|[\s"'(])\/(?:home|root|opt|var|srv|etc|mnt|tmp|data)\/[^\s"'<>)]*/g;
+const MIN_INPUT_REDACTION_PREFIX_LENGTH = 32;
+const MAX_INPUT_REDACTION_PREFIX_LENGTH = 512;
 
 const LIVE_E2E_DEFAULT_ARGS = {
   "min-active-ready-accounts": "1",
@@ -248,11 +250,36 @@ function sensitiveFragments(config) {
     config?.cacheSmoke?.adminToken,
     config?.cacheSmoke?.adminCookie,
     config?.cacheSmoke?.promptCacheKey,
-    config?.cacheSmoke?.input,
+    ...inputTextFragments(config?.cacheSmoke?.input),
     ...deploymentURLParts(config?.opencode?.baseURL),
     ...deploymentURLParts(config?.cacheSmoke?.baseURL),
   ].filter(Boolean);
   return Array.from(new Set(fragments)).sort((left, right) => right.length - left.length);
+}
+
+function inputTextFragments(input) {
+  const raw = String(input || "");
+  if (!raw) return [];
+  const fragments = [raw, ...inputPrefixFragments(raw)];
+  try {
+    const encoded = JSON.stringify(raw);
+    fragments.push(encoded);
+    if (encoded.length >= 2) {
+      const encodedInner = encoded.slice(1, -1);
+      fragments.push(encodedInner, ...inputPrefixFragments(encodedInner));
+    }
+  } catch {
+  }
+  return fragments;
+}
+
+function inputPrefixFragments(value) {
+  const maxLength = Math.min(value.length - 1, MAX_INPUT_REDACTION_PREFIX_LENGTH);
+  const fragments = [];
+  for (let length = maxLength; length >= MIN_INPUT_REDACTION_PREFIX_LENGTH; length -= 1) {
+    fragments.push(value.slice(0, length));
+  }
+  return fragments;
 }
 
 function deploymentURLParts(rawBaseURL) {

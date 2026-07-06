@@ -333,6 +333,49 @@ test("runOpenCodeLiveE2E redacts successful stage summaries defensively", async 
   }
 });
 
+test("runOpenCodeLiveE2E redacts prompt echo variants from stage summaries", async () => {
+  const liveInput = [
+    "cache prompt alpha line 001",
+    "cache prompt beta line 002",
+    "cache prompt gamma line 003",
+  ].join("\n");
+  const encodedInput = JSON.stringify(liveInput);
+  const encodedInnerInput = encodedInput.slice(1, -1);
+  const leakedFragments = [
+    liveInput.slice(0, 44),
+    encodedInput,
+    encodedInnerInput,
+    encodedInnerInput.slice(0, 44),
+  ];
+
+  const summary = await runOpenCodeLiveE2E({
+    continueOnFailure: true,
+    tailscale: null,
+    opencode: {},
+    cacheSmoke: {
+      input: liveInput,
+    },
+    runners: {
+      runOpenCodePreflight: async () => passedStage(),
+      runCacheSmoke: async () =>
+        passedStage({
+          upstream_error: {
+            raw_prefix: leakedFragments[0],
+            json_encoded: leakedFragments[1],
+            json_inner: leakedFragments[2],
+            json_inner_prefix: leakedFragments[3],
+          },
+        }),
+    },
+  });
+
+  assert.equal(summary.checks.status, "passed");
+  const serialized = JSON.stringify(summary);
+  for (const fragment of leakedFragments) {
+    assert.equal(serialized.includes(fragment), false);
+  }
+});
+
 test("runOpenCodeLiveE2E supports explicitly skipped Tailscale for local diagnostics", async () => {
   const calls = [];
   const summary = await runOpenCodeLiveE2E({

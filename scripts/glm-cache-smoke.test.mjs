@@ -234,7 +234,8 @@ test("runCacheSmoke rejects business failures from relay responses with redactio
   const fetcher = async () =>
     jsonResponse({
       success: false,
-      message: "relay rejected fixture-relay-secret for session-secret",
+      message:
+        "relay rejected fixture-relay-secret for session-secret at https://new-api.example.test/v1/responses",
     });
 
   await assert.rejects(
@@ -261,6 +262,7 @@ test("runCacheSmoke rejects business failures from relay responses with redactio
       assert.doesNotMatch(message, /response is not JSON/);
       assert.doesNotMatch(message, /fixture-relay-secret/);
       assert.doesNotMatch(message, /session-secret/);
+      assert.doesNotMatch(message, /new-api\.example\.test/);
       return true;
     },
   );
@@ -606,6 +608,65 @@ test("CLI exits non-zero after printing summary when configured checks fail", as
     assert.equal(summary.checks.items[0].name, "request_hit_rate");
     assert.doesNotMatch(stdout, /fixture-relay-secret/);
     assert.doesNotMatch(stdout, /session-secret/);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("CLI redacts deployment URL parts from relay failure stderr", async () => {
+  const server = createServer((request, response) => {
+    response.writeHead(200, { "Content-Type": "application/json" });
+    response.end(
+      JSON.stringify({
+        success: false,
+        message: `relay failed at http://${request.headers.host}${request.url} for fixture-relay-secret and session-secret`,
+      }),
+    );
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  try {
+    const address = server.address();
+    const child = spawn(
+      process.execPath,
+      [
+        SMOKE_SCRIPT_PATH,
+        "--base-url",
+        `http://127.0.0.1:${address.port}`,
+        "--requests",
+        "2",
+        "--delay-ms",
+        "0",
+      ],
+      {
+        env: {
+          ...process.env,
+          NEW_API_KEY: "fixture-relay-secret",
+          NEW_API_ADMIN_TOKEN: "",
+          NEW_API_ADMIN_COOKIE: "",
+          NEW_API_ADMIN_USER_ID: "",
+          GLM_CACHE_SMOKE_KEY: "session-secret",
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+
+    const [code] = await once(child, "exit");
+    assert.equal(code, 1);
+    assert.equal(stdout, "");
+    assert.match(stderr, /relay failed at/);
+    assert.match(stderr, /<redacted>/);
+    assert.doesNotMatch(stderr, /127\.0\.0\.1/);
+    assert.doesNotMatch(stderr, /fixture-relay-secret/);
+    assert.doesNotMatch(stderr, /session-secret/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

@@ -487,11 +487,23 @@ function sanitizeText(text, config) {
     config.adminToken,
     config.adminCookie,
     config.promptCacheKey,
+    ...deploymentURLParts(config.baseURL),
   ]) {
     if (!secret) continue;
     result = result.split(secret).join("<redacted>");
   }
   return result;
+}
+
+function deploymentURLParts(rawBaseURL) {
+  const baseURL = normalizeBaseURL(rawBaseURL);
+  if (!baseURL) return [];
+  try {
+    const url = new URL(baseURL);
+    return [baseURL, url.origin, url.host, url.hostname].filter(Boolean);
+  } catch {
+    return [baseURL];
+  }
 }
 
 function sleep(ms) {

@@ -285,7 +285,7 @@ End-to-end verification:
 | Channel binding validation | Implemented and locally verified | OpenCode account create/update now rejects both missing channel IDs and non-existent bound channel rows at the model boundary, preventing ghost bindings from entering persistent storage. Channel enabled/disabled state remains owned by channel management; if a bound channel is deleted after import, readiness reports `channel_id` as missing and activation fails closed without exposing storage-layer `record not found`. |
 | Credential readiness diagnostics | Implemented | Public OpenCode account responses now expose masked `credential_integrity`, `activation_ready`, and `missing_activation_fields` signals, so operators can distinguish missing account material from decrypt failures without seeing raw secrets. |
 | Credential key-source diagnostics | Implemented and remotely verified | Public OpenCode account responses now include non-sensitive `credential_key_source`, and startup logs warn when existing OpenCode accounts are encrypted under the session-secret fallback instead of a dedicated crypto secret. This makes the strongest remaining deployment footgun visible before real account import/cache E2E. |
-| Credential diagnostics endpoint | Implemented and locally verified; pending remote rollout | Added root-only `GET /api/opencode/accounts/diagnostics`, exposing only `credential_key_source` and `uses_fallback_credential_key`. This lets the Admin UI warn before any OpenCode account exists, without exposing secret values, ciphertext, cookies, workspace IDs, account emails, OAuth payloads, or local deployment paths. Handler-level tests now assert the JSON contract and verify the configured crypto secret is not emitted in the response. |
+| Credential diagnostics endpoint | Implemented and remotely verified | Added root-only `GET /api/opencode/accounts/diagnostics`, exposing only `credential_key_source` and `uses_fallback_credential_key`. This lets the Admin UI warn before any OpenCode account exists, without exposing secret values, ciphertext, cookies, workspace IDs, account emails, OAuth payloads, or local deployment paths. Handler-level tests assert the JSON contract and verify the configured crypto secret is not emitted in the response; the endpoint was also covered by the latest remote clean artifact rollout. |
 | Frontend key-source warning | Implemented and locally verified | The OpenCode account page now consumes the diagnostics endpoint and shows a page-level fallback-key warning before production account import. The warning and main workspace now live in an explicit fixed-content `auto + minmax(0,1fr)` grid so the browser panel remains bounded when the warning is visible. The account table still marks imported accounts using the fallback credential key source with a compact `Fallback key` badge, and the page refresh action refetches accounts, channels, and diagnostics together. Helper-level tests now cover the refresh fan-out, refresh disabled state, and fixed-content grid row decision without introducing a new React DOM test stack. |
 | Frontend account window | Implemented | Added Root-only admin route, sidebar entry, account list, enabled-channel selector with numeric ID fallback, remote screenshot controls, extract, quota refresh, activate, stop, and delete actions. The account list now has a fixed create/bind toolbar plus an independently scrollable table region, so importing many OpenCode accounts does not push the remote browser workspace out of the fixed admin surface. |
 | Frontend delete confirmation | Implemented locally | Account deletion now uses the existing `ConfirmDialog` destructive flow instead of single-click deletion. The dialog names the selected account, disables duplicate confirmation while deletion is in flight, and only clears the remote browser panel when the deleted account was selected. Helper tests cover dialog-open and confirm-enabled decisions without adding a React DOM test stack. |
@@ -294,6 +294,7 @@ End-to-end verification:
 | Activation credential contract | Implemented and locally verified | Activation now builds channel credentials according to the bound channel type. Plain OpenCode API keys remain valid for non-Codex channels, while Codex channels require JSON material containing `access_token` and `account_id`. Public readiness diagnostics now mark Codex/plain-key bindings as not activation-ready before the operator clicks activate. |
 | Activation error semantics | Implemented locally | Activation now returns the same sanitized account-not-found business failure for missing account IDs, and wraps missing bound channels as explicit channel-not-found failures instead of surfacing raw storage-layer `record not found` text. |
 | Remote clean artifact deployment | Done | Built pushed `main` from an isolated clean checkout, produced self-contained binary-plus-sidecar artifacts, switched the remote service to those artifacts, preserved the existing runtime data path, and verified the service is active. |
+| Clean rollout helper | Implemented in source; pending remote apply | Added `scripts/new-api-clean-rollout.mjs` plus Node tests. The helper codifies the clean-checkout gate, targeted Node/Go/frontend/build checks, systemd service contract validation, backup/install/restart, bounded HTTP readiness wait, rollback, and public-output redaction. It is verification-only by default and switches runtime artifacts only with explicit `--apply true`; it intentionally does not own SSH transport, sudo, systemd unit creation, database migration ownership, or secret provisioning. |
 | Last verified remote rollout | Done | Pushed `main` commit `5e18beaa` is the last rollout verified on the remote service. The rollout used a clean checkout, passed remote Node script tests/checks, targeted OpenCode/cache Go tests, default and classic frontend builds, and Go binary build before switching runtime artifacts. The service is active, local HTTP `/api/status` smoke passes, deployed runtime scripts pass `node --check`, `glm-cache-smoke` contains both response-usage and stats contract gates, and sidecar empty-state `status` returns `stopped`. |
 | Real OpenCode login E2E | Pending | Requires an operator-controlled OpenCode subscription account. The repository contains no real account material. |
 | Real `glm-5.2` cache-hit E2E | Pending | Should run only after a real OpenCode account has been imported and activated through New API. |
@@ -394,6 +395,8 @@ The latest cache-smoke contract gates are deployed from pushed `main` commit `5e
 
 Remote deployment is now separated from the previous runtime worktree. The service runs from a clean artifact built from the pushed `main`, while the existing runtime data location is preserved explicitly. This avoids overwriting unrelated local cache/accounting work that still exists in the old runtime tree and keeps source, artifact, and runtime data as separate concerns.
 
+The new clean rollout helper turns that manual rollout pattern into a repeatable source-controlled gate. Its default mode is intentionally non-mutating: clone the pushed fork, verify the requested revision, run the focused script/backend/frontend/build gates, and exit with redacted diagnostics. Runtime replacement is behind explicit `--apply true`, and even then it first validates the service contract from systemd (`ExecStart`, `WorkingDirectory`, `Restart`, current PID owner, and write permissions), writes backups under the existing runtime boundary, restarts through `Restart=always`, waits for HTTP readiness, and rolls back on failure. The tradeoff is conservative scope: the helper is not a deployment platform, does not create or edit systemd units, does not run privileged operations, does not transport secrets, and should still be invoked through the existing LearnSSH alias when used on the remote host.
+
 ### Verification Update
 
 Validated successfully:
@@ -443,6 +446,8 @@ node --test scripts/opencode-auth-session.test.mjs
 node --check scripts/opencode-auth-session.mjs
 node --test scripts/glm-cache-smoke.test.mjs
 node --check scripts/glm-cache-smoke.mjs
+node --test scripts/new-api-clean-rollout.test.mjs
+node --check scripts/new-api-clean-rollout.mjs
 git diff --check
 diff secret-pattern scan
 ```
@@ -511,13 +516,22 @@ Known verification limits:
 - The channel-affinity frontend directory and OpenCode-related frontend paths pass targeted lint. Broad full-frontend lint is still treated as a separate historical quality gate and should not be used as evidence of live OpenCode account or `glm-5.2` cache-hit behavior.
 - The broader `src/features/channels/components/dialogs/param-override-editor-dialog.tsx` file still exposes pre-existing oxlint style findings such as `curly`, `no-nested-ternary`, and `no-useless-spread`. This change only relies on that file for the Codex preset payload; typecheck, formatting, and default frontend build pass, but this is not claimed as a lint-clean file.
 - `go test ./common ./model ./service ./controller ./router ./service/relayconvert -count=1` currently exposes pre-existing SQLite test setup failures such as missing `users`, `tasks`, and `system_tasks` tables in unrelated tests. The OpenCode-specific backend tests pass.
+- The clean rollout helper improves rollout repeatability but is not live-account evidence. `--apply false` proves source/build/service gates only; `--apply true` still changes runtime artifacts and should be treated as an intentional rollout, not a smoke check.
 - The latest Tailscale health check still reports an expired peer node key. The remote service was rolled out through the configured LearnSSH alias, but Tailscale itself is still not healthy enough to treat the network requirement as solved.
 - Real OpenCode Google login, account extraction, channel activation against a live subscription account, and repeated `glm-5.2` cache-hit measurement still require operator-controlled credentials and must not be committed to the repository.
 
 ### Immediate Next Steps
 
 1. Restore Tailscale health first. The current pushed `main` has been deployed through LearnSSH, but the required Tailscale path still reports an expired peer node key and must be fixed before treating remote/local connectivity as robust.
-2. Run the non-mutating preflight gate against the deployed service before importing production account material. Treat any diagnostics payload, account-list payload, or affinity-stats identity failure as a rollout/configuration failure before real account import:
+2. Before the next runtime switch, run the clean rollout helper in verification-only mode against the exact pushed commit. Only use `--apply true` when intentionally replacing the running artifact:
+
+```bash
+node scripts/new-api-clean-rollout.mjs \
+  --revision <pushed-main-sha> \
+  --apply false
+```
+
+3. Run the non-mutating preflight gate against the deployed service before importing production account material. Treat any diagnostics payload, account-list payload, or affinity-stats identity failure as a rollout/configuration failure before real account import:
 
 ```bash
 NEW_API_BASE_URL=https://<deployed-new-api> \
@@ -526,11 +540,11 @@ NEW_API_ADMIN_USER_ID=<admin-user-id> \
 node scripts/opencode-e2e-preflight.mjs
 ```
 
-3. Open the deployed Admin Web and verify `/opencode-accounts` does not show the page-level fallback-key warning; if it does, configure a stable `CRYPTO_SECRET` before importing production account material.
-4. Complete the official OpenCode/Google authorization in the remote browser session with an operator-controlled OpenCode subscription account.
-5. Extract account material and verify only masked indicators are visible in the UI.
-6. Activate the bound New API channel, confirm channel cache refresh, then rerun preflight with `--min-active-ready-accounts 1`. Keep `--min-activation-ready-accounts 1 --min-active-accounts 1` only as supplemental diagnostics; the live cache smoke gate should require a single account that satisfies both states.
-7. Run repeated `glm-5.2` requests through New API with the secret-redacted smoke runner:
+4. Open the deployed Admin Web and verify `/opencode-accounts` does not show the page-level fallback-key warning; if it does, configure a stable `CRYPTO_SECRET` before importing production account material.
+5. Complete the official OpenCode/Google authorization in the remote browser session with an operator-controlled OpenCode subscription account.
+6. Extract account material and verify only masked indicators are visible in the UI.
+7. Activate the bound New API channel, confirm channel cache refresh, then rerun preflight with `--min-active-ready-accounts 1`. Keep `--min-activation-ready-accounts 1 --min-active-accounts 1` only as supplemental diagnostics; the live cache smoke gate should require a single account that satisfies both states.
+8. Run repeated `glm-5.2` requests through New API with the secret-redacted smoke runner:
 
 ```bash
 NEW_API_BASE_URL=https://<deployed-new-api> \
@@ -548,8 +562,8 @@ node scripts/glm-cache-smoke.mjs \
   --min-cache-signal-tokens 1
 ```
 
-8. Compare warm-cache behavior through the runner summary, New API channel-affinity usage stats, and upstream/OpenCode quota/accounting. For this smoke, the default input is already a stable cache-probe prefix; pass `--input` only when intentionally testing a different workload. The runner redacts the configured input from failure output, including JSON-escaped and truncated-prefix echoes, but the safer default is still to use the deterministic probe unless the live workload itself is the variable under test. Treat `warmup` as cache priming, request usage as evidence only after the response-usage contract gate, `stats.delta` as measured-run evidence only when `stats.status` is `ok` after the payload-contract and identity gates, `checks.status` as the machine gate, and `stats.data` as the final accumulated snapshot. If `reset_detected` is true, the runner now fails the machine gate by default; repeat the run after the cache window stabilizes instead of interpreting the clamped delta. The runner proves request and stats plumbing; it does not by itself prove upstream prompt-cache billing correctness.
-9. If CDP screenshot interaction proves insufficient for Google authorization, add a noVNC fallback without changing the account model or activation contract.
+9. Compare warm-cache behavior through the runner summary, New API channel-affinity usage stats, and upstream/OpenCode quota/accounting. For this smoke, the default input is already a stable cache-probe prefix; pass `--input` only when intentionally testing a different workload. The runner redacts the configured input from failure output, including JSON-escaped and truncated-prefix echoes, but the safer default is still to use the deterministic probe unless the live workload itself is the variable under test. Treat `warmup` as cache priming, request usage as evidence only after the response-usage contract gate, `stats.delta` as measured-run evidence only when `stats.status` is `ok` after the payload-contract and identity gates, `checks.status` as the machine gate, and `stats.data` as the final accumulated snapshot. If `reset_detected` is true, the runner now fails the machine gate by default; repeat the run after the cache window stabilizes instead of interpreting the clamped delta. The runner proves request and stats plumbing; it does not by itself prove upstream prompt-cache billing correctness.
+10. If CDP screenshot interaction proves insufficient for Google authorization, add a noVNC fallback without changing the account model or activation contract.
 
 ## 中文
 
@@ -836,7 +850,7 @@ web/default/src/routes/_authenticated/opencode-accounts/index.tsx
 | Channel binding 校验 | 已实现并完成本地验证 | OpenCode account create/update 现在会在 model 边界同时拒绝缺失 channel ID 与不存在的绑定 channel 行，避免 ghost binding 进入持久存储。channel enabled/disabled 状态仍由 channel 管理负责，不与账号导入强耦合；如果绑定 channel 在导入后被删除，readiness 会用既有 `channel_id` 字段报告缺失，activation 会 fail closed，且不暴露存储层 `record not found`。 |
 | 凭据 readiness 诊断 | 已实现 | OpenCode account 公开响应现在提供脱敏的 `credential_integrity`、`activation_ready` 与 `missing_activation_fields` 信号，让操作者能区分账号材料缺失与密文解密失败，而不看到任何原始 secret。 |
 | 凭据 key source 诊断 | 已实现并完成远端验证 | OpenCode account 公开响应现在包含非敏感的 `credential_key_source`，并且当已有 OpenCode 账号仍使用 session-secret fallback 而不是专用 crypto secret 加密时，启动日志会给出系统告警。这样在真实账号导入与 cache E2E 前，最容易踩的部署稳定性问题会变成可见状态。 |
-| 凭据 diagnostics endpoint | 本地已实现并验证；待远端上线 | 已增加 root-only `GET /api/opencode/accounts/diagnostics`，只暴露 `credential_key_source` 与 `uses_fallback_credential_key`。这样 Admin UI 在还没有任何 OpenCode 账号时也能提示 fallback key 风险，同时不暴露 secret 值、密文、cookie、workspace ID、账号邮箱、OAuth payload 或本地部署路径。当前已增加 handler 级测试断言 JSON 契约，并确认配置的 crypto secret 不会出现在响应中。 |
+| 凭据 diagnostics endpoint | 已实现并完成远端验证 | 已增加 root-only `GET /api/opencode/accounts/diagnostics`，只暴露 `credential_key_source` 与 `uses_fallback_credential_key`。这样 Admin UI 在还没有任何 OpenCode 账号时也能提示 fallback key 风险，同时不暴露 secret 值、密文、cookie、workspace ID、账号邮箱、OAuth payload 或本地部署路径。handler 级测试会断言 JSON 契约，并确认配置的 crypto secret 不会出现在响应中；该 endpoint 也已经被最新远端 clean artifact 上线路径覆盖。 |
 | 前端 key-source 告警 | 本地已实现并验证 | OpenCode account 页面现在消费 diagnostics endpoint，并在生产账号导入前显示页面级 fallback-key 告警。告警与主工作区现在放在显式 fixed-content `auto + minmax(0,1fr)` 网格中，因此告警可见时浏览器面板仍受高度约束。账号列表仍会用紧凑的 `Fallback key` 标记说明已导入账号正在使用 fallback credential key source，页面刷新动作也会同时刷新 accounts、channels 与 diagnostics。当前已增加 helper 级测试覆盖 refresh fan-out、刷新禁用状态和 fixed-content grid row 决策，未引入新的 React DOM 测试栈。 |
 | 前端账号窗口 | 已实现 | 已增加 Root-only 管理路由、侧边栏入口、账号列表、已启用 channel 选择器与数字 ID fallback、远端截图控制、extract、quota refresh、activate、stop、delete 操作。账号列表现在使用固定的创建/绑定工具栏与独立滚动的 table 区域，因此导入多个 OpenCode 账号后不会把远端浏览器工作区推出固定管理后台表面。 |
 | 前端删除确认 | 本地已实现 | 账号删除现在使用现有 `ConfirmDialog` destructive flow，而不是单击即删。对话框会显示被选中的账号名，在删除请求执行中禁用重复确认，并且只有删除当前选中账号时才清空远端浏览器面板。helper 测试覆盖 dialog open 与 confirm enabled 判定，未新增 React DOM 测试栈。 |
@@ -845,6 +859,7 @@ web/default/src/routes/_authenticated/opencode-accounts/index.tsx
 | Activation credential contract | 已实现并完成本地验证 | 激活现在会按照绑定 channel 类型构造 channel credential。非 Codex channel 继续接受纯 OpenCode API key；Codex channel 必须提供包含 `access_token` 与 `account_id` 的 JSON 材料。公开 readiness 诊断现在会在操作者点击 activate 前，把 Codex/plain-key 绑定标记为不可激活。 |
 | 激活错误语义 | 本地已实现 | activate 现在对缺失账号 ID 返回同一脱敏的账号不存在业务失败；绑定 channel 缺失时返回明确的 channel-not-found 失败，不再把存储层 `record not found` 原文暴露给操作者。 |
 | 远端 clean artifact 部署 | 已完成 | 已从隔离的干净 checkout 构建已推送的 `main`，生成包含二进制与 sidecar 的 artifact，远端服务已切换到这些 artifact，并显式保留既有运行时数据路径，服务状态已验证为 active。 |
+| Clean rollout helper | 已进入源码；待远端 apply | 已新增 `scripts/new-api-clean-rollout.mjs` 及 Node 测试。helper 将干净 checkout gate、Node/Go/前端/build 定向检查、systemd service contract 校验、backup/install/restart、有界 HTTP readiness wait、rollback 与公开输出脱敏固化为可复用流程。默认只做 verification-only，只有显式传入 `--apply true` 才会切换 runtime artifact；它不负责 SSH 传输、sudo、systemd unit 创建、数据库迁移所有权或 secret provisioning。 |
 | 上一次已验证远端上线 | 已完成 | 已推送的 `main` 提交 `5e18beaa` 是当前在远端服务完成验证的上线版本。本次上线使用干净 checkout，切换运行 artifact 前已通过远端 Node 脚本测试/语法检查、OpenCode/cache Go 定向测试、default 与 classic 前端构建，以及 Go 二进制构建。服务状态为 active，本机 HTTP `/api/status` smoke 通过，已部署 runtime 脚本通过 `node --check`，`glm-cache-smoke` 包含 response-usage 与 stats 两个 contract gate，sidecar 空状态 `status` 返回 `stopped`。 |
 | 真实 OpenCode 登录 E2E | 待执行 | 需要操作者控制的 OpenCode 订阅账号；仓库不包含真实账号材料。 |
 | 真实 `glm-5.2` cache-hit E2E | 待执行 | 只能在真实 OpenCode 账号经 New API 导入并激活后执行。 |
@@ -945,6 +960,8 @@ delete 现在会在产生外部副作用前验证所有权。缺失账号 ID 是
 
 远端部署现在已经与旧运行工作树分离。服务从基于已推送 `main` 构建的 clean artifact 运行，同时显式保留既有运行时数据位置。这样不会覆盖旧运行树中仍存在的本地 cache/accounting 工作，也把源码、artifact 与运行时数据拆成了三个独立边界。
 
+新的 clean rollout helper 把这套手工上线模式收敛为可重复、可审计的源码内 gate。默认模式刻意不产生副作用：克隆已推送 fork、校验指定 revision、运行聚焦的脚本/后端/前端/build gate，然后只输出脱敏诊断。运行时替换必须显式传入 `--apply true`；即使进入 apply，也会先从 systemd 校验 service contract（`ExecStart`、`WorkingDirectory`、`Restart`、当前 PID owner 与写权限），在既有运行时边界内写入备份，通过 `Restart=always` 重启，等待 HTTP readiness，并在失败时回滚。这里的取舍是有意保守：helper 不是部署平台，不创建或修改 systemd unit，不执行提权操作，不传输 secret；在远端使用时仍应由现有 LearnSSH alias 调用。
+
 ### 验证更新
 
 已成功验证：
@@ -994,6 +1011,8 @@ node --test scripts/opencode-auth-session.test.mjs
 node --check scripts/opencode-auth-session.mjs
 node --test scripts/glm-cache-smoke.test.mjs
 node --check scripts/glm-cache-smoke.mjs
+node --test scripts/new-api-clean-rollout.test.mjs
+node --check scripts/new-api-clean-rollout.mjs
 git diff --check
 diff secret-pattern scan
 ```
@@ -1062,13 +1081,22 @@ Sidecar smoke：
 - channel-affinity 前端目录与 OpenCode 相关前端路径已通过 targeted lint。更广的全量前端 lint 仍应视为独立的历史质量门，不能作为真实 OpenCode 账号或 `glm-5.2` cache-hit 行为的证据。
 - 更大的 `src/features/channels/components/dialogs/param-override-editor-dialog.tsx` 文件仍然存在既有 oxlint 风格问题，例如 `curly`、`no-nested-ternary` 和 `no-useless-spread`。本次只依赖该文件中的 Codex preset payload；typecheck、格式检查与 default 前端构建通过，但不声称该文件已经 lint-clean。
 - `go test ./common ./model ./service ./controller ./router ./service/relayconvert -count=1` 当前暴露既有 SQLite 测试初始化问题，典型错误是无关测试缺少 `users`、`tasks`、`system_tasks` 表；本次 OpenCode 后端相关测试已通过。
+- Clean rollout helper 提升的是上线可重复性，不是真实账号证据。`--apply false` 只能证明 source/build/service gate；`--apply true` 仍然会替换运行 artifact，应该被视为一次明确上线，而不是普通 smoke check。
 - 最新 Tailscale 健康检查仍显示 peer node key 已过期。远端服务已经通过配置好的 LearnSSH alias 完成上线，但 Tailscale 本身仍不能视为满足“必须走 Tailscale”的网络要求。
 - 真实 OpenCode Google 登录、账号提取、订阅账号 channel 激活，以及多轮 `glm-5.2` cache-hit 统计验证仍需要操作者控制的真实凭证，不能写入仓库。
 
 ### 下一步
 
 1. 先恢复 Tailscale 健康。当前已推送的 `main` 已通过 LearnSSH 部署到远端，但必需的 Tailscale 路径仍报告 peer node key 过期；在这个问题修复前，不能把远端/本地连接视为 robust。
-2. 在导入生产账号材料前，先对已部署服务运行非破坏性 preflight gate。diagnostics payload、账号列表 payload 或 affinity-stats identity 任一失败，都应先按上线/配置故障处理，再导入真实账号：
+2. 下一次切换运行 artifact 前，先对精确的已推送提交运行 clean rollout helper 的 verification-only 模式。只有在明确要替换当前运行 artifact 时才使用 `--apply true`：
+
+```bash
+node scripts/new-api-clean-rollout.mjs \
+  --revision <pushed-main-sha> \
+  --apply false
+```
+
+3. 在导入生产账号材料前，先对已部署服务运行非破坏性 preflight gate。diagnostics payload、账号列表 payload 或 affinity-stats identity 任一失败，都应先按上线/配置故障处理，再导入真实账号：
 
 ```bash
 NEW_API_BASE_URL=https://<deployed-new-api> \
@@ -1077,11 +1105,11 @@ NEW_API_ADMIN_USER_ID=<admin-user-id> \
 node scripts/opencode-e2e-preflight.mjs
 ```
 
-3. 打开已部署的 Admin Web，确认 `/opencode-accounts` 不显示页面级 fallback-key 告警；如果仍显示，先配置稳定 `CRYPTO_SECRET`，再导入生产账号材料。
-4. 使用操作者控制的 OpenCode 订阅账号，在远端浏览器会话中完成官方 OpenCode/Google 授权。
-5. 提取账号材料，并确认 UI 只显示 masked indicator。
-6. 激活绑定的 New API channel，确认 channel cache refresh，然后用 `--min-active-ready-accounts 1` 重跑 preflight。`--min-activation-ready-accounts 1 --min-active-accounts 1` 只能作为补充诊断；真实 cache smoke gate 应要求同一个账号同时满足两个状态。
-7. 用输出脱敏的 smoke runner 通过 New API 多轮调用 `glm-5.2`：
+4. 打开已部署的 Admin Web，确认 `/opencode-accounts` 不显示页面级 fallback-key 告警；如果仍显示，先配置稳定 `CRYPTO_SECRET`，再导入生产账号材料。
+5. 使用操作者控制的 OpenCode 订阅账号，在远端浏览器会话中完成官方 OpenCode/Google 授权。
+6. 提取账号材料，并确认 UI 只显示 masked indicator。
+7. 激活绑定的 New API channel，确认 channel cache refresh，然后用 `--min-active-ready-accounts 1` 重跑 preflight。`--min-activation-ready-accounts 1 --min-active-accounts 1` 只能作为补充诊断；真实 cache smoke gate 应要求同一个账号同时满足两个状态。
+8. 用输出脱敏的 smoke runner 通过 New API 多轮调用 `glm-5.2`：
 
 ```bash
 NEW_API_BASE_URL=https://<deployed-new-api> \
@@ -1099,5 +1127,5 @@ node scripts/glm-cache-smoke.mjs \
   --min-cache-signal-tokens 1
 ```
 
-8. 结合 runner 摘要、New API channel-affinity usage stats 与上游/OpenCode quota/accounting 比较 warm-cache 行为。默认输入已经是稳定 cache-probe prefix；只有在刻意验证其它 workload 时才传 `--input`。runner 会从失败输出中脱敏已配置 input，包括 JSON-escaped 与 truncated-prefix 回显；但更安全的默认做法仍是使用确定性 probe，除非真实 workload 本身就是待验证变量。本轮 smoke 应把 `warmup` 视为 cache 预热，只在 response-usage contract gate 之后把 request usage 当作证据，只在 `stats.status` 经过 payload-contract 与 identity gate 后为 `ok` 时把 `stats.delta` 作为测量阶段证据，把 `checks.status` 作为机器验收门，把 `stats.data` 只作为 final 累计快照。如果 `reset_detected` 为 true，runner 现在会默认让机器门失败；应等 cache 窗口稳定后重跑，而不是解释被 clamp 的 delta。runner 证明请求链路与统计读取链路可重复，不单独证明上游 prompt-cache 计费正确。
-9. 如果 CDP 截图交互不足以完成 Google 授权，再加 noVNC 兜底，但不改变账号模型和 activation contract。
+9. 结合 runner 摘要、New API channel-affinity usage stats 与上游/OpenCode quota/accounting 比较 warm-cache 行为。默认输入已经是稳定 cache-probe prefix；只有在刻意验证其它 workload 时才传 `--input`。runner 会从失败输出中脱敏已配置 input，包括 JSON-escaped 与 truncated-prefix 回显；但更安全的默认做法仍是使用确定性 probe，除非真实 workload 本身就是待验证变量。本轮 smoke 应把 `warmup` 视为 cache 预热，只在 response-usage contract gate 之后把 request usage 当作证据，只在 `stats.status` 经过 payload-contract 与 identity gate 后为 `ok` 时把 `stats.delta` 作为测量阶段证据，把 `checks.status` 作为机器验收门，把 `stats.data` 只作为 final 累计快照。如果 `reset_detected` 为 true，runner 现在会默认让机器门失败；应等 cache 窗口稳定后重跑，而不是解释被 clamp 的 delta。runner 证明请求链路与统计读取链路可重复，不单独证明上游 prompt-cache 计费正确。
+10. 如果 CDP 截图交互不足以完成 Google 授权，再加 noVNC 兜底，但不改变账号模型和 activation contract。

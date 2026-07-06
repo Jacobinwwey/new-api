@@ -2,8 +2,11 @@ package controller
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -188,4 +191,104 @@ func TestGetOpenCodeAccountDiagnosticsReturnsNonSecretPayload(t *testing.T) {
 	assert.Equal(t, common.SecretEncryptionKeySourceCryptoSecret, payload.Data.CredentialKeySource)
 	assert.False(t, payload.Data.UsesFallbackCredentialKey)
 	assert.NotContains(t, recorder.Body.String(), "configured-crypto-secret")
+}
+
+func TestDeleteOpenCodeAccountStopsLoginSessionBeforeDeleting(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	originalDB := model.DB
+	model.DB = db
+	t.Cleanup(func() {
+		model.DB = originalDB
+	})
+	require.NoError(t, db.AutoMigrate(&model.OpenCodeAccount{}))
+	require.NoError(t, db.Create(&model.OpenCodeAccount{
+		Id:        77,
+		Label:     "delete-lifecycle",
+		ChannelID: 9,
+	}).Error)
+
+	tempRoot := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(tempRoot, "scripts"), 0o700))
+	markerPath := filepath.Join(tempRoot, "stop-marker.txt")
+	t.Setenv("OPENCODE_DELETE_STOP_MARKER", markerPath)
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tempRoot, "scripts", "opencode-auth-session.mjs"),
+		[]byte(`import fs from "node:fs";
+const args = process.argv.slice(2);
+fs.writeFileSync(process.env.OPENCODE_DELETE_STOP_MARKER, args.join("\n"));
+const accountID = Number(args[args.indexOf("--account-id") + 1]);
+console.log(JSON.stringify({ success: true, status: { account_id: accountID, running: false, status: "stopped" } }));
+`),
+		0o700,
+	))
+	previousWorkingDirectory, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(tempRoot))
+	t.Cleanup(func() {
+		require.NoError(t, os.Chdir(previousWorkingDirectory))
+	})
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Params = gin.Params{{Key: "id", Value: "77"}}
+	ctx.Request = httptest.NewRequest(http.MethodDelete, "/api/opencode/accounts/77", nil)
+
+	DeleteOpenCodeAccount(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	marker, err := os.ReadFile(markerPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(marker), "--action\nstop")
+	assert.Contains(t, string(marker), "--account-id\n77")
+
+	var account model.OpenCodeAccount
+	err = db.First(&account, 77).Error
+	assert.True(t, errors.Is(err, gorm.ErrRecordNotFound))
+}
+
+func TestDeleteOpenCodeAccountPreservesAccountWhenStopFails(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	originalDB := model.DB
+	model.DB = db
+	t.Cleanup(func() {
+		model.DB = originalDB
+	})
+	require.NoError(t, db.AutoMigrate(&model.OpenCodeAccount{}))
+	require.NoError(t, db.Create(&model.OpenCodeAccount{
+		Id:        78,
+		Label:     "delete-stop-fails",
+		ChannelID: 9,
+	}).Error)
+
+	tempRoot := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(tempRoot, "scripts"), 0o700))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tempRoot, "scripts", "opencode-auth-session.mjs"),
+		[]byte(`console.log(JSON.stringify({ success: false, message: "stop failed for test" }));`),
+		0o700,
+	))
+	previousWorkingDirectory, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(tempRoot))
+	t.Cleanup(func() {
+		require.NoError(t, os.Chdir(previousWorkingDirectory))
+	})
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Params = gin.Params{{Key: "id", Value: "78"}}
+	ctx.Request = httptest.NewRequest(http.MethodDelete, "/api/opencode/accounts/78", nil)
+
+	DeleteOpenCodeAccount(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), "stop failed for test")
+
+	var account model.OpenCodeAccount
+	require.NoError(t, db.First(&account, 78).Error)
+	assert.Equal(t, "delete-stop-fails", account.Label)
 }

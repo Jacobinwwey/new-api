@@ -6,6 +6,7 @@ const DEFAULT_REQUIRE_ROOT = true;
 const DEFAULT_REQUIRE_STABLE_CREDENTIAL_KEY = true;
 const DEFAULT_REQUIRE_AFFINITY_STATS = true;
 const DEFAULT_MIN_ACTIVATION_READY_ACCOUNTS = 0;
+const DEFAULT_MIN_ACTIVE_ACCOUNTS = 0;
 
 export function buildOpenCodePreflightConfig(argv = process.argv, env = process.env) {
   const args = parseArgs(argv);
@@ -41,6 +42,12 @@ export function buildOpenCodePreflightConfig(argv = process.argv, env = process.
       DEFAULT_MIN_ACTIVATION_READY_ACCOUNTS,
       0,
       "min-activation-ready-accounts",
+    ),
+    minActiveAccounts: readInteger(
+      args["min-active-accounts"] || env.OPENCODE_PREFLIGHT_MIN_ACTIVE_ACCOUNTS,
+      DEFAULT_MIN_ACTIVE_ACCOUNTS,
+      0,
+      "min-active-accounts",
     ),
   };
 }
@@ -132,6 +139,14 @@ export async function runOpenCodePreflight(config) {
             : "failed",
         actual: summary.accounts.activation_ready,
         expected_min: config.minActivationReadyAccounts,
+      });
+    }
+    if (config.minActiveAccounts > 0) {
+      checks.push({
+        name: "active_accounts",
+        status: summary.accounts.active >= config.minActiveAccounts ? "passed" : "failed",
+        actual: summary.accounts.active,
+        expected_min: config.minActiveAccounts,
       });
     }
   }

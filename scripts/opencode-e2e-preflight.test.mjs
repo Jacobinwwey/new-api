@@ -29,6 +29,8 @@ test("buildOpenCodePreflightConfig reads root auth from environment only", () =>
       "false",
       "--min-activation-ready-accounts",
       "2",
+      "--min-active-accounts",
+      "1",
     ],
     {
       NEW_API_ADMIN_TOKEN: "root-token-secret",
@@ -43,6 +45,7 @@ test("buildOpenCodePreflightConfig reads root auth from environment only", () =>
   assert.equal(config.requireStableCredentialKey, false);
   assert.equal(config.requireAffinityStats, false);
   assert.equal(config.minActivationReadyAccounts, 2);
+  assert.equal(config.minActiveAccounts, 1);
 });
 
 test("runOpenCodePreflight fails when root auth is required but missing", async () => {
@@ -138,6 +141,7 @@ test("runOpenCodePreflight passes stable diagnostics and summarizes accounts wit
     requireStableCredentialKey: true,
     requireAffinityStats: true,
     minActivationReadyAccounts: 1,
+    minActiveAccounts: 1,
     fetcher,
   });
 
@@ -168,6 +172,63 @@ test("runOpenCodePreflight passes stable diagnostics and summarizes accounts wit
   assert.doesNotMatch(encoded, /u\*\*\*@example\.test/);
   assert.doesNotMatch(encoded, /api_key/);
   assert.doesNotMatch(encoded, /new-api\.example\.test/);
+});
+
+test("runOpenCodePreflight fails when active account threshold is not met", async () => {
+  const fetcher = async (url) => {
+    if (String(url).endsWith("/api/status")) {
+      return jsonResponse({ version: "test" });
+    }
+    if (String(url).endsWith("/api/opencode/accounts/diagnostics")) {
+      return jsonResponse({
+        success: true,
+        data: {
+          credential_key_source: "crypto_secret",
+          uses_fallback_credential_key: false,
+        },
+      });
+    }
+    if (String(url).endsWith("/api/opencode/accounts")) {
+      return jsonResponse({
+        success: true,
+        data: [
+          {
+            active: false,
+            activation_ready: true,
+            credential_integrity: "ok",
+            missing_activation_fields: [],
+          },
+        ],
+      });
+    }
+    if (String(url).includes("/api/log/channel_affinity_usage_cache")) {
+      return jsonResponse({ success: true, data: {} });
+    }
+    return jsonResponse({ success: false, message: "not found" }, { status: 404 });
+  };
+
+  const summary = await runOpenCodePreflight({
+    baseURL: "https://new-api.example.test",
+    adminToken: "root-token-secret",
+    adminCookie: "",
+    adminUserID: "1",
+    timeoutMs: 1000,
+    requireRoot: true,
+    requireStableCredentialKey: true,
+    requireAffinityStats: true,
+    minActivationReadyAccounts: 1,
+    minActiveAccounts: 1,
+    fetcher,
+  });
+
+  assert.equal(summary.checks.status, "failed");
+  const activeCheck = summary.checks.items.find((item) => item.name === "active_accounts");
+  assert.deepEqual(activeCheck, {
+    name: "active_accounts",
+    status: "failed",
+    actual: 0,
+    expected_min: 1,
+  });
 });
 
 test("runOpenCodePreflight fails when required affinity stats endpoint is unavailable", async () => {

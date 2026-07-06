@@ -10,11 +10,28 @@ import (
 	"gorm.io/gorm"
 )
 
-func TestCreateOpenCodeAccountEncryptsSecretsAndMasksPublicView(t *testing.T) {
+func setupOpenCodeAccountModelTestDB(t *testing.T, models ...interface{}) *gorm.DB {
+	t.Helper()
+
+	originalDB := DB
+	originalLOGDB := LOG_DB
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
 	DB = db
-	require.NoError(t, db.AutoMigrate(&OpenCodeAccount{}, &Channel{}))
+	LOG_DB = db
+	t.Cleanup(func() {
+		DB = originalDB
+		LOG_DB = originalLOGDB
+		if sqlDB, err := db.DB(); err == nil {
+			_ = sqlDB.Close()
+		}
+	})
+	require.NoError(t, db.AutoMigrate(models...))
+	return db
+}
+
+func TestCreateOpenCodeAccountEncryptsSecretsAndMasksPublicView(t *testing.T) {
+	db := setupOpenCodeAccountModelTestDB(t, &OpenCodeAccount{}, &Channel{})
 	require.NoError(t, db.Create(&Channel{
 		Id:     7,
 		Name:   "OpenCode Test Channel",
@@ -33,7 +50,7 @@ func TestCreateOpenCodeAccountEncryptsSecretsAndMasksPublicView(t *testing.T) {
 		Label:     "  primary-go-plan  ",
 		ChannelID: 7,
 	}
-	err = CreateOpenCodeAccount(account, OpenCodeAccountSecrets{
+	err := CreateOpenCodeAccount(account, OpenCodeAccountSecrets{
 		Email:       "operator@example.test",
 		WorkspaceID: "workspace-test-value",
 		APIKey:      "opencode-api-key-test-value",
@@ -74,10 +91,7 @@ func TestCreateOpenCodeAccountEncryptsSecretsAndMasksPublicView(t *testing.T) {
 }
 
 func TestOpenCodeAccountPublicViewReportsCredentialDecryptFailure(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	require.NoError(t, err)
-	DB = db
-	require.NoError(t, db.AutoMigrate(&OpenCodeAccount{}, &Channel{}))
+	db := setupOpenCodeAccountModelTestDB(t, &OpenCodeAccount{}, &Channel{})
 	require.NoError(t, db.Create(&Channel{
 		Id:     7,
 		Name:   "OpenCode Test Channel",
@@ -96,7 +110,7 @@ func TestOpenCodeAccountPublicViewReportsCredentialDecryptFailure(t *testing.T) 
 		Label:     "primary-go-plan",
 		ChannelID: 7,
 	}
-	err = CreateOpenCodeAccount(account, OpenCodeAccountSecrets{
+	err := CreateOpenCodeAccount(account, OpenCodeAccountSecrets{
 		Email:       "operator@example.test",
 		WorkspaceID: "workspace-test-value",
 		APIKey:      "opencode-api-key-test-value",
@@ -132,34 +146,25 @@ func TestOpenCodeAccountPublicViewReportsCredentialKeySource(t *testing.T) {
 }
 
 func TestCreateOpenCodeAccountRejectsInvalidLabel(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	require.NoError(t, err)
-	DB = db
-	require.NoError(t, db.AutoMigrate(&OpenCodeAccount{}))
+	setupOpenCodeAccountModelTestDB(t, &OpenCodeAccount{})
 
-	err = CreateOpenCodeAccount(&OpenCodeAccount{Label: "bad label", ChannelID: 7}, OpenCodeAccountSecrets{})
+	err := CreateOpenCodeAccount(&OpenCodeAccount{Label: "bad label", ChannelID: 7}, OpenCodeAccountSecrets{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "label")
 }
 
 func TestCreateOpenCodeAccountRejectsMissingChannelBinding(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	require.NoError(t, err)
-	DB = db
-	require.NoError(t, db.AutoMigrate(&OpenCodeAccount{}))
+	setupOpenCodeAccountModelTestDB(t, &OpenCodeAccount{})
 
-	err = CreateOpenCodeAccount(&OpenCodeAccount{Label: "primary"}, OpenCodeAccountSecrets{})
+	err := CreateOpenCodeAccount(&OpenCodeAccount{Label: "primary"}, OpenCodeAccountSecrets{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "channel id")
 }
 
 func TestCreateOpenCodeAccountRejectsUnknownChannelBinding(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	require.NoError(t, err)
-	DB = db
-	require.NoError(t, db.AutoMigrate(&OpenCodeAccount{}, &Channel{}))
+	setupOpenCodeAccountModelTestDB(t, &OpenCodeAccount{}, &Channel{})
 
-	err = CreateOpenCodeAccount(&OpenCodeAccount{
+	err := CreateOpenCodeAccount(&OpenCodeAccount{
 		Label:     "unknown-channel",
 		ChannelID: 404,
 	}, OpenCodeAccountSecrets{})
@@ -168,10 +173,7 @@ func TestCreateOpenCodeAccountRejectsUnknownChannelBinding(t *testing.T) {
 }
 
 func TestUpdateOpenCodeAccountRejectsUnknownChannelBinding(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	require.NoError(t, err)
-	DB = db
-	require.NoError(t, db.AutoMigrate(&OpenCodeAccount{}, &Channel{}))
+	db := setupOpenCodeAccountModelTestDB(t, &OpenCodeAccount{}, &Channel{})
 	require.NoError(t, db.Create(&Channel{
 		Id:     7,
 		Name:   "OpenCode Test Channel",
@@ -189,7 +191,7 @@ func TestUpdateOpenCodeAccountRejectsUnknownChannelBinding(t *testing.T) {
 	}))
 
 	account.ChannelID = 404
-	err = UpdateOpenCodeAccount(account, OpenCodeAccountSecrets{
+	err := UpdateOpenCodeAccount(account, OpenCodeAccountSecrets{
 		APIKey: "opencode-api-key-test-value",
 	})
 	require.Error(t, err)

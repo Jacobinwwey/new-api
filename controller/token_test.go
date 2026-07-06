@@ -74,6 +74,8 @@ func (legacyToken) TableName() string {
 func openTokenControllerTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
+	originalDB := model.DB
+	originalLOGDB := model.LOG_DB
 	gin.SetMode(gin.TestMode)
 	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
 	common.RedisEnabled = false
@@ -87,6 +89,8 @@ func openTokenControllerTestDB(t *testing.T) *gorm.DB {
 	model.LOG_DB = db
 
 	t.Cleanup(func() {
+		model.DB = originalDB
+		model.LOG_DB = originalLOGDB
 		sqlDB, err := db.DB()
 		if err == nil {
 			_ = sqlDB.Close()
@@ -115,6 +119,8 @@ func setupTokenControllerTestDB(t *testing.T) *gorm.DB {
 func openTokenControllerExternalDB(t *testing.T, dialect string, dsn string) (*gorm.DB, *bool) {
 	t.Helper()
 
+	originalDB := model.DB
+	originalLOGDB := model.LOG_DB
 	gin.SetMode(gin.TestMode)
 	common.RedisEnabled = false
 
@@ -141,13 +147,10 @@ func openTokenControllerExternalDB(t *testing.T, dialect string, dsn string) (*g
 	model.DB = db
 	model.LOG_DB = db
 
-	if db.Migrator().HasTable("tokens") {
-		t.Skipf("refusing to run %s migration compatibility test against external database because tokens table already exists", dialect)
-	}
-
 	managedTokensTable := new(bool)
-
 	t.Cleanup(func() {
+		model.DB = originalDB
+		model.LOG_DB = originalLOGDB
 		if *managedTokensTable && db.Migrator().HasTable("tokens") {
 			_ = db.Migrator().DropTable("tokens")
 		}
@@ -156,6 +159,10 @@ func openTokenControllerExternalDB(t *testing.T, dialect string, dsn string) (*g
 			_ = sqlDB.Close()
 		}
 	})
+
+	if db.Migrator().HasTable("tokens") {
+		t.Skipf("refusing to run %s migration compatibility test against external database because tokens table already exists", dialect)
+	}
 
 	return db, managedTokensTable
 }

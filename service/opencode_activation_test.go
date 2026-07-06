@@ -12,11 +12,28 @@ import (
 	"gorm.io/gorm"
 )
 
-func TestActivateOpenCodeAccountUpdatesBoundChannelKeyAndActiveAccount(t *testing.T) {
+func setupOpenCodeActivationTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
+
+	originalDB := model.DB
+	originalLOGDB := model.LOG_DB
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
 	model.DB = db
+	model.LOG_DB = db
+	t.Cleanup(func() {
+		model.DB = originalDB
+		model.LOG_DB = originalLOGDB
+		if sqlDB, err := db.DB(); err == nil {
+			_ = sqlDB.Close()
+		}
+	})
 	require.NoError(t, db.AutoMigrate(&model.OpenCodeAccount{}, &model.Channel{}))
+	return db
+}
+
+func TestActivateOpenCodeAccountUpdatesBoundChannelKeyAndActiveAccount(t *testing.T) {
+	db := setupOpenCodeActivationTestDB(t)
 
 	originalSecret := common.CryptoSecret
 	common.CryptoSecret = "opencode-activation-test-secret"
@@ -53,10 +70,7 @@ func TestActivateOpenCodeAccountUpdatesBoundChannelKeyAndActiveAccount(t *testin
 }
 
 func TestActivateOpenCodeAccountRequiresAPIKey(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	require.NoError(t, err)
-	model.DB = db
-	require.NoError(t, db.AutoMigrate(&model.OpenCodeAccount{}, &model.Channel{}))
+	db := setupOpenCodeActivationTestDB(t)
 	require.NoError(t, db.Create(&model.Channel{
 		Id:     10,
 		Name:   "OpenCode Missing Key",
@@ -71,16 +85,13 @@ func TestActivateOpenCodeAccountRequiresAPIKey(t *testing.T) {
 	}
 	require.NoError(t, model.CreateOpenCodeAccount(account, model.OpenCodeAccountSecrets{}))
 
-	_, err = ActivateOpenCodeAccount(account.Id)
+	_, err := ActivateOpenCodeAccount(account.Id)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "api key")
 }
 
 func TestActivateOpenCodeAccountRequiresExistingChannel(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	require.NoError(t, err)
-	model.DB = db
-	require.NoError(t, db.AutoMigrate(&model.OpenCodeAccount{}, &model.Channel{}))
+	db := setupOpenCodeActivationTestDB(t)
 	require.NoError(t, db.Create(&model.Channel{
 		Id:     404,
 		Name:   "OpenCode Deleted Channel",
@@ -104,7 +115,7 @@ func TestActivateOpenCodeAccountRequiresExistingChannel(t *testing.T) {
 	}))
 	require.NoError(t, db.Delete(&model.Channel{}, 404).Error)
 
-	_, err = ActivateOpenCodeAccount(account.Id)
+	_, err := ActivateOpenCodeAccount(account.Id)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "channel")
 	assert.NotContains(t, err.Error(), "record not found")
@@ -115,10 +126,7 @@ func TestActivateOpenCodeAccountRequiresExistingChannel(t *testing.T) {
 }
 
 func TestActivateOpenCodeAccountRejectsPlainAPIKeyForCodexChannel(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	require.NoError(t, err)
-	model.DB = db
-	require.NoError(t, db.AutoMigrate(&model.OpenCodeAccount{}, &model.Channel{}))
+	db := setupOpenCodeActivationTestDB(t)
 
 	originalSecret := common.CryptoSecret
 	common.CryptoSecret = "opencode-codex-activation-test-secret"
@@ -143,7 +151,7 @@ func TestActivateOpenCodeAccountRejectsPlainAPIKeyForCodexChannel(t *testing.T) 
 		APIKey: "plain-opencode-api-key",
 	}))
 
-	_, err = ActivateOpenCodeAccount(account.Id)
+	_, err := ActivateOpenCodeAccount(account.Id)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "Codex")
 	assert.Contains(t, err.Error(), "access_token")
@@ -158,10 +166,7 @@ func TestActivateOpenCodeAccountRejectsPlainAPIKeyForCodexChannel(t *testing.T) 
 }
 
 func TestActivateOpenCodeAccountAcceptsCodexOAuthJSONKey(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	require.NoError(t, err)
-	model.DB = db
-	require.NoError(t, db.AutoMigrate(&model.OpenCodeAccount{}, &model.Channel{}))
+	db := setupOpenCodeActivationTestDB(t)
 
 	originalSecret := common.CryptoSecret
 	common.CryptoSecret = "opencode-codex-json-activation-test-secret"

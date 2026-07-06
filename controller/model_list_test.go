@@ -34,6 +34,8 @@ type userModelsResponse struct {
 func setupModelListControllerTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
+	originalDB := model.DB
+	originalLOGDB := model.LOG_DB
 	initModelListColumnNames(t)
 
 	gin.SetMode(gin.TestMode)
@@ -49,6 +51,8 @@ func setupModelListControllerTestDB(t *testing.T) *gorm.DB {
 	require.NoError(t, db.AutoMigrate(&model.User{}, &model.Channel{}, &model.Ability{}, &model.Model{}, &model.Vendor{}))
 
 	t.Cleanup(func() {
+		model.DB = originalDB
+		model.LOG_DB = originalLOGDB
 		sqlDB, err := db.DB()
 		if err == nil {
 			_ = sqlDB.Close()

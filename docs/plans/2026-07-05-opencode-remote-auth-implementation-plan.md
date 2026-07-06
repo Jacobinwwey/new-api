@@ -83,6 +83,7 @@ The current fork now represents the Responses usage compatibility fix that previ
 - `UsageFromChatUsage` preserves cache details in both `PromptTokensDetails` and `InputTokensDetails`.
 - Channel-affinity usage-cache stats record cached-token and prompt-cache-hit counters with relay-format-aware rate modes.
 - Tests cover both the compatibility conversion and usage-cache observation paths. The channel-affinity usage-cache tests now allocate deterministic per-test cache keys, so repeated fast runs cannot merge counters through coarse clock resolution.
+- The default Codex channel-affinity rule now includes `glm-*` models as well as `gpt-*`, so `glm-5.2` requests on `/v1/responses` can use the same `prompt_cache_key` affinity and Codex header pass-through path.
 
 The remaining cache question is not a repository representation issue; it is a live upstream behavior question. Real `glm-5.2` warm-cache verification still requires an imported OpenCode subscription account and repeated calls through New API. A separate replay/cache-key hardening patch from the old remote working tree has not been mapped to a current fork path, so it should be validated during the live E2E instead of assumed complete.
 
@@ -243,6 +244,7 @@ End-to-end verification:
 | Privacy boundary | Done | This document contains no secrets or deployment-specific account material. |
 | Cache accounting parity in fork | Implemented | `UsageFromChatUsage` now preserves cached-token details in both Chat-style and Responses-style accounting fields. |
 | Cache accounting test isolation | Implemented locally | Channel-affinity usage-cache tests now use deterministic per-test cache keys instead of wall-clock nanosecond keys. This removes cross-test counter bleed in fast repeated runs and makes cache-hit accounting verification stronger before real `glm-5.2` E2E. |
+| `glm-5.2` Codex affinity coverage | Implemented locally | The default Codex channel-affinity rule now matches both `gpt-*` and `glm-*` models on `/v1/responses`, using `prompt_cache_key` as the key source and the same Codex header pass-through template. This fixes a concrete cache-hit path gap where `glm-5.2` would skip affinity despite carrying a stable prompt cache key. |
 | OpenCode account model | Implemented | Added `opencode_accounts` model, migration registration, validation, encrypted secret storage, and masked public view. |
 | Reversible encryption helper | Implemented | Added AES-GCM `EncryptSecret` / `DecryptSecret` using `CRYPTO_SECRET`-derived key and versioned ciphertext. |
 | Root-only OpenCode account API | Implemented | Added CRUD, login-session, extract, quota refresh, and activate routes under `/api/opencode/accounts`. Quota refresh now accepts quota-only browser payloads and updates structured `quota_limit` / `quota_used` fields. |
@@ -412,6 +414,7 @@ go test ./controller -run "TestOpenCodeLoginSessionActionsSkipSidecarWhenAccount
 go test ./controller ./service -run "TestActivateOpenCodeAccountReturnsNotFoundWhenAccountMissing|TestActivateOpenCodeAccountRequiresExistingChannel|TestActivateOpenCodeAccountRequiresAPIKey|TestActivateOpenCodeAccountRejectsPlainAPIKeyForCodexChannel|TestActivateOpenCodeAccountAcceptsCodexOAuthJSONKey|TestActivateOpenCodeAccountUpdatesBoundChannelKeyAndActiveAccount" -count=1
 go test ./service -run "TestObserveChannelAffinityUsageCacheByRelayFormat" -count=20
 go test ./model ./controller ./service -run "TestCreateOpenCodeAccount|TestUpdateOpenCodeAccountRejectsUnknownChannelBinding|TestOpenCodeAccountPublicView|TestOpenCodeAccountResponseMarks|TestActivateOpenCodeAccount" -count=1
+go test ./service -run "TestChannelAffinityHitCodexTemplatePassHeadersEffective|TestGetPreferredChannelByAffinity_RequestHeaderKeySource|TestApplyChannelAffinityOverrideTemplate" -count=1
 go test ./model ./controller ./service ./router ./service/relayconvert -run "TestActivateOpenCodeAccountReturnsNotFoundWhenAccountMissing|TestActivateOpenCodeAccountRequiresExistingChannel|TestOpenCodeLoginSessionActionsSkipSidecarWhenAccountMissing|TestDeleteOpenCodeAccountPurgesLoginSessionBeforeDeleting|TestDeleteOpenCodeAccountPreservesAccountWhenPurgeFails|TestDeleteOpenCodeAccountSkipsPurgeWhenAccountMissing|TestGetOpenCodeAccountDiagnosticsReturnsNonSecretPayload|TestOpenCodeAccountDiagnosticsReportsCredentialKeySource|TestCreateOpenCodeAccount|TestOpenCodeAccountPublicViewReportsCredentialDecryptFailure|TestOpenCodeAccountResponse|TestOpenCodeAccountPublicViewReportsCredentialKeySource|TestMergeExtractedOpenCodeSecrets|TestApplyExtractedOpenCodeAccount|TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState|TestActivateOpenCodeAccount|TestBuildOpenCodeAuthCommandSpecPassesKeyTextThroughStdin|TestFindOpenCodeAuthSidecarPathSearchesExecutableDirectory|TestOpenCodeAuthSidecarStatusTreatsMissingStateAsStopped|TestOpenCodeAccountRoutesRegisterExpectedPaths|TestUsageFromChatUsagePreservesCachedTokensForBothAccountingPaths|TestObserveChannelAffinityUsageCacheByRelayFormat" -count=1
 bun run typecheck
 bun test src/features/opencode-accounts/lib.test.ts
@@ -575,6 +578,7 @@ https://opencode.ai/auth
 - `UsageFromChatUsage` 会在 `PromptTokensDetails` 与 `InputTokensDetails` 中同时保留 cache details。
 - channel-affinity usage-cache stats 会按 relay format 记录 cached-token 与 prompt-cache-hit 计数。
 - 仓库测试已经覆盖 compatibility conversion 与 usage-cache observation 路径。channel-affinity usage-cache 测试现在会分配确定性的 per-test cache key，因此快速重复运行不会因为时钟分辨率粗糙而把不同测试的计数合并。
+- 默认 Codex channel-affinity 规则现在同时覆盖 `glm-*` 与 `gpt-*` 模型，因此 `/v1/responses` 下的 `glm-5.2` 请求可以走同一条 `prompt_cache_key` affinity 与 Codex header 透传路径。
 
 剩余 cache 问题不再是“仓库是否已有代码表示”，而是真实上游行为验证问题。真实 `glm-5.2` warm-cache 验证仍需要导入 OpenCode 订阅账号，并通过 New API 多轮调用。旧远端工作树中的 replay/cache-key 加固补丁尚未映射到当前 fork 的具体路径，因此应在真实 E2E 中验证 request-body cache key 稳定性，而不是假定已经完成。
 
@@ -735,6 +739,7 @@ web/default/src/routes/_authenticated/opencode-accounts/index.tsx
 | 隐私边界 | 已完成 | 本文档不包含 secret 或部署特定账号材料。 |
 | fork 内 cache accounting parity | 已实现 | `UsageFromChatUsage` 现在同时保留 Chat 风格与 Responses 风格计费字段中的 cached-token details。 |
 | Cache accounting 测试隔离 | 本地已实现 | channel-affinity usage-cache 测试现在使用确定性的 per-test cache key，不再依赖 wall-clock nanosecond key。这样快速重复运行时不会发生跨测试 counter 串扰，在真实 `glm-5.2` E2E 前提升 cache-hit accounting 验证可信度。 |
+| `glm-5.2` Codex affinity 覆盖 | 本地已实现 | 默认 Codex channel-affinity 规则现在会在 `/v1/responses` 同时匹配 `gpt-*` 与 `glm-*` 模型，并继续使用 `prompt_cache_key` 作为 key source 与同一套 Codex header 透传模板。这修复了一个具体 cache-hit 链路缺口：`glm-5.2` 即使携带稳定 prompt cache key，先前也不会触发 affinity。 |
 | OpenCode account model | 已实现 | 已增加 `opencode_accounts` model、迁移注册、校验、加密 secret 存储与 masked public view。 |
 | 可逆加密 helper | 已实现 | 已增加 AES-GCM `EncryptSecret` / `DecryptSecret`，使用 `CRYPTO_SECRET` 派生 key，密文带版本前缀。 |
 | Root-only OpenCode account API | 已实现 | `/api/opencode/accounts` 下已包含 CRUD、登录会话、提取、quota refresh 与 activate 路由。quota refresh 现在支持只包含 quota 的浏览器 payload，并会更新结构化 `quota_limit` / `quota_used` 字段。 |
@@ -903,6 +908,7 @@ go test ./controller -run "TestOpenCodeLoginSessionActionsSkipSidecarWhenAccount
 go test ./controller ./service -run "TestActivateOpenCodeAccountReturnsNotFoundWhenAccountMissing|TestActivateOpenCodeAccountRequiresExistingChannel|TestActivateOpenCodeAccountRequiresAPIKey|TestActivateOpenCodeAccountRejectsPlainAPIKeyForCodexChannel|TestActivateOpenCodeAccountAcceptsCodexOAuthJSONKey|TestActivateOpenCodeAccountUpdatesBoundChannelKeyAndActiveAccount" -count=1
 go test ./service -run "TestObserveChannelAffinityUsageCacheByRelayFormat" -count=20
 go test ./model ./controller ./service -run "TestCreateOpenCodeAccount|TestUpdateOpenCodeAccountRejectsUnknownChannelBinding|TestOpenCodeAccountPublicView|TestOpenCodeAccountResponseMarks|TestActivateOpenCodeAccount" -count=1
+go test ./service -run "TestChannelAffinityHitCodexTemplatePassHeadersEffective|TestGetPreferredChannelByAffinity_RequestHeaderKeySource|TestApplyChannelAffinityOverrideTemplate" -count=1
 go test ./model ./controller ./service ./router ./service/relayconvert -run "TestActivateOpenCodeAccountReturnsNotFoundWhenAccountMissing|TestActivateOpenCodeAccountRequiresExistingChannel|TestOpenCodeLoginSessionActionsSkipSidecarWhenAccountMissing|TestDeleteOpenCodeAccountPurgesLoginSessionBeforeDeleting|TestDeleteOpenCodeAccountPreservesAccountWhenPurgeFails|TestDeleteOpenCodeAccountSkipsPurgeWhenAccountMissing|TestGetOpenCodeAccountDiagnosticsReturnsNonSecretPayload|TestOpenCodeAccountDiagnosticsReportsCredentialKeySource|TestCreateOpenCodeAccount|TestOpenCodeAccountPublicViewReportsCredentialDecryptFailure|TestOpenCodeAccountResponse|TestOpenCodeAccountPublicViewReportsCredentialKeySource|TestMergeExtractedOpenCodeSecrets|TestApplyExtractedOpenCodeAccount|TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState|TestActivateOpenCodeAccount|TestBuildOpenCodeAuthCommandSpecPassesKeyTextThroughStdin|TestFindOpenCodeAuthSidecarPathSearchesExecutableDirectory|TestOpenCodeAuthSidecarStatusTreatsMissingStateAsStopped|TestOpenCodeAccountRoutesRegisterExpectedPaths|TestUsageFromChatUsagePreservesCachedTokensForBothAccountingPaths|TestObserveChannelAffinityUsageCacheByRelayFormat" -count=1
 bun run typecheck
 bun test src/features/opencode-accounts/lib.test.ts

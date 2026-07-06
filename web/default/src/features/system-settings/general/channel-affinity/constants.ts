@@ -59,7 +59,7 @@ export type RuleTemplate = Omit<AffinityRule, 'id'>
 export const RULE_TEMPLATES: Record<string, RuleTemplate> = {
   codexCli: {
     name: 'codex cli trace',
-    model_regex: ['^gpt-.*$'],
+    model_regex: ['^gpt-.*$', '^glm-.*$'],
     path_regex: ['/v1/responses'],
     key_sources: [{ type: 'gjson', path: 'prompt_cache_key' }],
     param_override_template: buildPassHeadersTemplate(
@@ -103,5 +103,5 @@ export function makeUniqueName(
 }
 
 export function cloneTemplate<T>(template: T): T {
-  return JSON.parse(JSON.stringify(template))
+  return structuredClone(template)
 }

@@ -279,56 +279,60 @@ func TestChannelAffinityHitCodexTemplatePassHeadersEffective(t *testing.T) {
 	}
 	require.NotNil(t, codexRule)
 
-	affinityValue := fmt.Sprintf("pc-hit-%d", time.Now().UnixNano())
-	cacheKeySuffix := buildChannelAffinityCacheKeySuffix(*codexRule, "gpt-5", "default", affinityValue)
+	for _, modelName := range []string{"gpt-5", "glm-5.2"} {
+		t.Run(modelName, func(t *testing.T) {
+			affinityValue := fmt.Sprintf("pc-hit-%s-%d", strings.ReplaceAll(modelName, ".", "-"), time.Now().UnixNano())
+			cacheKeySuffix := buildChannelAffinityCacheKeySuffix(*codexRule, modelName, "default", affinityValue)
 
-	cache := getChannelAffinityCache()
-	require.NoError(t, cache.SetWithTTL(cacheKeySuffix, 9527, time.Minute))
-	t.Cleanup(func() {
-		_, _ = cache.DeleteMany([]string{cacheKeySuffix})
-	})
+			cache := getChannelAffinityCache()
+			require.NoError(t, cache.SetWithTTL(cacheKeySuffix, 9527, time.Minute))
+			t.Cleanup(func() {
+				_, _ = cache.DeleteMany([]string{cacheKeySuffix})
+			})
 
-	rec := httptest.NewRecorder()
-	ctx, _ := gin.CreateTestContext(rec)
-	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(fmt.Sprintf(`{"prompt_cache_key":"%s"}`, affinityValue)))
-	ctx.Request.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(rec)
+			ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(fmt.Sprintf(`{"prompt_cache_key":"%s"}`, affinityValue)))
+			ctx.Request.Header.Set("Content-Type", "application/json")
 
-	channelID, found := GetPreferredChannelByAffinity(ctx, "gpt-5", "default")
-	require.True(t, found)
-	require.Equal(t, 9527, channelID)
+			channelID, found := GetPreferredChannelByAffinity(ctx, modelName, "default")
+			require.True(t, found)
+			require.Equal(t, 9527, channelID)
 
-	baseOverride := map[string]interface{}{
-		"temperature": 0.2,
+			baseOverride := map[string]interface{}{
+				"temperature": 0.2,
+			}
+			mergedOverride, applied := ApplyChannelAffinityOverrideTemplate(ctx, baseOverride)
+			require.True(t, applied)
+			require.Equal(t, 0.2, mergedOverride["temperature"])
+
+			info := &relaycommon.RelayInfo{
+				RequestHeaders: map[string]string{
+					"Originator": "Codex CLI",
+					"Session_id": "sess-123",
+					"User-Agent": "codex-cli-test",
+				},
+				ChannelMeta: &relaycommon.ChannelMeta{
+					ParamOverride: mergedOverride,
+					HeadersOverride: map[string]interface{}{
+						"X-Static": "legacy-static",
+					},
+				},
+			}
+
+			_, err := relaycommon.ApplyParamOverrideWithRelayInfo([]byte(fmt.Sprintf(`{"model":"%s"}`, modelName)), info)
+			require.NoError(t, err)
+			require.True(t, info.UseRuntimeHeadersOverride)
+
+			require.Equal(t, "legacy-static", info.RuntimeHeadersOverride["x-static"])
+			require.Equal(t, "Codex CLI", info.RuntimeHeadersOverride["originator"])
+			require.Equal(t, "sess-123", info.RuntimeHeadersOverride["session_id"])
+			require.Equal(t, "codex-cli-test", info.RuntimeHeadersOverride["user-agent"])
+
+			_, exists := info.RuntimeHeadersOverride["x-codex-beta-features"]
+			require.False(t, exists)
+			_, exists = info.RuntimeHeadersOverride["x-codex-turn-metadata"]
+			require.False(t, exists)
+		})
 	}
-	mergedOverride, applied := ApplyChannelAffinityOverrideTemplate(ctx, baseOverride)
-	require.True(t, applied)
-	require.Equal(t, 0.2, mergedOverride["temperature"])
-
-	info := &relaycommon.RelayInfo{
-		RequestHeaders: map[string]string{
-			"Originator": "Codex CLI",
-			"Session_id": "sess-123",
-			"User-Agent": "codex-cli-test",
-		},
-		ChannelMeta: &relaycommon.ChannelMeta{
-			ParamOverride: mergedOverride,
-			HeadersOverride: map[string]interface{}{
-				"X-Static": "legacy-static",
-			},
-		},
-	}
-
-	_, err := relaycommon.ApplyParamOverrideWithRelayInfo([]byte(`{"model":"gpt-5"}`), info)
-	require.NoError(t, err)
-	require.True(t, info.UseRuntimeHeadersOverride)
-
-	require.Equal(t, "legacy-static", info.RuntimeHeadersOverride["x-static"])
-	require.Equal(t, "Codex CLI", info.RuntimeHeadersOverride["originator"])
-	require.Equal(t, "sess-123", info.RuntimeHeadersOverride["session_id"])
-	require.Equal(t, "codex-cli-test", info.RuntimeHeadersOverride["user-agent"])
-
-	_, exists := info.RuntimeHeadersOverride["x-codex-beta-features"]
-	require.False(t, exists)
-	_, exists = info.RuntimeHeadersOverride["x-codex-turn-metadata"]
-	require.False(t, exists)
 }

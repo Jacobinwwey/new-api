@@ -220,6 +220,60 @@ test("runOpenCodeLiveE2E fails when cache smoke checks are skipped unexpectedly"
   ]);
 });
 
+test("runOpenCodeLiveE2E redacts stage exceptions and keeps fail-fast semantics", async () => {
+  const calls = [];
+  const summary = await runOpenCodeLiveE2E({
+    continueOnFailure: false,
+    tailscale: { target: "private-tailnet-host" },
+    opencode: {
+      baseURL: "https://new-api.example.test",
+      adminToken: "root-token-secret",
+      adminCookie: "session=admin-cookie-secret",
+    },
+    cacheSmoke: {
+      baseURL: "https://new-api.example.test",
+      apiKey: "relay-key-secret",
+      promptCacheKey: "stable-cache-key",
+      input: "private prompt text for live e2e",
+    },
+    runners: {
+      runTailscaleLinkPreflight: async () => {
+        calls.push("tailscale");
+        return passedStage();
+      },
+      runOpenCodePreflight: async () => {
+        calls.push("opencode");
+        throw new Error(
+          "failed root-token-secret relay-key-secret stable-cache-key private-tailnet-host https://new-api.example.test api_key=x user@example.test C:\\Users\\operator\\secret",
+        );
+      },
+      runCacheSmoke: async () => {
+        calls.push("cache");
+        return passedStage();
+      },
+    },
+  });
+
+  assert.deepEqual(calls, ["tailscale", "opencode"]);
+  assert.equal(summary.checks.status, "failed");
+  assert.equal(summary.opencode.checks.status, "failed");
+  assert.equal(summary.opencode.error.message.includes("<redacted>"), true);
+  const serialized = JSON.stringify(summary);
+  for (const fragment of [
+    "root-token-secret",
+    "relay-key-secret",
+    "stable-cache-key",
+    "private-tailnet-host",
+    "new-api.example.test",
+    "api_" + "key=x",
+    "user@example.test",
+    "C:\\Users\\operator\\secret",
+  ]) {
+    assert.equal(serialized.includes(fragment), false);
+  }
+  assert.equal(summary.cache_smoke, null);
+});
+
 test("runOpenCodeLiveE2E supports explicitly skipped Tailscale for local diagnostics", async () => {
   const calls = [];
   const summary = await runOpenCodeLiveE2E({

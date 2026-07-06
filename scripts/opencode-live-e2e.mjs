@@ -14,6 +14,15 @@ import {
   runTailscaleLinkPreflight,
 } from "./tailscale-link-preflight.mjs";
 
+const SECRET_ASSIGNMENT_PATTERN =
+  /\b(api[_-]?key|cookie|workspace[_-]?id|access[_-]?token|refresh[_-]?token|id[_-]?token|authorization)\s*[:=]\s*["']?[^"',\s&}]+/gi;
+const OAUTH_QUERY_PATTERN = /([?&](?:code|state|access_token|refresh_token|id_token)=)[^&\s]+/gi;
+const BEARER_TOKEN_PATTERN = /\bBearer\s+[A-Za-z0-9._~+/=-]{12,}/gi;
+const EMAIL_PATTERN = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
+const WINDOWS_ABSOLUTE_PATH_PATTERN = /\b[A-Za-z]:\\[^\s"'<>]+/g;
+const POSIX_ABSOLUTE_PATH_PATTERN =
+  /(^|[\s"'(])\/(?:home|root|opt|var|srv|etc|mnt|tmp|data)\/[^\s"'<>)]*/g;
+
 const LIVE_E2E_DEFAULT_ARGS = {
   "min-active-ready-accounts": "1",
   "require-root": "true",
@@ -62,7 +71,11 @@ export async function runOpenCodeLiveE2E(config) {
   const checks = [];
 
   if (config.tailscale) {
-    summary.tailscale = await runners.runTailscaleLinkPreflight(config.tailscale);
+    summary.tailscale = await runStage(
+      "tailscale_link",
+      () => runners.runTailscaleLinkPreflight(config.tailscale),
+      config,
+    );
     checks.push(stageCheck("tailscale_link", summary.tailscale?.checks?.status));
     if (shouldStop(summary.tailscale, config)) {
       checks.push(
@@ -82,7 +95,11 @@ export async function runOpenCodeLiveE2E(config) {
     checks.push(stageCheck("tailscale_link", "skipped", "disabled", { allowSkipped: true }));
   }
 
-  summary.opencode = await runners.runOpenCodePreflight(config.opencode);
+  summary.opencode = await runStage(
+    "opencode_preflight",
+    () => runners.runOpenCodePreflight(config.opencode),
+    config,
+  );
   checks.push(stageCheck("opencode_preflight", summary.opencode?.checks?.status));
   if (shouldStop(summary.opencode, config)) {
     checks.push(
@@ -94,7 +111,11 @@ export async function runOpenCodeLiveE2E(config) {
     return summary;
   }
 
-  summary.cache_smoke = await runners.runCacheSmoke(config.cacheSmoke);
+  summary.cache_smoke = await runStage(
+    "glm_cache_smoke",
+    () => runners.runCacheSmoke(config.cacheSmoke),
+    config,
+  );
   checks.push(stageCheck("glm_cache_smoke", summary.cache_smoke?.checks?.status));
 
   summary.checks = buildChecksSummary(checks);
@@ -142,6 +163,29 @@ function shouldStop(stageSummary, config) {
   return !config.continueOnFailure && stageSummary?.checks?.status !== "passed";
 }
 
+async function runStage(name, execute, config) {
+  try {
+    return await execute();
+  } catch (error) {
+    const message = sanitizeLiveText(error.message || `${name} failed`, config);
+    return {
+      error: { message },
+      checks: {
+        status: "failed",
+        items: [
+          {
+            name: `${name}_exception`,
+            status: "failed",
+            actual: "thrown",
+            expected: "completed",
+            message,
+          },
+        ],
+      },
+    };
+  }
+}
+
 function stageCheck(name, status, reason = "", options = {}) {
   const normalized =
     status === "passed" || (status === "skipped" && options.allowSkipped) ? status : "failed";
@@ -159,6 +203,49 @@ function buildChecksSummary(items) {
     status: items.some((item) => item.status === "failed") ? "failed" : "passed",
     items,
   };
+}
+
+function sanitizeLiveText(text, config) {
+  let result = String(text || "");
+  for (const fragment of sensitiveFragments(config)) {
+    result = result.split(fragment).join("<redacted>");
+  }
+  result = result.replace(BEARER_TOKEN_PATTERN, "Bearer <redacted>");
+  result = result.replace(OAUTH_QUERY_PATTERN, "$1<redacted>");
+  result = result.replace(SECRET_ASSIGNMENT_PATTERN, (_match, key) => `${key}=<redacted>`);
+  result = result.replace(EMAIL_PATTERN, "<redacted-email>");
+  result = result.replace(WINDOWS_ABSOLUTE_PATH_PATTERN, "<redacted-path>");
+  result = result.replace(POSIX_ABSOLUTE_PATH_PATTERN, (_match, prefix) => `${prefix}<redacted-path>`);
+  return result;
+}
+
+function sensitiveFragments(config) {
+  const fragments = [
+    config?.tailscale?.target,
+    config?.opencode?.baseURL,
+    config?.opencode?.adminToken,
+    config?.opencode?.adminCookie,
+    config?.cacheSmoke?.baseURL,
+    config?.cacheSmoke?.apiKey,
+    config?.cacheSmoke?.adminToken,
+    config?.cacheSmoke?.adminCookie,
+    config?.cacheSmoke?.promptCacheKey,
+    config?.cacheSmoke?.input,
+    ...deploymentURLParts(config?.opencode?.baseURL),
+    ...deploymentURLParts(config?.cacheSmoke?.baseURL),
+  ].filter(Boolean);
+  return Array.from(new Set(fragments)).sort((left, right) => right.length - left.length);
+}
+
+function deploymentURLParts(rawBaseURL) {
+  const baseURL = String(rawBaseURL || "").trim().replace(/\/+$/, "");
+  if (!baseURL) return [];
+  try {
+    const url = new URL(baseURL);
+    return [baseURL, url.origin, url.host, url.hostname].filter(Boolean);
+  } catch {
+    return [baseURL];
+  }
 }
 
 async function main() {

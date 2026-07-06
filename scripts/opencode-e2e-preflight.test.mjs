@@ -105,7 +105,7 @@ test("runOpenCodePreflight passes stable diagnostics and summarizes accounts wit
             activation_ready: false,
             credential_integrity: "decrypt_failed",
             email_masked: "",
-            missing_activation_fields: ["credential", "channel_id"],
+            missing_activation_fields: [`api_${"key"}`, "channel_id"],
           },
         ],
       });
@@ -140,14 +140,39 @@ test("runOpenCodePreflight passes stable diagnostics and summarizes accounts wit
     },
     missing_activation_fields: {
       credential: 1,
-      channel_id: 1,
+      channel: 1,
     },
   });
+  assert.equal(Object.hasOwn(summary, "base_url"), false);
   assert.equal(calls[1].headers.Authorization, "root-token-secret");
   assert.equal(calls[1].headers["New-Api-User"], "1");
   const encoded = JSON.stringify(summary);
   assert.doesNotMatch(encoded, /root-token-secret/);
   assert.doesNotMatch(encoded, /u\*\*\*@example\.test/);
+  assert.doesNotMatch(encoded, /api_key/);
+  assert.doesNotMatch(encoded, /new-api\.example\.test/);
+});
+
+test("runOpenCodePreflight redacts deployment URL parts from endpoint errors", async () => {
+  const fetcher = async (url) => {
+    throw new Error(`cannot reach ${url}`);
+  };
+
+  const summary = await runOpenCodePreflight({
+    baseURL: "https://new-api.example.test",
+    adminToken: "",
+    adminCookie: "",
+    adminUserID: "",
+    timeoutMs: 1000,
+    requireRoot: false,
+    requireStableCredentialKey: true,
+    minActivationReadyAccounts: 0,
+    fetcher,
+  });
+
+  assert.equal(summary.checks.status, "failed");
+  assert.equal(summary.endpoints.status.status, "request_error");
+  assert.doesNotMatch(JSON.stringify(summary), /new-api\.example\.test/);
 });
 
 test("runOpenCodePreflight fails fallback credential key by default", async () => {
@@ -252,7 +277,9 @@ test("CLI exits non-zero and redacts root auth when preflight checks fail", asyn
     assert.equal(stderr, "");
     const summary = JSON.parse(stdout);
     assert.equal(summary.checks.status, "failed");
+    assert.equal(Object.hasOwn(summary, "base_url"), false);
     assert.doesNotMatch(stdout, /root-token-secret/);
+    assert.doesNotMatch(stdout, /127\.0\.0\.1/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

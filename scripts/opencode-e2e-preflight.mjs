@@ -46,7 +46,6 @@ export async function runOpenCodePreflight(config) {
   }
 
   const summary = {
-    base_url: normalizeBaseURL(config.baseURL),
     endpoints: {},
     diagnostics: null,
     accounts: null,
@@ -276,7 +275,7 @@ function summarizeAccounts(data) {
     const integrity = String(account?.credential_integrity || "unknown");
     credentialIntegrity[integrity] = (credentialIntegrity[integrity] || 0) + 1;
     for (const field of account?.missing_activation_fields || []) {
-      const key = String(field || "");
+      const key = missingActivationFieldCategory(field);
       if (!key) continue;
       missingActivationFields[key] = (missingActivationFields[key] || 0) + 1;
     }
@@ -288,6 +287,25 @@ function summarizeAccounts(data) {
     credential_integrity: credentialIntegrity,
     missing_activation_fields: missingActivationFields,
   };
+}
+
+function missingActivationFieldCategory(field) {
+  const value = String(field || "").trim().toLowerCase();
+  if (!value) return "";
+  if (value.includes("channel")) return "channel";
+  if (
+    value.includes("api") ||
+    value.includes("key") ||
+    value.includes("token") ||
+    value.includes("secret") ||
+    value.includes("credential")
+  ) {
+    return "credential";
+  }
+  if (value.includes("workspace")) return "workspace";
+  if (value.includes("account")) return "account";
+  if (value.includes("email")) return "email";
+  return "other";
 }
 
 function buildChecksSummary(items) {
@@ -309,11 +327,22 @@ async function fetchWithTimeout(fetcher, url, init, timeoutMs) {
 
 function sanitizeText(text, config) {
   let result = String(text || "");
-  for (const secret of [config.adminToken, config.adminCookie]) {
+  for (const secret of [config.adminToken, config.adminCookie, ...deploymentURLParts(config.baseURL)]) {
     if (!secret) continue;
     result = result.split(secret).join("<redacted>");
   }
   return result;
+}
+
+function deploymentURLParts(rawBaseURL) {
+  const baseURL = normalizeBaseURL(rawBaseURL);
+  if (!baseURL) return [];
+  try {
+    const url = new URL(baseURL);
+    return [baseURL, url.origin, url.host, url.hostname].filter(Boolean);
+  } catch {
+    return [baseURL];
+  }
 }
 
 async function main() {

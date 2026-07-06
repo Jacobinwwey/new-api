@@ -170,6 +170,11 @@ test("runOpenCodePreflight passes stable diagnostics and summarizes accounts wit
   });
   assert.equal(Object.hasOwn(summary, "base_url"), false);
   assert.equal(summary.endpoints.affinity_usage_stats.status, "ok");
+  assert.deepEqual(summary.affinity_usage_stats, {
+    rule_name: "codex cli trace",
+    using_group: "default",
+    key_fp: "00000000",
+  });
   assert.equal(calls[1].headers.Authorization, "root-token-secret");
   assert.equal(calls[1].headers["New-Api-User"], "1");
   const encoded = JSON.stringify(summary);
@@ -348,6 +353,179 @@ test("runOpenCodePreflight fails when required affinity stats endpoint is unavai
   );
   assert.equal(statsCheck.status, "failed");
   assert.equal(statsCheck.actual, "business_error");
+});
+
+test("runOpenCodePreflight fails malformed diagnostics payloads", async () => {
+  const fetcher = async (url) => {
+    if (String(url).endsWith("/api/status")) {
+      return jsonResponse({ version: "test" });
+    }
+    if (String(url).endsWith("/api/opencode/accounts/diagnostics")) {
+      return jsonResponse({
+        success: true,
+        data: {},
+      });
+    }
+    if (String(url).endsWith("/api/opencode/accounts")) {
+      return jsonResponse({ success: true, data: [] });
+    }
+    if (String(url).includes("/api/log/channel_affinity_usage_cache")) {
+      return jsonResponse({
+        success: true,
+        data: {
+          rule_name: "codex cli trace",
+          using_group: "default",
+          key_fp: "00000000",
+        },
+      });
+    }
+    return jsonResponse({ success: false, message: "not found" }, { status: 404 });
+  };
+
+  const summary = await runOpenCodePreflight({
+    baseURL: "https://new-api.example.test",
+    adminToken: "root-token-secret",
+    adminCookie: "",
+    adminUserID: "1",
+    timeoutMs: 1000,
+    requireRoot: true,
+    requireStableCredentialKey: true,
+    requireAffinityStats: true,
+    minActivationReadyAccounts: 0,
+    fetcher,
+  });
+
+  assert.equal(summary.checks.status, "failed");
+  const payloadCheck = summary.checks.items.find(
+    (item) => item.name === "opencode_diagnostics_payload",
+  );
+  assert.deepEqual(payloadCheck, {
+    name: "opencode_diagnostics_payload",
+    status: "failed",
+    actual: "invalid:credential_key_source",
+    expected: "credential_key_source+uses_fallback_credential_key",
+  });
+  assert.equal(
+    summary.checks.items.some((item) => item.name === "credential_key_stable"),
+    false,
+  );
+  assert.doesNotMatch(JSON.stringify(summary), /root-token-secret/);
+});
+
+test("runOpenCodePreflight fails non-array account payloads", async () => {
+  const fetcher = async (url) => {
+    if (String(url).endsWith("/api/status")) {
+      return jsonResponse({ version: "test" });
+    }
+    if (String(url).endsWith("/api/opencode/accounts/diagnostics")) {
+      return jsonResponse({
+        success: true,
+        data: {
+          credential_key_source: "crypto_secret",
+          uses_fallback_credential_key: false,
+        },
+      });
+    }
+    if (String(url).endsWith("/api/opencode/accounts")) {
+      return jsonResponse({ success: true, data: { items: [] } });
+    }
+    if (String(url).includes("/api/log/channel_affinity_usage_cache")) {
+      return jsonResponse({
+        success: true,
+        data: {
+          rule_name: "codex cli trace",
+          using_group: "default",
+          key_fp: "00000000",
+        },
+      });
+    }
+    return jsonResponse({ success: false, message: "not found" }, { status: 404 });
+  };
+
+  const summary = await runOpenCodePreflight({
+    baseURL: "https://new-api.example.test",
+    adminToken: "root-token-secret",
+    adminCookie: "",
+    adminUserID: "1",
+    timeoutMs: 1000,
+    requireRoot: true,
+    requireStableCredentialKey: true,
+    requireAffinityStats: true,
+    minActivationReadyAccounts: 0,
+    fetcher,
+  });
+
+  assert.equal(summary.checks.status, "failed");
+  assert.equal(summary.accounts, null);
+  const accountsPayloadCheck = summary.checks.items.find(
+    (item) => item.name === "opencode_accounts_payload",
+  );
+  assert.deepEqual(accountsPayloadCheck, {
+    name: "opencode_accounts_payload",
+    status: "failed",
+    actual: "object",
+    expected: "array",
+  });
+});
+
+test("runOpenCodePreflight fails mismatched affinity stats identity", async () => {
+  const fetcher = async (url) => {
+    if (String(url).endsWith("/api/status")) {
+      return jsonResponse({ version: "test" });
+    }
+    if (String(url).endsWith("/api/opencode/accounts/diagnostics")) {
+      return jsonResponse({
+        success: true,
+        data: {
+          credential_key_source: "crypto_secret",
+          uses_fallback_credential_key: false,
+        },
+      });
+    }
+    if (String(url).endsWith("/api/opencode/accounts")) {
+      return jsonResponse({ success: true, data: [] });
+    }
+    if (String(url).includes("/api/log/channel_affinity_usage_cache")) {
+      return jsonResponse({
+        success: true,
+        data: {
+          rule_name: "other codex rule",
+          using_group: "default",
+          key_fp: "00000000",
+        },
+      });
+    }
+    return jsonResponse({ success: false, message: "not found" }, { status: 404 });
+  };
+
+  const summary = await runOpenCodePreflight({
+    baseURL: "https://new-api.example.test",
+    adminToken: "root-token-secret",
+    adminCookie: "",
+    adminUserID: "1",
+    timeoutMs: 1000,
+    requireRoot: true,
+    requireStableCredentialKey: true,
+    requireAffinityStats: true,
+    minActivationReadyAccounts: 0,
+    fetcher,
+  });
+
+  assert.equal(summary.checks.status, "failed");
+  const statsIdentityCheck = summary.checks.items.find(
+    (item) => item.name === "affinity_usage_stats_identity",
+  );
+  assert.deepEqual(statsIdentityCheck, {
+    name: "affinity_usage_stats_identity",
+    status: "failed",
+    actual: "mismatch:rule_name",
+    expected: "rule_name+using_group+key_fp",
+  });
+  assert.deepEqual(summary.affinity_usage_stats, {
+    rule_name: "other codex rule",
+    using_group: "default",
+    key_fp: "00000000",
+  });
 });
 
 test("runOpenCodePreflight redacts deployment URL parts from endpoint errors", async () => {

@@ -8,6 +8,12 @@ const DEFAULT_REQUIRE_AFFINITY_STATS = true;
 const DEFAULT_MIN_ACTIVATION_READY_ACCOUNTS = 0;
 const DEFAULT_MIN_ACTIVE_ACCOUNTS = 0;
 const DEFAULT_MIN_ACTIVE_READY_ACCOUNTS = 0;
+const CREDENTIAL_KEY_SOURCES = new Set(["crypto_secret", "session_secret_fallback"]);
+const AFFINITY_STATS_PROBE = {
+  ruleName: "codex cli trace",
+  usingGroup: "default",
+  keyFingerprint: "00000000",
+};
 
 export function buildOpenCodePreflightConfig(argv = process.argv, env = process.env) {
   const args = parseArgs(argv);
@@ -114,16 +120,25 @@ export async function runOpenCodePreflight(config) {
   });
   if (diagnosticsResult.ok) {
     summary.diagnostics = sanitizeDiagnostics(diagnosticsResult.data);
+    const diagnosticsContractError = diagnosticsContractViolation(diagnosticsResult.data);
     checks.push({
-      name: "credential_key_stable",
-      status:
-        !config.requireStableCredentialKey ||
-        !summary.diagnostics.uses_fallback_credential_key
-          ? "passed"
-          : "failed",
-      actual: summary.diagnostics.credential_key_source,
-      expected: "crypto_secret",
+      name: "opencode_diagnostics_payload",
+      status: diagnosticsContractError ? "failed" : "passed",
+      actual: diagnosticsContractError ? `invalid:${diagnosticsContractError}` : "valid",
+      expected: "credential_key_source+uses_fallback_credential_key",
     });
+    if (!diagnosticsContractError) {
+      checks.push({
+        name: "credential_key_stable",
+        status:
+          !config.requireStableCredentialKey ||
+          !summary.diagnostics.uses_fallback_credential_key
+            ? "passed"
+            : "failed",
+        actual: summary.diagnostics.credential_key_source,
+        expected: "crypto_secret",
+      });
+    }
   }
 
   const accountsResult = await getJSON(config, fetcher, "/api/opencode/accounts", { root: true });
@@ -136,8 +151,17 @@ export async function runOpenCodePreflight(config) {
     message: accountsResult.message,
   });
   if (accountsResult.ok) {
-    summary.accounts = summarizeAccounts(accountsResult.data);
-    if (config.minActivationReadyAccounts > 0) {
+    const accountsPayloadIsArray = Array.isArray(accountsResult.data);
+    checks.push({
+      name: "opencode_accounts_payload",
+      status: accountsPayloadIsArray ? "passed" : "failed",
+      actual: accountsPayloadIsArray ? "array" : typeof accountsResult.data,
+      expected: "array",
+    });
+    if (accountsPayloadIsArray) {
+      summary.accounts = summarizeAccounts(accountsResult.data);
+    }
+    if (accountsPayloadIsArray && config.minActivationReadyAccounts > 0) {
       checks.push({
         name: "activation_ready_accounts",
         status:
@@ -148,7 +172,7 @@ export async function runOpenCodePreflight(config) {
         expected_min: config.minActivationReadyAccounts,
       });
     }
-    if (config.minActiveAccounts > 0) {
+    if (accountsPayloadIsArray && config.minActiveAccounts > 0) {
       checks.push({
         name: "active_accounts",
         status: summary.accounts.active >= config.minActiveAccounts ? "passed" : "failed",
@@ -156,7 +180,7 @@ export async function runOpenCodePreflight(config) {
         expected_min: config.minActiveAccounts,
       });
     }
-    if (config.minActiveReadyAccounts > 0) {
+    if (accountsPayloadIsArray && config.minActiveReadyAccounts > 0) {
       checks.push({
         name: "active_ready_accounts",
         status:
@@ -178,6 +202,18 @@ export async function runOpenCodePreflight(config) {
     expected: "ok",
     message: affinityStatsResult.message,
   });
+  if (affinityStatsResult.ok) {
+    summary.affinity_usage_stats = sanitizeAffinityStats(affinityStatsResult.data);
+    const statsIdentityError = affinityStatsIdentityMismatch(summary.affinity_usage_stats);
+    checks.push({
+      name: "affinity_usage_stats_identity",
+      status: statsIdentityError
+        ? endpointCheckStatus({ ok: false }, config.requireAffinityStats)
+        : "passed",
+      actual: statsIdentityError ? `mismatch:${statsIdentityError}` : "matched",
+      expected: "rule_name+using_group+key_fp",
+    });
+  }
 
   summary.checks = buildChecksSummary(checks);
   return summary;
@@ -230,9 +266,9 @@ function hasRootCredentials(config) {
 
 function buildAffinityStatsProbePath() {
   const params = new URLSearchParams({
-    rule_name: "codex cli trace",
-    using_group: "default",
-    key_fp: "00000000",
+    rule_name: AFFINITY_STATS_PROBE.ruleName,
+    using_group: AFFINITY_STATS_PROBE.usingGroup,
+    key_fp: AFFINITY_STATS_PROBE.keyFingerprint,
   });
   return `/api/log/channel_affinity_usage_cache?${params.toString()}`;
 }
@@ -319,6 +355,39 @@ function sanitizeDiagnostics(data) {
     credential_key_source: String(data?.credential_key_source || ""),
     uses_fallback_credential_key: Boolean(data?.uses_fallback_credential_key),
   };
+}
+
+function diagnosticsContractViolation(data) {
+  const source = String(data?.credential_key_source || "");
+  if (!CREDENTIAL_KEY_SOURCES.has(source)) {
+    return "credential_key_source";
+  }
+  if (typeof data?.uses_fallback_credential_key !== "boolean") {
+    return "uses_fallback_credential_key";
+  }
+  return "";
+}
+
+function sanitizeAffinityStats(data) {
+  return {
+    rule_name: String(data?.rule_name || ""),
+    using_group: String(data?.using_group || ""),
+    key_fp: String(data?.key_fp || ""),
+  };
+}
+
+function affinityStatsIdentityMismatch(stats) {
+  const expected = {
+    rule_name: AFFINITY_STATS_PROBE.ruleName,
+    using_group: AFFINITY_STATS_PROBE.usingGroup,
+    key_fp: AFFINITY_STATS_PROBE.keyFingerprint,
+  };
+  for (const field of ["rule_name", "using_group", "key_fp"]) {
+    if (stats[field] !== expected[field]) {
+      return field;
+    }
+  }
+  return "";
 }
 
 function summarizeAccounts(data) {

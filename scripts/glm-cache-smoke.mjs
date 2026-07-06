@@ -281,10 +281,30 @@ async function readUsageStats(config, fetcher, keyFingerprint) {
     if (payload && payload.success === false) {
       return { status: "error", message: sanitizeText(payload.message || "stats request failed", config) };
     }
-    return { status: "ok", data: sanitizeStats(payload?.data || {}) };
+    const stats = sanitizeStats(payload?.data || {});
+    const identityMismatch = usageStatsIdentityMismatch(stats, config, keyFingerprint);
+    if (identityMismatch) {
+      return { status: "error", message: `stats identity mismatch: ${identityMismatch}` };
+    }
+    return { status: "ok", data: stats };
   } catch (error) {
     return { status: "error", message: sanitizeText(error.message || "stats request failed", config) };
   }
+}
+
+function usageStatsIdentityMismatch(stats, config, keyFingerprint) {
+  const expected = {
+    rule_name: String(config.ruleName || ""),
+    using_group: String(config.usingGroup || ""),
+    key_fp: String(keyFingerprint || ""),
+  };
+  for (const field of ["rule_name", "using_group", "key_fp"]) {
+    const actual = String(stats[field] || "");
+    if (actual && actual !== expected[field]) {
+      return field;
+    }
+  }
+  return "";
 }
 
 function buildUsageStatsReport(baselineStats, finalStats) {

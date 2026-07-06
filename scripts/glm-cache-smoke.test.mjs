@@ -16,6 +16,7 @@ import {
 } from "./glm-cache-smoke.mjs";
 
 const SMOKE_SCRIPT_PATH = fileURLToPath(new URL("./glm-cache-smoke.mjs", import.meta.url));
+const FIXTURE_CACHE_KEY_FP = cacheKeyFingerprint("session-secret");
 
 test("cacheKeyFingerprint returns the New API affinity fingerprint without exposing the key", () => {
   const key = "session-value-that-must-not-be-printed";
@@ -183,7 +184,7 @@ test("runCacheSmoke never returns raw secrets in the summary", async () => {
         data: {
           rule_name: "codex cli trace",
           using_group: "default",
-          key_fp: "deadbeef",
+          key_fp: FIXTURE_CACHE_KEY_FP,
           hit: 2,
           total: 3,
           cached_tokens: 128,
@@ -285,7 +286,7 @@ test("runCacheSmoke reports usage-cache deltas for the current smoke run", async
             ? {
                 rule_name: "codex cli trace",
                 using_group: "default",
-                key_fp: "deadbeef",
+                key_fp: FIXTURE_CACHE_KEY_FP,
                 hit: 5,
                 total: 8,
                 cached_tokens: 256,
@@ -295,7 +296,7 @@ test("runCacheSmoke reports usage-cache deltas for the current smoke run", async
             : {
                 rule_name: "codex cli trace",
                 using_group: "default",
-                key_fp: "deadbeef",
+                key_fp: FIXTURE_CACHE_KEY_FP,
                 hit: 7,
                 total: 10,
                 cached_tokens: 768,
@@ -345,6 +346,188 @@ test("runCacheSmoke reports usage-cache deltas for the current smoke run", async
   });
 });
 
+test("runCacheSmoke accepts legacy usage-cache stats without identity fields", async () => {
+  let statsReads = 0;
+  const fetcher = async (url) => {
+    if (String(url).includes("/api/log/channel_affinity_usage_cache")) {
+      statsReads += 1;
+      return jsonResponse({
+        success: true,
+        data:
+          statsReads === 1
+            ? {
+                hit: 1,
+                total: 2,
+                cached_tokens: 64,
+              }
+            : {
+                hit: 3,
+                total: 4,
+                cached_tokens: 192,
+              },
+      });
+    }
+    return jsonResponse({
+      usage: {
+        input_tokens: 10,
+        input_tokens_details: { cached_tokens: 4 },
+      },
+    });
+  };
+
+  const summary = await runCacheSmoke({
+    baseURL: "https://new-api.example.test",
+    apiKey: "fixture-relay-secret",
+    adminToken: "admin-token-secret",
+    adminCookie: "",
+    adminUserID: "1",
+    model: "glm-5.2",
+    promptCacheKey: "session-secret",
+    input: "cache smoke prompt",
+    maxOutputTokens: 16,
+    requestCount: 2,
+    requestDelayMs: 0,
+    usingGroup: "default",
+    ruleName: "codex cli trace",
+    timeoutMs: 1000,
+    requireStats: true,
+    fetcher,
+  });
+
+  assert.equal(summary.stats.status, "ok");
+  assert.deepEqual(summary.stats.delta, {
+    hit: 2,
+    total: 2,
+    cached_tokens: 128,
+    prompt_cache_hit_tokens: 0,
+    prompt_tokens: 0,
+    completion_tokens: 0,
+    total_tokens: 0,
+  });
+  assert.equal(summary.checks.status, "passed");
+});
+
+test("runCacheSmoke rejects mismatched baseline usage-cache stats identity", async () => {
+  const fetcher = async (url) => {
+    if (String(url).includes("/api/log/channel_affinity_usage_cache")) {
+      return jsonResponse({
+        success: true,
+        data: {
+          rule_name: "other codex rule",
+          using_group: "default",
+          key_fp: FIXTURE_CACHE_KEY_FP,
+          hit: 100,
+          total: 100,
+          cached_tokens: 4096,
+        },
+      });
+    }
+    return jsonResponse({
+      usage: {
+        input_tokens: 10,
+        input_tokens_details: { cached_tokens: 4 },
+      },
+    });
+  };
+
+  const summary = await runCacheSmoke({
+    baseURL: "https://new-api.example.test",
+    apiKey: "fixture-relay-secret",
+    adminToken: "admin-token-secret",
+    adminCookie: "",
+    adminUserID: "1",
+    model: "glm-5.2",
+    promptCacheKey: "session-secret",
+    input: "cache smoke prompt",
+    maxOutputTokens: 16,
+    requestCount: 2,
+    requestDelayMs: 0,
+    usingGroup: "default",
+    ruleName: "codex cli trace",
+    timeoutMs: 1000,
+    requireStats: true,
+    fetcher,
+  });
+
+  assert.equal(summary.stats.status, "error");
+  assert.equal(summary.stats.phase, "baseline");
+  assert.equal(summary.stats.message, "stats identity mismatch: rule_name");
+  assert.equal(summary.checks.status, "failed");
+  assert.deepEqual(summary.checks.items[0], {
+    name: "stats_available",
+    status: "failed",
+    actual: "error",
+    expected: "ok",
+    reason: "stats identity mismatch: rule_name",
+  });
+});
+
+test("runCacheSmoke rejects mismatched final usage-cache stats identity", async () => {
+  let statsReads = 0;
+  const fetcher = async (url) => {
+    if (String(url).includes("/api/log/channel_affinity_usage_cache")) {
+      statsReads += 1;
+      return jsonResponse({
+        success: true,
+        data:
+          statsReads === 1
+            ? {
+                rule_name: "codex cli trace",
+                using_group: "default",
+                key_fp: FIXTURE_CACHE_KEY_FP,
+                hit: 5,
+                total: 8,
+                cached_tokens: 256,
+              }
+            : {
+                rule_name: "codex cli trace",
+                using_group: "default",
+                key_fp: "cafebabe",
+                hit: 9,
+                total: 12,
+                cached_tokens: 768,
+              },
+      });
+    }
+    return jsonResponse({
+      usage: {
+        input_tokens: 10,
+        input_tokens_details: { cached_tokens: 4 },
+      },
+    });
+  };
+
+  const summary = await runCacheSmoke({
+    baseURL: "https://new-api.example.test",
+    apiKey: "fixture-relay-secret",
+    adminToken: "admin-token-secret",
+    adminCookie: "",
+    adminUserID: "1",
+    model: "glm-5.2",
+    promptCacheKey: "session-secret",
+    input: "cache smoke prompt",
+    maxOutputTokens: 16,
+    requestCount: 2,
+    requestDelayMs: 0,
+    usingGroup: "default",
+    ruleName: "codex cli trace",
+    timeoutMs: 1000,
+    requireStats: true,
+    minStatsHitRate: 0.5,
+    fetcher,
+  });
+
+  assert.equal(summary.stats.status, "error");
+  assert.equal(summary.stats.phase, "final");
+  assert.equal(summary.stats.baseline.cached_tokens, 256);
+  assert.equal(summary.stats.message, "stats identity mismatch: key_fp");
+  assert.equal(summary.checks.status, "failed");
+  assert.equal(summary.checks.items[0].name, "stats_available");
+  assert.equal(summary.checks.items[0].reason, "stats identity mismatch: key_fp");
+  assert.equal(summary.checks.items[1].name, "stats_hit_rate");
+  assert.equal(summary.checks.items[1].status, "failed");
+});
+
 test("runCacheSmoke measures deltas after warmup requests", async () => {
   const calls = [];
   let statsReads = 0;
@@ -360,7 +543,7 @@ test("runCacheSmoke measures deltas after warmup requests", async () => {
             ? {
                 rule_name: "codex cli trace",
                 using_group: "default",
-                key_fp: "deadbeef",
+                key_fp: FIXTURE_CACHE_KEY_FP,
                 hit: 2,
                 total: 2,
                 cached_tokens: 64,
@@ -368,7 +551,7 @@ test("runCacheSmoke measures deltas after warmup requests", async () => {
             : {
                 rule_name: "codex cli trace",
                 using_group: "default",
-                key_fp: "deadbeef",
+                key_fp: FIXTURE_CACHE_KEY_FP,
                 hit: 4,
                 total: 4,
                 cached_tokens: 192,
@@ -434,7 +617,7 @@ test("runCacheSmoke passes configured cache-hit checks when measured signals mee
             ? {
                 rule_name: "codex cli trace",
                 using_group: "default",
-                key_fp: "deadbeef",
+                key_fp: FIXTURE_CACHE_KEY_FP,
                 hit: 10,
                 total: 20,
                 cached_tokens: 1000,
@@ -442,7 +625,7 @@ test("runCacheSmoke passes configured cache-hit checks when measured signals mee
             : {
                 rule_name: "codex cli trace",
                 using_group: "default",
-                key_fp: "deadbeef",
+                key_fp: FIXTURE_CACHE_KEY_FP,
                 hit: 14,
                 total: 24,
                 cached_tokens: 1400,
@@ -700,7 +883,7 @@ test("runCacheSmoke clamps usage-cache deltas when counters reset", async () => 
             ? {
                 rule_name: "codex cli trace",
                 using_group: "default",
-                key_fp: "deadbeef",
+                key_fp: FIXTURE_CACHE_KEY_FP,
                 hit: 9,
                 total: 10,
                 cached_tokens: 1024,
@@ -710,7 +893,7 @@ test("runCacheSmoke clamps usage-cache deltas when counters reset", async () => 
             : {
                 rule_name: "codex cli trace",
                 using_group: "default",
-                key_fp: "deadbeef",
+                key_fp: FIXTURE_CACHE_KEY_FP,
                 hit: 1,
                 total: 1,
                 cached_tokens: 64,

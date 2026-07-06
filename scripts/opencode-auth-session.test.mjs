@@ -13,6 +13,7 @@ import {
   buildOpenCodeBrowserStateExpression,
   isDirectScriptExecution,
   retryTransientBrowserAction,
+  sanitizeBrowserStatusURL,
   shouldProbeOpenCodeResourceURL,
 } from "./opencode-auth-session.mjs";
 
@@ -85,6 +86,22 @@ test("shouldProbeOpenCodeResourceURL accepts only likely OpenCode JSON resources
     ),
     false,
   );
+});
+
+test("sanitizeBrowserStatusURL strips authorization payload from browser URLs", () => {
+  const callbackURL = sanitizeBrowserStatusURL(
+    "https://opencode.ai/auth/callback?code=oauth-code-secret&state=oauth-state-secret#fragment-secret",
+  );
+  const credentialURL = sanitizeBrowserStatusURL("https://operator:browser-pass@opencode.ai/auth?session=secret");
+
+  assert.equal(callbackURL, "https://opencode.ai/auth/callback");
+  assert.equal(credentialURL, "https://opencode.ai/auth");
+  assert.equal(sanitizeBrowserStatusURL("about:blank"), "about:blank");
+  assert.equal(sanitizeBrowserStatusURL("not a url with oauth-code-secret"), "");
+
+  for (const sanitized of [callbackURL, credentialURL]) {
+    assert.doesNotMatch(sanitized, /oauth-code-secret|oauth-state-secret|fragment-secret|operator|browser-pass|secret/);
+  }
 });
 
 test("buildOpenCodeBrowserStateExpression collects same-site JSON responses", async () => {

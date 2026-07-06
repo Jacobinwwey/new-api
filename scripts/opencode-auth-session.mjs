@@ -138,6 +138,22 @@ export function shouldProbeOpenCodeResourceURL(rawURL, pageURL) {
   }
 }
 
+export function sanitizeBrowserStatusURL(rawURL) {
+  const value = String(rawURL || "").trim();
+  if (!value) return "";
+  try {
+    const url = new URL(value);
+    if (!["http:", "https:"].includes(url.protocol)) return value;
+    url.username = "";
+    url.password = "";
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
+
 export function buildOpenCodeBrowserStateExpression() {
   return `(${async function browserStateProbe(maxResponses, maxChars) {
     const shouldProbeOpenCodeResourceURL = SHOULD_PROBE_SOURCE;
@@ -446,7 +462,7 @@ async function statusFromState(state) {
   if (running) {
     try {
       const target = await pageWebSocketURL(state.port);
-      url = target.url;
+      url = sanitizeBrowserStatusURL(target.url);
     } catch {
       running = false;
     }

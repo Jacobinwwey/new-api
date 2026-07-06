@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  RUNTIME_SCRIPTS,
   buildRolloutConfig,
   parseExecStartPath,
   redactText,
@@ -129,5 +130,18 @@ test("buildRolloutConfig rejects credential-bearing repository URLs", () => {
         {},
       ),
     /repo-url must not include query or fragment data/,
+  );
+});
+
+test("runtime script install set includes live E2E orchestration dependencies", () => {
+  assert.deepEqual(
+    new Set(RUNTIME_SCRIPTS),
+    new Set([
+      "opencode-auth-session.mjs",
+      "opencode-e2e-preflight.mjs",
+      "glm-cache-smoke.mjs",
+      "tailscale-link-preflight.mjs",
+      "opencode-live-e2e.mjs",
+    ]),
   );
 });

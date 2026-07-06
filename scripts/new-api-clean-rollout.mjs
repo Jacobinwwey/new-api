@@ -11,10 +11,12 @@ const DEFAULT_SERVICE_NAME = "new-api";
 const DEFAULT_STATUS_URL = "http://127.0.0.1:3000/api/status";
 const DEFAULT_TIMEOUT_SECONDS = 900;
 const DEFAULT_READY_TIMEOUT_SECONDS = 90;
-const RUNTIME_SCRIPTS = [
+export const RUNTIME_SCRIPTS = [
   "opencode-auth-session.mjs",
   "opencode-e2e-preflight.mjs",
   "glm-cache-smoke.mjs",
+  "tailscale-link-preflight.mjs",
+  "opencode-live-e2e.mjs",
 ];
 
 const SECRET_ASSIGNMENT_PATTERN =

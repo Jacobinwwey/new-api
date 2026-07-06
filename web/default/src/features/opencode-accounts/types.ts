@@ -28,6 +28,11 @@ export type OpenCodeAccount = {
   missing_activation_fields: string[]
 }
 
+export type OpenCodeAccountDiagnostics = {
+  credential_key_source: 'crypto_secret' | 'session_secret_fallback'
+  uses_fallback_credential_key: boolean
+}
+
 export type OpenCodeAccountRequest = {
   label: string
   channel_id: number

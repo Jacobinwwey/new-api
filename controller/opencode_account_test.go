@@ -147,3 +147,17 @@ func TestOpenCodeAccountResponseMarksCodexPlainAPIKeyNotReady(t *testing.T) {
 	assert.False(t, response.ActivationReady)
 	assert.Contains(t, response.MissingActivationFields, "codex_oauth_key")
 }
+
+func TestOpenCodeAccountDiagnosticsReportsCredentialKeySource(t *testing.T) {
+	t.Setenv("CRYPTO_SECRET", "configured-crypto-secret")
+
+	configured := toOpenCodeAccountDiagnosticsResponse()
+	assert.Equal(t, common.SecretEncryptionKeySourceCryptoSecret, configured.CredentialKeySource)
+	assert.False(t, configured.UsesFallbackCredentialKey)
+
+	t.Setenv("CRYPTO_SECRET", "")
+
+	fallback := toOpenCodeAccountDiagnosticsResponse()
+	assert.Equal(t, common.SecretEncryptionKeySourceSessionSecretFallback, fallback.CredentialKeySource)
+	assert.True(t, fallback.UsesFallbackCredentialKey)
+}

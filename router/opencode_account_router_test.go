@@ -25,6 +25,7 @@ func TestOpenCodeAccountRoutesRegisterExpectedPaths(t *testing.T) {
 
 	expected := []string{
 		http.MethodGet + " /api/opencode/accounts",
+		http.MethodGet + " /api/opencode/accounts/diagnostics",
 		http.MethodPost + " /api/opencode/accounts",
 		http.MethodPut + " /api/opencode/accounts/:id",
 		http.MethodDelete + " /api/opencode/accounts/:id",

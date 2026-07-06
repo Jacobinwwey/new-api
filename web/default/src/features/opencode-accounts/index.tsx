@@ -44,6 +44,7 @@ import {
   createOpenCodeAccount,
   deleteOpenCodeAccount,
   extractOpenCodeLogin,
+  getOpenCodeAccountDiagnostics,
   getOpenCodeLoginScreenshot,
   getOpenCodeLoginStatus,
   keyOpenCodeLogin,
@@ -81,8 +82,15 @@ export function OpenCodeAccounts() {
       }),
     retry: false,
   })
+  const diagnosticsQuery = useQuery({
+    queryKey: ['opencode-account-diagnostics'],
+    queryFn: getOpenCodeAccountDiagnostics,
+    retry: false,
+  })
   const accounts = accountsQuery.data?.data ?? []
   const channels = channelsQuery.data?.data?.items ?? []
+  const usesFallbackCredentialKey =
+    diagnosticsQuery.data?.data.uses_fallback_credential_key === true
   const selectedAccount =
     accounts.find((account) => account.id === selectedID) ?? null
   const selectedAccountID = selectedAccount?.id ?? null
@@ -238,6 +246,7 @@ export function OpenCodeAccounts() {
         </Button>
       </SectionPageLayout.Actions>
       <SectionPageLayout.Content>
+        {usesFallbackCredentialKey ? <CredentialKeySourceWarning /> : null}
         <div className='grid min-h-0 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(480px,0.9fr)]'>
           <section className='bg-background min-w-0 rounded-lg border'>
             <div className='grid gap-3 border-b p-3 md:grid-cols-[minmax(0,1fr)_minmax(220px,280px)_120px_auto]'>
@@ -333,17 +342,6 @@ export function OpenCodeAccounts() {
                     t('No account selected')}
                 </span>
               </div>
-              {selectedAccount &&
-              accountUsesSessionSecretFallback(selectedAccount) ? (
-                <div className='border-warning/40 bg-warning/10 text-warning flex items-start gap-2 rounded-md border px-3 py-2 text-sm'>
-                  <AlertTriangle className='mt-0.5 size-4 shrink-0' />
-                  <span className='min-w-0'>
-                    {t(
-                      'Credential encryption is using session-secret fallback. Set a stable crypto secret before importing production OpenCode accounts.'
-                    )}
-                  </span>
-                </div>
-              ) : null}
             </div>
             <div className='flex flex-wrap items-center gap-2'>
               <Button
@@ -438,6 +436,21 @@ export function OpenCodeAccounts() {
         </div>
       </SectionPageLayout.Content>
     </SectionPageLayout>
+  )
+}
+
+function CredentialKeySourceWarning() {
+  const { t } = useTranslation()
+
+  return (
+    <div className='border-warning/40 bg-warning/10 text-warning mb-4 flex items-start gap-2 rounded-md border px-3 py-2 text-sm'>
+      <AlertTriangle className='mt-0.5 size-4 shrink-0' />
+      <span className='min-w-0'>
+        {t(
+          'Credential encryption is using session-secret fallback. Set a stable crypto secret before importing production OpenCode accounts.'
+        )}
+      </span>
+    </div>
   )
 }
 

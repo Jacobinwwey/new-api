@@ -34,6 +34,11 @@ type UpdateOpenCodeAccountRequest struct {
 	QuotaUsed   *int64  `json:"quota_used"`
 }
 
+type OpenCodeAccountDiagnostics struct {
+	CredentialKeySource       string `json:"credential_key_source"`
+	UsesFallbackCredentialKey bool   `json:"uses_fallback_credential_key"`
+}
+
 func toOpenCodeAccountResponse(account *model.OpenCodeAccount) model.OpenCodeAccountPublic {
 	if account == nil {
 		return model.OpenCodeAccountPublic{}
@@ -44,6 +49,14 @@ func toOpenCodeAccountResponse(account *model.OpenCodeAccount) model.OpenCodeAcc
 	}
 	response.ActivationReady = len(response.MissingActivationFields) == 0
 	return response
+}
+
+func toOpenCodeAccountDiagnosticsResponse() OpenCodeAccountDiagnostics {
+	credentialKeySource := common.SecretEncryptionKeySource()
+	return OpenCodeAccountDiagnostics{
+		CredentialKeySource:       credentialKeySource,
+		UsesFallbackCredentialKey: credentialKeySource == common.SecretEncryptionKeySourceSessionSecretFallback,
+	}
 }
 
 func appendMissingActivationField(fields []string, field string) []string {
@@ -66,6 +79,10 @@ func GetOpenCodeAccounts(c *gin.Context) {
 		response = append(response, toOpenCodeAccountResponse(account))
 	}
 	common.ApiSuccess(c, response)
+}
+
+func GetOpenCodeAccountDiagnostics(c *gin.Context) {
+	common.ApiSuccess(c, toOpenCodeAccountDiagnosticsResponse())
 }
 
 func CreateOpenCodeAccount(c *gin.Context) {

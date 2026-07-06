@@ -3,6 +3,7 @@ import { api } from '@/lib/api'
 import type {
   ApiResponse,
   OpenCodeAccount,
+  OpenCodeAccountDiagnostics,
   OpenCodeAccountRequest,
   OpenCodeClickRequest,
   OpenCodeKeyRequest,
@@ -13,6 +14,13 @@ import type {
 export async function listOpenCodeAccounts() {
   const res =
     await api.get<ApiResponse<OpenCodeAccount[]>>('/api/opencode/accounts')
+  return res.data
+}
+
+export async function getOpenCodeAccountDiagnostics() {
+  const res = await api.get<ApiResponse<OpenCodeAccountDiagnostics>>(
+    '/api/opencode/accounts/diagnostics'
+  )
   return res.data
 }
 

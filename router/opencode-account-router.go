@@ -11,6 +11,7 @@ func registerOpenCodeAccountRoutes(apiRouter *gin.RouterGroup) {
 	route.Use(middleware.RootAuth())
 	{
 		route.GET("", controller.GetOpenCodeAccounts)
+		route.GET("/diagnostics", controller.GetOpenCodeAccountDiagnostics)
 		route.POST("", controller.CreateOpenCodeAccount)
 		route.PUT("/:id", controller.UpdateOpenCodeAccount)
 		route.DELETE("/:id", controller.DeleteOpenCodeAccount)

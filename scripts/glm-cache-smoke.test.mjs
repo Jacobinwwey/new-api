@@ -192,6 +192,147 @@ test("runCacheSmoke rejects business failures from relay responses with redactio
   );
 });
 
+test("runCacheSmoke reports usage-cache deltas for the current smoke run", async () => {
+  let statsReads = 0;
+  const fetcher = async (url) => {
+    if (String(url).includes("/api/log/channel_affinity_usage_cache")) {
+      statsReads += 1;
+      return jsonResponse({
+        success: true,
+        data:
+          statsReads === 1
+            ? {
+                rule_name: "codex cli trace",
+                using_group: "default",
+                key_fp: "deadbeef",
+                hit: 5,
+                total: 8,
+                cached_tokens: 256,
+                prompt_cache_hit_tokens: 128,
+                prompt_tokens: 1024,
+              }
+            : {
+                rule_name: "codex cli trace",
+                using_group: "default",
+                key_fp: "deadbeef",
+                hit: 7,
+                total: 10,
+                cached_tokens: 768,
+                prompt_cache_hit_tokens: 384,
+                prompt_tokens: 2048,
+              },
+      });
+    }
+    return jsonResponse({
+      usage: {
+        input_tokens: 10,
+        input_tokens_details: { cached_tokens: 4 },
+      },
+    });
+  };
+
+  const summary = await runCacheSmoke({
+    baseURL: "https://new-api.example.test",
+    apiKey: "fixture-relay-secret",
+    adminToken: "admin-token-secret",
+    adminCookie: "",
+    adminUserID: "1",
+    model: "glm-5.2",
+    promptCacheKey: "session-secret",
+    input: "cache smoke prompt",
+    maxOutputTokens: 16,
+    requestCount: 2,
+    requestDelayMs: 0,
+    usingGroup: "default",
+    ruleName: "codex cli trace",
+    timeoutMs: 1000,
+    fetcher,
+  });
+
+  assert.equal(statsReads, 2);
+  assert.equal(summary.stats.status, "ok");
+  assert.equal(summary.stats.baseline.cached_tokens, 256);
+  assert.equal(summary.stats.data.cached_tokens, 768);
+  assert.deepEqual(summary.stats.delta, {
+    hit: 2,
+    total: 2,
+    cached_tokens: 512,
+    prompt_cache_hit_tokens: 256,
+    prompt_tokens: 1024,
+    completion_tokens: 0,
+    total_tokens: 0,
+  });
+});
+
+test("runCacheSmoke clamps usage-cache deltas when counters reset", async () => {
+  let statsReads = 0;
+  const fetcher = async (url) => {
+    if (String(url).includes("/api/log/channel_affinity_usage_cache")) {
+      statsReads += 1;
+      return jsonResponse({
+        success: true,
+        data:
+          statsReads === 1
+            ? {
+                rule_name: "codex cli trace",
+                using_group: "default",
+                key_fp: "deadbeef",
+                hit: 9,
+                total: 10,
+                cached_tokens: 1024,
+                prompt_cache_hit_tokens: 512,
+                prompt_tokens: 4096,
+              }
+            : {
+                rule_name: "codex cli trace",
+                using_group: "default",
+                key_fp: "deadbeef",
+                hit: 1,
+                total: 1,
+                cached_tokens: 64,
+                prompt_cache_hit_tokens: 32,
+                prompt_tokens: 128,
+              },
+      });
+    }
+    return jsonResponse({
+      usage: {
+        input_tokens: 10,
+      },
+    });
+  };
+
+  const summary = await runCacheSmoke({
+    baseURL: "https://new-api.example.test",
+    apiKey: "fixture-relay-secret",
+    adminToken: "admin-token-secret",
+    adminCookie: "",
+    adminUserID: "1",
+    model: "glm-5.2",
+    promptCacheKey: "session-secret",
+    input: "cache smoke prompt",
+    maxOutputTokens: 16,
+    requestCount: 1,
+    requestDelayMs: 0,
+    usingGroup: "default",
+    ruleName: "codex cli trace",
+    timeoutMs: 1000,
+    fetcher,
+  });
+
+  assert.equal(statsReads, 2);
+  assert.equal(summary.stats.reset_detected, true);
+  assert.deepEqual(summary.stats.delta, {
+    hit: 0,
+    total: 0,
+    cached_tokens: 0,
+    prompt_cache_hit_tokens: 0,
+    prompt_tokens: 0,
+    completion_tokens: 0,
+    total_tokens: 0,
+  });
+});
+
 function jsonResponse(body) {
   return {
     ok: true,

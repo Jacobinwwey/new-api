@@ -89,6 +89,7 @@ export async function runCacheSmoke(config) {
   }
 
   const keyFingerprint = cacheKeyFingerprint(config.promptCacheKey);
+  const baselineStats = await readUsageStats(config, fetcher, keyFingerprint);
   const results = [];
   for (let index = 0; index < config.requestCount; index += 1) {
     const response = await postResponsesRequest(config, fetcher);
@@ -97,6 +98,10 @@ export async function runCacheSmoke(config) {
       await sleep(config.requestDelayMs);
     }
   }
+  const finalStats =
+    baselineStats.status === "skipped"
+      ? baselineStats
+      : await readUsageStats(config, fetcher, keyFingerprint);
 
   return {
     model: config.model,
@@ -104,7 +109,7 @@ export async function runCacheSmoke(config) {
     using_group: config.usingGroup,
     key_fp: keyFingerprint,
     requests: summarizeRequests(results),
-    stats: await readUsageStats(config, fetcher, keyFingerprint),
+    stats: buildUsageStatsReport(baselineStats, finalStats),
   };
 }
 
@@ -188,6 +193,48 @@ async function readUsageStats(config, fetcher, keyFingerprint) {
   } catch (error) {
     return { status: "error", message: sanitizeText(error.message || "stats request failed", config) };
   }
+}
+
+function buildUsageStatsReport(baselineStats, finalStats) {
+  if (baselineStats.status === "skipped") {
+    return baselineStats;
+  }
+  if (baselineStats.status !== "ok") {
+    return { ...baselineStats, phase: "baseline" };
+  }
+  if (finalStats.status !== "ok") {
+    return { ...finalStats, phase: "final", baseline: baselineStats.data };
+  }
+
+  const { delta, resetDetected } = computeStatsDelta(baselineStats.data, finalStats.data);
+  return {
+    status: "ok",
+    baseline: baselineStats.data,
+    data: finalStats.data,
+    delta,
+    reset_detected: resetDetected,
+  };
+}
+
+function computeStatsDelta(baseline, current) {
+  const delta = {};
+  let resetDetected = false;
+  for (const key of [
+    "hit",
+    "total",
+    "cached_tokens",
+    "prompt_cache_hit_tokens",
+    "prompt_tokens",
+    "completion_tokens",
+    "total_tokens",
+  ]) {
+    const value = Number(current[key] || 0) - Number(baseline[key] || 0);
+    if (value < 0) {
+      resetDetected = true;
+    }
+    delta[key] = Math.max(0, value);
+  }
+  return { delta, resetDetected };
 }
 
 async function fetchWithTimeout(fetcher, url, init, timeoutMs) {

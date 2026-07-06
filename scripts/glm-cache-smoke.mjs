@@ -360,6 +360,14 @@ function evaluateCacheSmokeChecks(summary, config) {
       expected_min: config.minRequestHitRate,
     });
   }
+  if (summary.stats.status === "ok" && summary.stats.reset_detected) {
+    items.push({
+      name: "stats_not_reset",
+      status: "failed",
+      actual: "reset_detected",
+      expected: "stable_counter_window",
+    });
+  }
 
   const expectsStats =
     config.requireStats ||
@@ -374,14 +382,6 @@ function evaluateCacheSmokeChecks(summary, config) {
       expected: "ok",
       reason: summary.stats.reason || summary.stats.message || "",
     });
-    if (statsOK && summary.stats.reset_detected) {
-      items.push({
-        name: "stats_not_reset",
-        status: "failed",
-        actual: "reset_detected",
-        expected: "stable_counter_window",
-      });
-    }
     if (Number(config.minStatsHitRate || 0) > 0) {
       const actual = statsOK ? ratio(summary.stats.delta.hit, summary.stats.delta.total) : 0;
       items.push({

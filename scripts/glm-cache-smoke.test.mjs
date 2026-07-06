@@ -938,6 +938,15 @@ test("runCacheSmoke clamps usage-cache deltas when counters reset", async () => 
     completion_tokens: 0,
     total_tokens: 0,
   });
+  assert.equal(summary.checks.status, "failed");
+  assert.deepEqual(summary.checks.items, [
+    {
+      name: "stats_not_reset",
+      status: "failed",
+      actual: "reset_detected",
+      expected: "stable_counter_window",
+    },
+  ]);
 });
 
 function jsonResponse(body) {

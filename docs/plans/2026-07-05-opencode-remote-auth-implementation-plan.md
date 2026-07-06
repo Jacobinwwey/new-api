@@ -294,7 +294,7 @@ End-to-end verification:
 | Activation credential contract | Implemented and locally verified | Activation now builds channel credentials according to the bound channel type. Plain OpenCode API keys remain valid for non-Codex channels, while Codex channels require JSON material containing `access_token` and `account_id`. Public readiness diagnostics now mark Codex/plain-key bindings as not activation-ready before the operator clicks activate. |
 | Activation error semantics | Implemented locally | Activation now returns the same sanitized account-not-found business failure for missing account IDs, and wraps missing bound channels as explicit channel-not-found failures instead of surfacing raw storage-layer `record not found` text. |
 | Remote clean artifact deployment | Done | Built pushed `main` from an isolated clean checkout, produced self-contained binary-plus-sidecar artifacts, switched the remote service to those artifacts, preserved the existing runtime data path, and verified the service is active. |
-| Last verified remote rollout | Done | Pushed `main` commit `e76a8063` is the last rollout verified on the remote service. HTTP smoke returned 200 after readiness polling, the service was active, executable-directory sidecar resolution returned successful empty-state `stopped`, remote default frontend typecheck/build passed, remote classic frontend build passed, remote Node sidecar tests passed, OpenCode key-source/readiness/extractor/quota/activation targeted Go tests passed, and the sidecar path-resolution regression test passed on the deployed source checkout. Changes after that point, including the local delete-purge hardening, still require remote rollout once the Tailscale peer is reachable again. |
+| Last verified remote rollout | Done | Pushed `main` commit `5e18beaa` is the last rollout verified on the remote service. The rollout used a clean checkout, passed remote Node script tests/checks, targeted OpenCode/cache Go tests, default and classic frontend builds, and Go binary build before switching runtime artifacts. The service is active, local HTTP `/api/status` smoke passes, deployed runtime scripts pass `node --check`, `glm-cache-smoke` contains both response-usage and stats contract gates, and sidecar empty-state `status` returns `stopped`. |
 | Real OpenCode login E2E | Pending | Requires an operator-controlled OpenCode subscription account. The repository contains no real account material. |
 | Real `glm-5.2` cache-hit E2E | Pending | Should run only after a real OpenCode account has been imported and activated through New API. |
 
@@ -342,7 +342,7 @@ Account deletion now participates in the same lifecycle boundary. The controller
 
 Delete now validates ownership before side effects. A missing account ID is a durable-state problem, not a sidecar cleanup request, so the controller returns the sanitized account-not-found business failure before invoking purge. This keeps external browser cleanup scoped to accounts that New API still owns and makes stale UI/API calls retry-safe without deleting arbitrary account-numbered browser artifacts.
 
-This delete-purge hardening is currently local and repository-verified only. It should not be treated as live on the remote service until the remote Tailscale peer key issue is resolved and a clean artifact rollout plus HTTP/sidecar smoke validation is repeated.
+This delete-purge hardening has now gone through the later clean artifact rollout path as part of pushed `main` commit `5e18beaa`. It is still not a live-account E2E result: no operator-controlled OpenCode subscription account has been imported, activated, or used for `glm-5.2` cache-hit measurement.
 
 State corruption now has its own lifecycle semantics. A missing state file still means no login browser has been started and returns `stopped`; an unreadable or invalid state file is a real integrity failure. Start, status, stop, and purge now surface that failure instead of silently falling through. This deliberately favors a noisy, retryable operator state over deleting the persistent account while potentially leaving an untracked browser profile or process behind.
 
@@ -390,7 +390,7 @@ Account deletion now has a UI guard aligned with its backend semantics. Since de
 
 The frontend API boundary now rejects New API business failures instead of trusting HTTP 200 as success. This matters because `common.ApiError` returns `{success:false}` with status 200, and React Query would otherwise run success handlers for failed purge/delete, extract, quota refresh, activation, or browser-session operations. The wrapper keeps global error toast behavior intact but prevents false success toasts and state clearing when the backend deliberately keeps an account available for retry.
 
-The credential key-source diagnostics are deployed from pushed `main` commit `e76a8063`. The remote clean artifact build completed, default frontend typecheck/build completed, classic frontend build completed, remote Node sidecar tests passed, OpenCode key-source/readiness/extractor/quota/activation Go tests passed, service restart completed, readiness-polled HTTP smoke returned 200, and sidecar `status` returned `success/stopped` with an empty state directory.
+The latest cache-smoke contract gates are deployed from pushed `main` commit `5e18beaa`. The remote rollout intentionally avoided sudo by validating that the system service process runs as the application user, that the service has `Restart=always`, and that the runtime artifact directory is user-writable. The first rollout attempt backed up and rolled back correctly because the HTTP smoke checked readiness too early while the process was still starting; the second attempt used a bounded HTTP readiness window and completed successfully. Runtime verification confirms service active, local HTTP status OK, deployed script syntax OK, and sidecar empty-state `status` OK.
 
 Remote deployment is now separated from the previous runtime worktree. The service runs from a clean artifact built from the pushed `main`, while the existing runtime data location is preserved explicitly. This avoids overwriting unrelated local cache/accounting work that still exists in the old runtime tree and keeps source, artifact, and runtime data as separate concerns.
 
@@ -462,7 +462,7 @@ Sidecar smoke:
   start/status/screenshot/stop on https://opencode.ai/auth
 
 Remote clean artifact rollout:
-  clean checkout fixed to pushed main commit e76a8063
+  clean checkout fixed to pushed main commit 5e18beaa
   web/default build completed on the remote host
   web/classic build completed on the remote host
   Go binary built into an isolated artifact with the OpenCode sidecar script
@@ -494,6 +494,14 @@ Remote clean artifact rollout:
   latest credential key-source diagnostic artifact deployed on the remote service
   default frontend typecheck/build and classic frontend build passed on the remote host
   OpenCode key-source/readiness/extractor/quota/activation Go tests passed on the remote source checkout
+  latest cache-smoke contract-gate artifact deployed from commit 5e18beaa
+  remote clean checkout Node script tests/checks passed, including glm-cache-smoke, opencode-e2e-preflight, and opencode-auth-session
+  remote targeted Go tests passed for cache usage conversion, channel-affinity usage observation, OpenCode extraction/quota/activation, sidecar command construction, sidecar stopped-status semantics, account diagnostics, and non-secret account responses
+  remote default and classic frontend builds passed
+  service rollout used backup/install/restart with automatic rollback; an initial too-early HTTP smoke rolled back successfully, then a bounded readiness wait completed rollout
+  deployed runtime scripts pass syntax checks
+  deployed glm-cache-smoke script contains both response-usage and stats payload contract gates
+  deployed sidecar empty-state status smoke returns stopped
 ```
 
 The `web/classic` build failure was traced to `date-fns-tz@1.3.8` resolving its peer `date-fns` to the workspace-level `date-fns@4`. That package version blocks private subpath imports such as `date-fns/_lib/cloneObject/index.js`. The fix keeps `web/default` on `date-fns@4` and adds a classic-only Rsbuild alias so Semi UI's `date-fns-tz` resolves to Semi's nested `date-fns@2.30.0`.
@@ -503,12 +511,12 @@ Known verification limits:
 - The channel-affinity frontend directory and OpenCode-related frontend paths pass targeted lint. Broad full-frontend lint is still treated as a separate historical quality gate and should not be used as evidence of live OpenCode account or `glm-5.2` cache-hit behavior.
 - The broader `src/features/channels/components/dialogs/param-override-editor-dialog.tsx` file still exposes pre-existing oxlint style findings such as `curly`, `no-nested-ternary`, and `no-useless-spread`. This change only relies on that file for the Codex preset payload; typecheck, formatting, and default frontend build pass, but this is not claimed as a lint-clean file.
 - `go test ./common ./model ./service ./controller ./router ./service/relayconvert -count=1` currently exposes pre-existing SQLite test setup failures such as missing `users`, `tasks`, and `system_tasks` tables in unrelated tests. The OpenCode-specific backend tests pass.
-- The latest remote reachability check reports an expired Tailscale peer node key. Current changes are therefore locally verified gates and pushed source, not a new remote rollout or live subscription E2E result.
+- The latest Tailscale health check still reports an expired peer node key. The remote service was rolled out through the configured LearnSSH alias, but Tailscale itself is still not healthy enough to treat the network requirement as solved.
 - Real OpenCode Google login, account extraction, channel activation against a live subscription account, and repeated `glm-5.2` cache-hit measurement still require operator-controlled credentials and must not be committed to the repository.
 
 ### Immediate Next Steps
 
-1. Restore remote peer reachability first if the Tailscale peer still reports an expired node key, then roll out the current pushed `main` as a clean artifact before running credential E2E.
+1. Restore Tailscale health first. The current pushed `main` has been deployed through LearnSSH, but the required Tailscale path still reports an expired peer node key and must be fixed before treating remote/local connectivity as robust.
 2. Run the non-mutating preflight gate against the deployed service before importing production account material. Treat any diagnostics payload, account-list payload, or affinity-stats identity failure as a rollout/configuration failure before real account import:
 
 ```bash
@@ -837,7 +845,7 @@ web/default/src/routes/_authenticated/opencode-accounts/index.tsx
 | Activation credential contract | 已实现并完成本地验证 | 激活现在会按照绑定 channel 类型构造 channel credential。非 Codex channel 继续接受纯 OpenCode API key；Codex channel 必须提供包含 `access_token` 与 `account_id` 的 JSON 材料。公开 readiness 诊断现在会在操作者点击 activate 前，把 Codex/plain-key 绑定标记为不可激活。 |
 | 激活错误语义 | 本地已实现 | activate 现在对缺失账号 ID 返回同一脱敏的账号不存在业务失败；绑定 channel 缺失时返回明确的 channel-not-found 失败，不再把存储层 `record not found` 原文暴露给操作者。 |
 | 远端 clean artifact 部署 | 已完成 | 已从隔离的干净 checkout 构建已推送的 `main`，生成包含二进制与 sidecar 的 artifact，远端服务已切换到这些 artifact，并显式保留既有运行时数据路径，服务状态已验证为 active。 |
-| 上一次已验证远端上线 | 已完成 | 已推送的 `main` 提交 `e76a8063` 是上一次在远端服务完成验证的上线版本。经过 readiness polling 的 HTTP smoke 返回 200，服务状态为 active，基于可执行文件目录的 sidecar 解析返回成功的空状态 `stopped`，远端 default 前端 typecheck/build 通过，classic 前端 build 通过，远端 Node sidecar 测试通过，OpenCode key-source/readiness/extractor/quota/activation 相关 Go 定向测试通过，且 sidecar path-resolution 回归测试已在部署源 checkout 上通过。该版本之后的变更，包括当前本地 delete-purge hardening，仍需要在 Tailscale peer 恢复可达后再做远端 clean artifact 上线验证。 |
+| 上一次已验证远端上线 | 已完成 | 已推送的 `main` 提交 `5e18beaa` 是当前在远端服务完成验证的上线版本。本次上线使用干净 checkout，切换运行 artifact 前已通过远端 Node 脚本测试/语法检查、OpenCode/cache Go 定向测试、default 与 classic 前端构建，以及 Go 二进制构建。服务状态为 active，本机 HTTP `/api/status` smoke 通过，已部署 runtime 脚本通过 `node --check`，`glm-cache-smoke` 包含 response-usage 与 stats 两个 contract gate，sidecar 空状态 `status` 返回 `stopped`。 |
 | 真实 OpenCode 登录 E2E | 待执行 | 需要操作者控制的 OpenCode 订阅账号；仓库不包含真实账号材料。 |
 | 真实 `glm-5.2` cache-hit E2E | 待执行 | 只能在真实 OpenCode 账号经 New API 导入并激活后执行。 |
 
@@ -883,7 +891,7 @@ stop 现在更完整地拥有进程清理语义。它不再发送 SIGTERM 后立
 
 账号删除现在也进入同一生命周期边界。controller 会在删除持久账号行前先 purge 该账号的浏览器会话；sidecar 会停止记录的进程，并删除账号 state 文件与浏览器 profile 目录。如果 purge 失败，删除会 fail closed，并保留账号以便重试。这里的取舍是：sidecar 故障可能暂时阻塞删除，但这比在远端浏览器 artifact 可能仍存在时删除唯一的持久账号句柄更安全。
 
-当前 delete-purge hardening 只完成本地与仓库级验证，不能视为已经在远端服务生效。必须等远端 Tailscale peer key 问题修复后，重新执行 clean artifact 上线、HTTP smoke 与 sidecar smoke 验证。
+当前 delete-purge hardening 已经随已推送的 `main` 提交 `5e18beaa` 走过后续 clean artifact 上线路径。但这仍不等价于真实账号 E2E：尚未导入、激活或使用操作者控制的 OpenCode 订阅账号执行 `glm-5.2` cache-hit 测量。
 
 state 损坏现在也有明确的生命周期语义。state 文件缺失仍表示尚未启动登录浏览器，返回 `stopped`；state 不可读或 JSON 无效则是完整性失败。start、status、stop、purge 现在都会暴露该失败，而不是静默进入“无会话”路径。这个选择刻意偏向有噪声但可重试的操作者状态，而不是在可能留下未跟踪浏览器 profile 或进程时删除持久账号。
 
@@ -933,7 +941,7 @@ delete 现在会在产生外部副作用前验证所有权。缺失账号 ID 是
 
 前端 API 边界现在会拒绝 New API 的业务失败响应，而不是把 HTTP 200 直接当作成功。这里很关键：`common.ApiError` 会以 200 返回 `{success:false}`，如果不在 wrapper 层拦截，React Query 会对失败的 purge/delete、extract、quota refresh、activation 或浏览器会话操作继续执行 success handler。这个 wrapper 保留全局错误 toast 行为，但阻止失败操作误弹成功提示，也避免后端刻意保留账号以便重试时前端错误清空状态。
 
-凭据 key-source 诊断已经从已推送的 `main` 提交 `e76a8063` 部署到远端。远端 clean artifact 构建完成，default 前端 typecheck/build 完成，classic 前端 build 完成，远端 Node sidecar 测试通过，OpenCode key-source/readiness/extractor/quota/activation Go 定向测试通过，服务重启完成，经过 readiness polling 的 HTTP smoke 返回 200，空 state directory 下的 sidecar `status` 返回 `success/stopped`。
+最新 cache-smoke contract gate 已经从已推送的 `main` 提交 `5e18beaa` 部署到远端。本次远端上线刻意不使用 sudo：先验证 system service 进程由应用用户运行、服务配置为 `Restart=always`，且运行 artifact 目录可由该用户写入。第一次上线尝试完成备份并正确回滚，根因是 HTTP smoke 在进程仍处于启动阶段时过早检查；第二次改为有界 readiness 等待后完成上线。运行时验证确认服务 active、本机 HTTP status OK、已部署脚本语法 OK、sidecar 空状态 `status` OK。
 
 远端部署现在已经与旧运行工作树分离。服务从基于已推送 `main` 构建的 clean artifact 运行，同时显式保留既有运行时数据位置。这样不会覆盖旧运行树中仍存在的本地 cache/accounting 工作，也把源码、artifact 与运行时数据拆成了三个独立边界。
 
@@ -1005,7 +1013,7 @@ Sidecar smoke：
   https://opencode.ai/auth 上完成 start/status/screenshot/stop
 
 远端 clean artifact 上线：
-  clean checkout 固定到已推送 main 提交 e76a8063
+  clean checkout 固定到已推送 main 提交 5e18beaa
   远端 web/default 构建完成
   远端 web/classic 构建完成
   Go 二进制已构建到隔离 artifact，并包含 OpenCode sidecar 脚本
@@ -1037,6 +1045,14 @@ Sidecar smoke：
   最新 credential key-source diagnostic artifact 已部署到远端服务
   default 前端 typecheck/build 与 classic 前端 build 已在远端通过
   OpenCode key-source/readiness/extractor/quota/activation Go 测试已在远端源 checkout 上通过
+  最新 cache-smoke contract-gate artifact 已从提交 5e18beaa 部署
+  远端干净 checkout 下的 Node 脚本测试/语法检查通过，覆盖 glm-cache-smoke、opencode-e2e-preflight 与 opencode-auth-session
+  远端 Go 定向测试通过，覆盖 cache usage conversion、channel-affinity usage observation、OpenCode extraction/quota/activation、sidecar command construction、sidecar stopped-status 语义、账号 diagnostics 与非敏感账号响应
+  远端 default 与 classic 前端构建通过
+  服务上线使用 backup/install/restart，并带自动 rollback；第一次过早 HTTP smoke 已成功回滚，第二次使用有界 readiness 等待后完成上线
+  已部署 runtime 脚本通过语法检查
+  已部署 glm-cache-smoke 脚本包含 response-usage 与 stats payload 两个 contract gate
+  已部署 sidecar 空状态 status smoke 返回 stopped
 ```
 
 `web/classic` 构建失败的根因已经定位为 `date-fns-tz@1.3.8` 将 peer `date-fns` 解析到了 workspace 顶层的 `date-fns@4`。该版本通过 package exports 阻断 `date-fns/_lib/cloneObject/index.js` 等 private subpath。修复方式是保持 `web/default` 使用 `date-fns@4`，只在 classic 的 Rsbuild 配置中增加局部 alias，让 Semi UI 的 `date-fns-tz` 解析到 Semi 自带的 `date-fns@2.30.0`。
@@ -1046,12 +1062,12 @@ Sidecar smoke：
 - channel-affinity 前端目录与 OpenCode 相关前端路径已通过 targeted lint。更广的全量前端 lint 仍应视为独立的历史质量门，不能作为真实 OpenCode 账号或 `glm-5.2` cache-hit 行为的证据。
 - 更大的 `src/features/channels/components/dialogs/param-override-editor-dialog.tsx` 文件仍然存在既有 oxlint 风格问题，例如 `curly`、`no-nested-ternary` 和 `no-useless-spread`。本次只依赖该文件中的 Codex preset payload；typecheck、格式检查与 default 前端构建通过，但不声称该文件已经 lint-clean。
 - `go test ./common ./model ./service ./controller ./router ./service/relayconvert -count=1` 当前暴露既有 SQLite 测试初始化问题，典型错误是无关测试缺少 `users`、`tasks`、`system_tasks` 表；本次 OpenCode 后端相关测试已通过。
-- 最新远端可达性检查显示 Tailscale peer node key 已过期。因此当前变更只能声明为本地验证过的 gate 与已推送源码，不能声明为新的远端 rollout 或真实订阅账号 E2E 结果。
+- 最新 Tailscale 健康检查仍显示 peer node key 已过期。远端服务已经通过配置好的 LearnSSH alias 完成上线，但 Tailscale 本身仍不能视为满足“必须走 Tailscale”的网络要求。
 - 真实 OpenCode Google 登录、账号提取、订阅账号 channel 激活，以及多轮 `glm-5.2` cache-hit 统计验证仍需要操作者控制的真实凭证，不能写入仓库。
 
 ### 下一步
 
-1. 如 Tailscale peer 仍报告 node key 过期，先恢复远端可达性，然后把当前已推送的 `main` 作为 clean artifact 上线，再执行真实凭据 E2E。
+1. 先恢复 Tailscale 健康。当前已推送的 `main` 已通过 LearnSSH 部署到远端，但必需的 Tailscale 路径仍报告 peer node key 过期；在这个问题修复前，不能把远端/本地连接视为 robust。
 2. 在导入生产账号材料前，先对已部署服务运行非破坏性 preflight gate。diagnostics payload、账号列表 payload 或 affinity-stats identity 任一失败，都应先按上线/配置故障处理，再导入真实账号：
 
 ```bash

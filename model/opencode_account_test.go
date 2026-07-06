@@ -14,7 +14,14 @@ func TestCreateOpenCodeAccountEncryptsSecretsAndMasksPublicView(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
 	DB = db
-	require.NoError(t, db.AutoMigrate(&OpenCodeAccount{}))
+	require.NoError(t, db.AutoMigrate(&OpenCodeAccount{}, &Channel{}))
+	require.NoError(t, db.Create(&Channel{
+		Id:     7,
+		Name:   "OpenCode Test Channel",
+		Type:   1,
+		Key:    "test-key",
+		Status: common.ChannelStatusEnabled,
+	}).Error)
 
 	originalSecret := common.CryptoSecret
 	common.CryptoSecret = "opencode-account-test-secret"
@@ -70,7 +77,14 @@ func TestOpenCodeAccountPublicViewReportsCredentialDecryptFailure(t *testing.T) 
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
 	DB = db
-	require.NoError(t, db.AutoMigrate(&OpenCodeAccount{}))
+	require.NoError(t, db.AutoMigrate(&OpenCodeAccount{}, &Channel{}))
+	require.NoError(t, db.Create(&Channel{
+		Id:     7,
+		Name:   "OpenCode Test Channel",
+		Type:   1,
+		Key:    "test-key",
+		Status: common.ChannelStatusEnabled,
+	}).Error)
 
 	originalSecret := common.CryptoSecret
 	common.CryptoSecret = "opencode-account-original-secret"
@@ -137,4 +151,51 @@ func TestCreateOpenCodeAccountRejectsMissingChannelBinding(t *testing.T) {
 	err = CreateOpenCodeAccount(&OpenCodeAccount{Label: "primary"}, OpenCodeAccountSecrets{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "channel id")
+}
+
+func TestCreateOpenCodeAccountRejectsUnknownChannelBinding(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	DB = db
+	require.NoError(t, db.AutoMigrate(&OpenCodeAccount{}, &Channel{}))
+
+	err = CreateOpenCodeAccount(&OpenCodeAccount{
+		Label:     "unknown-channel",
+		ChannelID: 404,
+	}, OpenCodeAccountSecrets{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "channel not found")
+}
+
+func TestUpdateOpenCodeAccountRejectsUnknownChannelBinding(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	DB = db
+	require.NoError(t, db.AutoMigrate(&OpenCodeAccount{}, &Channel{}))
+	require.NoError(t, db.Create(&Channel{
+		Id:     7,
+		Name:   "OpenCode Test Channel",
+		Type:   1,
+		Key:    "test-key",
+		Status: common.ChannelStatusEnabled,
+	}).Error)
+
+	account := &OpenCodeAccount{
+		Label:     "primary",
+		ChannelID: 7,
+	}
+	require.NoError(t, CreateOpenCodeAccount(account, OpenCodeAccountSecrets{
+		APIKey: "opencode-api-key-test-value",
+	}))
+
+	account.ChannelID = 404
+	err = UpdateOpenCodeAccount(account, OpenCodeAccountSecrets{
+		APIKey: "opencode-api-key-test-value",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "channel not found")
+
+	var stored OpenCodeAccount
+	require.NoError(t, DB.First(&stored, account.Id).Error)
+	assert.Equal(t, 7, stored.ChannelID)
 }

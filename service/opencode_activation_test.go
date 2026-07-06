@@ -57,6 +57,13 @@ func TestActivateOpenCodeAccountRequiresAPIKey(t *testing.T) {
 	require.NoError(t, err)
 	model.DB = db
 	require.NoError(t, db.AutoMigrate(&model.OpenCodeAccount{}, &model.Channel{}))
+	require.NoError(t, db.Create(&model.Channel{
+		Id:     10,
+		Name:   "OpenCode Missing Key",
+		Type:   1,
+		Key:    "old-key",
+		Status: common.ChannelStatusEnabled,
+	}).Error)
 
 	account := &model.OpenCodeAccount{
 		Label:     "missing-key",
@@ -74,6 +81,13 @@ func TestActivateOpenCodeAccountRequiresExistingChannel(t *testing.T) {
 	require.NoError(t, err)
 	model.DB = db
 	require.NoError(t, db.AutoMigrate(&model.OpenCodeAccount{}, &model.Channel{}))
+	require.NoError(t, db.Create(&model.Channel{
+		Id:     404,
+		Name:   "OpenCode Deleted Channel",
+		Type:   1,
+		Key:    "old-key",
+		Status: common.ChannelStatusEnabled,
+	}).Error)
 
 	originalSecret := common.CryptoSecret
 	common.CryptoSecret = "opencode-missing-channel-activation-test-secret"
@@ -88,6 +102,7 @@ func TestActivateOpenCodeAccountRequiresExistingChannel(t *testing.T) {
 	require.NoError(t, model.CreateOpenCodeAccount(account, model.OpenCodeAccountSecrets{
 		APIKey: "opencode-api-key-missing-channel-test",
 	}))
+	require.NoError(t, db.Delete(&model.Channel{}, 404).Error)
 
 	_, err = ActivateOpenCodeAccount(account.Id)
 	require.Error(t, err)

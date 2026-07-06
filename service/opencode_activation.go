@@ -75,7 +75,7 @@ func GetOpenCodeActivationMissingFields(account *model.OpenCodeAccount) []string
 	}
 	channel, err := model.GetChannelById(account.ChannelID, true)
 	if err != nil || channel == nil {
-		return []string{"channel"}
+		return []string{"channel_id"}
 	}
 	if channel.Type == constant.ChannelTypeCodex {
 		if err := validateCodexOAuthCredential(secrets.APIKey); err != nil {

@@ -156,6 +156,38 @@ func TestOpenCodeAccountResponseMarksCodexPlainAPIKeyNotReady(t *testing.T) {
 	assert.Contains(t, response.MissingActivationFields, "codex_oauth_key")
 }
 
+func TestOpenCodeAccountResponseMarksMissingChannelNotReady(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	originalDB := model.DB
+	model.DB = db
+	t.Cleanup(func() {
+		model.DB = originalDB
+	})
+	require.NoError(t, db.AutoMigrate(&model.Channel{}))
+
+	originalSecret := common.CryptoSecret
+	common.CryptoSecret = "opencode-controller-missing-channel-test-secret"
+	t.Cleanup(func() {
+		common.CryptoSecret = originalSecret
+	})
+
+	account := &model.OpenCodeAccount{
+		Id:        23,
+		Label:     "missing-channel",
+		ChannelID: 404,
+	}
+	require.NoError(t, account.EncryptSecrets(model.OpenCodeAccountSecrets{
+		APIKey: "opencode-api-key-missing-channel-test",
+	}))
+
+	response := toOpenCodeAccountResponse(account)
+
+	assert.False(t, response.ActivationReady)
+	assert.Contains(t, response.MissingActivationFields, "channel_id")
+	assert.NotContains(t, response.MissingActivationFields, "channel")
+}
+
 func TestOpenCodeAccountDiagnosticsReportsCredentialKeySource(t *testing.T) {
 	t.Setenv("CRYPTO_SECRET", "configured-crypto-secret")
 

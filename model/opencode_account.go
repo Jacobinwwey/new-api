@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"gorm.io/gorm"
 )
 
 type OpenCodeAccount struct {
@@ -238,10 +239,27 @@ func normalizeOpenCodeAccount(account *OpenCodeAccount) error {
 			return errors.New("label must contain only lowercase letters, numbers, and hyphens")
 		}
 	}
+	if err := validateOpenCodeAccountChannelBinding(account.ChannelID); err != nil {
+		return err
+	}
 	if account.LoginStatus == "" {
 		account.LoginStatus = "idle"
 	}
 	account.Label = label
+	return nil
+}
+
+func validateOpenCodeAccountChannelBinding(channelID int) error {
+	if DB == nil {
+		return errors.New("database is not initialized")
+	}
+	var channel Channel
+	if err := DB.Select("id").First(&channel, channelID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return errors.New("opencode account channel not found")
+		}
+		return fmt.Errorf("validate opencode account channel: %w", err)
+	}
 	return nil
 }
 

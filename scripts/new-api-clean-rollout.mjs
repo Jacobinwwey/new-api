@@ -107,7 +107,12 @@ export async function runCleanRollout(config) {
     const srcDir = path.join(workDir, "src");
     const artifactPath = path.join(workDir, "new-api");
     const stepTimeoutMs = config.timeoutSeconds * 1000;
-    await runStep("git_clone", `git clone --depth 1 ${shellQuote(config.repoURL)} ${shellQuote(srcDir)}`, stepTimeoutMs);
+    await runStep(
+      "git_clone",
+      `git -c http.version=HTTP/1.1 clone --depth 1 --single-branch ${shellQuote(config.repoURL)} ${shellQuote(srcDir)}`,
+      stepTimeoutMs,
+      3,
+    );
 
     const actualRevision = (await runCommand(`git -C ${shellQuote(srcDir)} rev-parse HEAD`)).stdout.trim();
     if (actualRevision !== config.revision) {
@@ -340,15 +345,34 @@ async function httpStatusOK(url) {
   }
 }
 
-async function runStep(name, command, timeoutMs = DEFAULT_TIMEOUT_SECONDS * 1000) {
-  const result = await runCommand(command, { timeoutMs });
-  if (result.exitCode !== 0) {
-    console.log(`${name}=failed`);
-    const tail = redactText(`${result.stdout}\n${result.stderr}`).trim().split(/\r?\n/).slice(-80).join("\n");
-    if (tail) process.stderr.write(`${tail}\n`);
-    throw new Error(`${name} failed`);
+async function runStep(name, command, timeoutMs = DEFAULT_TIMEOUT_SECONDS * 1000, attempts = 1) {
+  let lastError = null;
+  let lastResult = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const result = await runCommand(command, { timeoutMs });
+      if (result.exitCode === 0) {
+        console.log(`${name}=ok`);
+        return;
+      }
+      lastResult = result;
+    } catch (error) {
+      lastError = error;
+    }
+    if (attempt < attempts) {
+      console.log(`${name}=retry attempt=${attempt + 1}`);
+      await sleep(Math.min(1000 * attempt, 5000));
+    }
   }
-  console.log(`${name}=ok`);
+  console.log(`${name}=failed`);
+  if (lastResult) {
+    const tail = redactText(`${lastResult.stdout}\n${lastResult.stderr}`).trim().split(/\r?\n/).slice(-80).join("\n");
+    if (tail) process.stderr.write(`${tail}\n`);
+  }
+  if (lastError) {
+    throw new Error(`${name} failed: ${redactText(lastError.message)}`);
+  }
+  throw new Error(`${name} failed`);
 }
 
 async function runCommand(command, options = {}) {
@@ -360,11 +384,25 @@ async function runCommand(command, options = {}) {
     });
     let stdout = "";
     let stderr = "";
-    const timer =
+    let timedOut = false;
+    let settled = false;
+    let timer = null;
+    let killTimer = null;
+    const settle = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      if (killTimer) clearTimeout(killTimer);
+      fn(value);
+    };
+    timer =
       options.timeoutMs && options.timeoutMs > 0
         ? setTimeout(() => {
+            timedOut = true;
             child.kill("SIGTERM");
-            reject(new Error(`command timed out: ${redactText(command)}`));
+            killTimer = setTimeout(() => {
+              if (!settled) child.kill("SIGKILL");
+            }, 5000);
           }, options.timeoutMs)
         : null;
     child.stdout.on("data", (chunk) => {
@@ -374,12 +412,14 @@ async function runCommand(command, options = {}) {
       stderr += chunk;
     });
     child.on("error", (error) => {
-      if (timer) clearTimeout(timer);
-      reject(error);
+      settle(reject, error);
     });
     child.on("close", (exitCode, signal) => {
-      if (timer) clearTimeout(timer);
-      resolve({ exitCode, signal, stdout, stderr });
+      if (timedOut) {
+        settle(reject, new Error(`command timed out: ${redactText(command)}`));
+        return;
+      }
+      settle(resolve, { exitCode, signal, stdout, stderr });
     });
   });
 }

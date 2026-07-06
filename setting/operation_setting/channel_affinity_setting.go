@@ -87,6 +87,7 @@ var channelAffinitySetting = ChannelAffinitySetting{
 			PathRegex:  []string{"/v1/responses"},
 			KeySources: []ChannelAffinityKeySource{
 				{Type: "gjson", Path: "prompt_cache_key"},
+				{Type: "request_header", Key: "Session_id"},
 			},
 			ValueRegex:            "",
 			TTLSeconds:            0,

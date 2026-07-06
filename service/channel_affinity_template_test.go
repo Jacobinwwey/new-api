@@ -354,3 +354,46 @@ func TestChannelAffinityHitCodexTemplatePassHeadersEffective(t *testing.T) {
 		})
 	}
 }
+
+func TestChannelAffinityHitCodexTemplateFallsBackToSessionHeader(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	setting := operation_setting.GetChannelAffinitySetting()
+	require.NotNil(t, setting)
+
+	var codexRule *operation_setting.ChannelAffinityRule
+	for i := range setting.Rules {
+		rule := &setting.Rules[i]
+		if strings.EqualFold(strings.TrimSpace(rule.Name), "codex cli trace") {
+			codexRule = rule
+			break
+		}
+	}
+	require.NotNil(t, codexRule)
+
+	sessionID := fmt.Sprintf("codex-session-fallback-%d", time.Now().UnixNano())
+	cacheKeySuffix := buildChannelAffinityCacheKeySuffix(*codexRule, "glm-5.2", "default", sessionID)
+
+	cache := getChannelAffinityCache()
+	require.NoError(t, cache.SetWithTTL(cacheKeySuffix, 9527, time.Minute))
+	t.Cleanup(func() {
+		_, _ = cache.DeleteMany([]string{cacheKeySuffix})
+	})
+
+	rec := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(rec)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"glm-5.2"}`))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	ctx.Request.Header.Set("Session_id", sessionID)
+
+	channelID, found := GetPreferredChannelByAffinity(ctx, "glm-5.2", "default")
+
+	require.True(t, found)
+	require.Equal(t, 9527, channelID)
+
+	meta, ok := getChannelAffinityMeta(ctx)
+	require.True(t, ok)
+	require.Equal(t, "request_header", meta.KeySourceType)
+	require.Equal(t, "Session_id", meta.KeySourceKey)
+	require.Empty(t, meta.KeySourcePath)
+}

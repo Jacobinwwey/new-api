@@ -1,12 +1,16 @@
 package controller
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -160,4 +164,28 @@ func TestOpenCodeAccountDiagnosticsReportsCredentialKeySource(t *testing.T) {
 	fallback := toOpenCodeAccountDiagnosticsResponse()
 	assert.Equal(t, common.SecretEncryptionKeySourceSessionSecretFallback, fallback.CredentialKeySource)
 	assert.True(t, fallback.UsesFallbackCredentialKey)
+}
+
+func TestGetOpenCodeAccountDiagnosticsReturnsNonSecretPayload(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("CRYPTO_SECRET", "configured-crypto-secret")
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/opencode/accounts/diagnostics", nil)
+
+	GetOpenCodeAccountDiagnostics(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var payload struct {
+		Success bool                       `json:"success"`
+		Message string                     `json:"message"`
+		Data    OpenCodeAccountDiagnostics `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &payload))
+	assert.True(t, payload.Success)
+	assert.Empty(t, payload.Message)
+	assert.Equal(t, common.SecretEncryptionKeySourceCryptoSecret, payload.Data.CredentialKeySource)
+	assert.False(t, payload.Data.UsesFallbackCredentialKey)
+	assert.NotContains(t, recorder.Body.String(), "configured-crypto-secret")
 }

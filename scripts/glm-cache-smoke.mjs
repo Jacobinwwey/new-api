@@ -7,6 +7,7 @@ const DEFAULT_RULE_NAME = "codex cli trace";
 const DEFAULT_GROUP = "default";
 const DEFAULT_INPUT = "Return the word ok. Keep the answer short.";
 const DEFAULT_REQUEST_COUNT = 4;
+const DEFAULT_WARMUP_REQUEST_COUNT = 0;
 const DEFAULT_REQUEST_DELAY_MS = 750;
 const DEFAULT_TIMEOUT_MS = 120000;
 const DEFAULT_MAX_OUTPUT_TOKENS = 64;
@@ -74,6 +75,11 @@ export function buildCacheSmokeConfig(argv = process.argv, env = process.env) {
     input: String(args.input || env.GLM_CACHE_SMOKE_INPUT || DEFAULT_INPUT),
     maxOutputTokens: readInteger(args["max-output-tokens"], DEFAULT_MAX_OUTPUT_TOKENS, 1),
     requestCount: readInteger(args.requests, DEFAULT_REQUEST_COUNT, 2),
+    warmupRequestCount: readInteger(
+      args["warmup-requests"] || env.GLM_CACHE_SMOKE_WARMUP_REQUESTS,
+      DEFAULT_WARMUP_REQUEST_COUNT,
+      0,
+    ),
     requestDelayMs: readInteger(args["delay-ms"], DEFAULT_REQUEST_DELAY_MS, 0),
     usingGroup: String(args.group || DEFAULT_GROUP).trim(),
     ruleName: String(args["rule-name"] || DEFAULT_RULE_NAME).trim(),
@@ -89,15 +95,13 @@ export async function runCacheSmoke(config) {
   }
 
   const keyFingerprint = cacheKeyFingerprint(config.promptCacheKey);
+  const warmupResults = await runResponsesRequests(
+    config,
+    fetcher,
+    Number(config.warmupRequestCount || 0),
+  );
   const baselineStats = await readUsageStats(config, fetcher, keyFingerprint);
-  const results = [];
-  for (let index = 0; index < config.requestCount; index += 1) {
-    const response = await postResponsesRequest(config, fetcher);
-    results.push(summarizeResponse(response));
-    if (index + 1 < config.requestCount && config.requestDelayMs > 0) {
-      await sleep(config.requestDelayMs);
-    }
-  }
+  const results = await runResponsesRequests(config, fetcher, config.requestCount);
   const finalStats =
     baselineStats.status === "skipped"
       ? baselineStats
@@ -108,6 +112,7 @@ export async function runCacheSmoke(config) {
     rule_name: config.ruleName,
     using_group: config.usingGroup,
     key_fp: keyFingerprint,
+    warmup: summarizeRequests(warmupResults),
     requests: summarizeRequests(results),
     stats: buildUsageStatsReport(baselineStats, finalStats),
   };
@@ -160,6 +165,18 @@ async function postResponsesRequest(config, fetcher) {
     config.timeoutMs,
   );
   return parseJSONResponse(response, config);
+}
+
+async function runResponsesRequests(config, fetcher, requestCount) {
+  const results = [];
+  for (let index = 0; index < requestCount; index += 1) {
+    const response = await postResponsesRequest(config, fetcher);
+    results.push(summarizeResponse(response));
+    if (index + 1 < requestCount && config.requestDelayMs > 0) {
+      await sleep(config.requestDelayMs);
+    }
+  }
+  return results;
 }
 
 async function readUsageStats(config, fetcher, keyFingerprint) {

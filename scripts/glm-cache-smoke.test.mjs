@@ -44,6 +44,8 @@ test("buildCacheSmokeConfig reads secrets from environment only", () => {
       "https://new-api.example.test/",
       "--requests",
       "3",
+      "--warmup-requests",
+      "2",
     ],
     {
       NEW_API_KEY: "fixture-relay-secret",
@@ -59,6 +61,7 @@ test("buildCacheSmokeConfig reads secrets from environment only", () => {
   assert.equal(config.adminUserID, "1");
   assert.equal(config.promptCacheKey, "session-secret");
   assert.equal(config.requestCount, 3);
+  assert.equal(config.warmupRequestCount, 2);
 });
 
 test("buildAdminHeaders supports token and cookie auth without mixing relay keys", () => {
@@ -259,6 +262,83 @@ test("runCacheSmoke reports usage-cache deltas for the current smoke run", async
     cached_tokens: 512,
     prompt_cache_hit_tokens: 256,
     prompt_tokens: 1024,
+    completion_tokens: 0,
+    total_tokens: 0,
+  });
+});
+
+test("runCacheSmoke measures deltas after warmup requests", async () => {
+  const calls = [];
+  let statsReads = 0;
+  let responseReads = 0;
+  const fetcher = async (url) => {
+    if (String(url).includes("/api/log/channel_affinity_usage_cache")) {
+      statsReads += 1;
+      calls.push("stats");
+      return jsonResponse({
+        success: true,
+        data:
+          statsReads === 1
+            ? {
+                rule_name: "codex cli trace",
+                using_group: "default",
+                key_fp: "deadbeef",
+                hit: 2,
+                total: 2,
+                cached_tokens: 64,
+              }
+            : {
+                rule_name: "codex cli trace",
+                using_group: "default",
+                key_fp: "deadbeef",
+                hit: 4,
+                total: 4,
+                cached_tokens: 192,
+              },
+      });
+    }
+    responseReads += 1;
+    calls.push("response");
+    return jsonResponse({
+      usage: {
+        input_tokens: 20,
+        input_tokens_details: {
+          cached_tokens: responseReads <= 2 ? 0 : 8,
+        },
+      },
+    });
+  };
+
+  const summary = await runCacheSmoke({
+    baseURL: "https://new-api.example.test",
+    apiKey: "fixture-relay-secret",
+    adminToken: "admin-token-secret",
+    adminCookie: "",
+    adminUserID: "1",
+    model: "glm-5.2",
+    promptCacheKey: "session-secret",
+    input: "cache smoke prompt",
+    maxOutputTokens: 16,
+    requestCount: 2,
+    warmupRequestCount: 2,
+    requestDelayMs: 0,
+    usingGroup: "default",
+    ruleName: "codex cli trace",
+    timeoutMs: 1000,
+    fetcher,
+  });
+
+  assert.deepEqual(calls, ["response", "response", "stats", "response", "response", "stats"]);
+  assert.equal(summary.warmup.total, 2);
+  assert.equal(summary.warmup.hit, 0);
+  assert.equal(summary.requests.total, 2);
+  assert.equal(summary.requests.hit, 2);
+  assert.deepEqual(summary.stats.delta, {
+    hit: 2,
+    total: 2,
+    cached_tokens: 128,
+    prompt_cache_hit_tokens: 0,
+    prompt_tokens: 0,
     completion_tokens: 0,
     total_tokens: 0,
   });

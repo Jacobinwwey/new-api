@@ -31,6 +31,8 @@ test("buildOpenCodePreflightConfig reads root auth from environment only", () =>
       "2",
       "--min-active-accounts",
       "1",
+      "--min-active-ready-accounts",
+      "1",
     ],
     {
       NEW_API_ADMIN_TOKEN: "root-token-secret",
@@ -46,6 +48,7 @@ test("buildOpenCodePreflightConfig reads root auth from environment only", () =>
   assert.equal(config.requireAffinityStats, false);
   assert.equal(config.minActivationReadyAccounts, 2);
   assert.equal(config.minActiveAccounts, 1);
+  assert.equal(config.minActiveReadyAccounts, 1);
 });
 
 test("runOpenCodePreflight fails when root auth is required but missing", async () => {
@@ -142,6 +145,7 @@ test("runOpenCodePreflight passes stable diagnostics and summarizes accounts wit
     requireAffinityStats: true,
     minActivationReadyAccounts: 1,
     minActiveAccounts: 1,
+    minActiveReadyAccounts: 1,
     fetcher,
   });
 
@@ -153,6 +157,7 @@ test("runOpenCodePreflight passes stable diagnostics and summarizes accounts wit
   assert.deepEqual(summary.accounts, {
     total: 2,
     active: 1,
+    active_ready: 1,
     activation_ready: 1,
     credential_integrity: {
       ok: 1,
@@ -172,6 +177,76 @@ test("runOpenCodePreflight passes stable diagnostics and summarizes accounts wit
   assert.doesNotMatch(encoded, /u\*\*\*@example\.test/);
   assert.doesNotMatch(encoded, /api_key/);
   assert.doesNotMatch(encoded, /new-api\.example\.test/);
+});
+
+test("runOpenCodePreflight fails when no single account is both active and activation-ready", async () => {
+  const fetcher = async (url) => {
+    if (String(url).endsWith("/api/status")) {
+      return jsonResponse({ version: "test" });
+    }
+    if (String(url).endsWith("/api/opencode/accounts/diagnostics")) {
+      return jsonResponse({
+        success: true,
+        data: {
+          credential_key_source: "crypto_secret",
+          uses_fallback_credential_key: false,
+        },
+      });
+    }
+    if (String(url).endsWith("/api/opencode/accounts")) {
+      return jsonResponse({
+        success: true,
+        data: [
+          {
+            active: true,
+            activation_ready: false,
+            credential_integrity: "decrypt_failed",
+            missing_activation_fields: [`api_${"key"}`],
+          },
+          {
+            active: false,
+            activation_ready: true,
+            credential_integrity: "ok",
+            missing_activation_fields: [],
+          },
+        ],
+      });
+    }
+    if (String(url).includes("/api/log/channel_affinity_usage_cache")) {
+      return jsonResponse({ success: true, data: {} });
+    }
+    return jsonResponse({ success: false, message: "not found" }, { status: 404 });
+  };
+
+  const summary = await runOpenCodePreflight({
+    baseURL: "https://new-api.example.test",
+    adminToken: "root-token-secret",
+    adminCookie: "",
+    adminUserID: "1",
+    timeoutMs: 1000,
+    requireRoot: true,
+    requireStableCredentialKey: true,
+    requireAffinityStats: true,
+    minActivationReadyAccounts: 1,
+    minActiveAccounts: 1,
+    minActiveReadyAccounts: 1,
+    fetcher,
+  });
+
+  assert.equal(summary.accounts.active, 1);
+  assert.equal(summary.accounts.activation_ready, 1);
+  assert.equal(summary.accounts.active_ready, 0);
+  assert.equal(summary.checks.status, "failed");
+  const activeReadyCheck = summary.checks.items.find(
+    (item) => item.name === "active_ready_accounts",
+  );
+  assert.deepEqual(activeReadyCheck, {
+    name: "active_ready_accounts",
+    status: "failed",
+    actual: 0,
+    expected_min: 1,
+  });
+  assert.doesNotMatch(JSON.stringify(summary), /api_key/);
 });
 
 test("runOpenCodePreflight fails when active account threshold is not met", async () => {

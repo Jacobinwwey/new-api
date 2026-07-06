@@ -7,6 +7,7 @@ const DEFAULT_REQUIRE_STABLE_CREDENTIAL_KEY = true;
 const DEFAULT_REQUIRE_AFFINITY_STATS = true;
 const DEFAULT_MIN_ACTIVATION_READY_ACCOUNTS = 0;
 const DEFAULT_MIN_ACTIVE_ACCOUNTS = 0;
+const DEFAULT_MIN_ACTIVE_READY_ACCOUNTS = 0;
 
 export function buildOpenCodePreflightConfig(argv = process.argv, env = process.env) {
   const args = parseArgs(argv);
@@ -48,6 +49,12 @@ export function buildOpenCodePreflightConfig(argv = process.argv, env = process.
       DEFAULT_MIN_ACTIVE_ACCOUNTS,
       0,
       "min-active-accounts",
+    ),
+    minActiveReadyAccounts: readInteger(
+      args["min-active-ready-accounts"] || env.OPENCODE_PREFLIGHT_MIN_ACTIVE_READY_ACCOUNTS,
+      DEFAULT_MIN_ACTIVE_READY_ACCOUNTS,
+      0,
+      "min-active-ready-accounts",
     ),
   };
 }
@@ -147,6 +154,15 @@ export async function runOpenCodePreflight(config) {
         status: summary.accounts.active >= config.minActiveAccounts ? "passed" : "failed",
         actual: summary.accounts.active,
         expected_min: config.minActiveAccounts,
+      });
+    }
+    if (config.minActiveReadyAccounts > 0) {
+      checks.push({
+        name: "active_ready_accounts",
+        status:
+          summary.accounts.active_ready >= config.minActiveReadyAccounts ? "passed" : "failed",
+        actual: summary.accounts.active_ready,
+        expected_min: config.minActiveReadyAccounts,
       });
     }
   }
@@ -311,9 +327,11 @@ function summarizeAccounts(data) {
   const credentialIntegrity = {};
   let activationReady = 0;
   let active = 0;
+  let activeReady = 0;
   for (const account of accounts) {
     if (account?.activation_ready) activationReady += 1;
     if (account?.active) active += 1;
+    if (account?.active && account?.activation_ready) activeReady += 1;
     const integrity = String(account?.credential_integrity || "unknown");
     credentialIntegrity[integrity] = (credentialIntegrity[integrity] || 0) + 1;
     for (const field of account?.missing_activation_fields || []) {
@@ -325,6 +343,7 @@ function summarizeAccounts(data) {
   return {
     total: accounts.length,
     active,
+    active_ready: activeReady,
     activation_ready: activationReady,
     credential_integrity: credentialIntegrity,
     missing_activation_fields: missingActivationFields,

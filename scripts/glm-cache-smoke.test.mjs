@@ -471,6 +471,103 @@ test("runCacheSmoke accepts legacy usage-cache stats without identity fields", a
   assert.equal(summary.checks.status, "passed");
 });
 
+test("runCacheSmoke rejects missing usage-cache stats data object", async () => {
+  const fetcher = async (url) => {
+    if (String(url).includes("/api/log/channel_affinity_usage_cache")) {
+      return jsonResponse({
+        success: true,
+      });
+    }
+    return jsonResponse({
+      usage: {
+        input_tokens: 10,
+        input_tokens_details: { cached_tokens: 4 },
+      },
+    });
+  };
+
+  const summary = await runCacheSmoke({
+    baseURL: "https://new-api.example.test",
+    apiKey: "fixture-relay-secret",
+    adminToken: "admin-token-secret",
+    adminCookie: "",
+    adminUserID: "1",
+    model: "glm-5.2",
+    promptCacheKey: "session-secret",
+    input: "cache smoke prompt",
+    maxOutputTokens: 16,
+    requestCount: 2,
+    requestDelayMs: 0,
+    usingGroup: "default",
+    ruleName: "codex cli trace",
+    timeoutMs: 1000,
+    requireStats: true,
+    fetcher,
+  });
+
+  assert.equal(summary.stats.status, "error");
+  assert.equal(summary.stats.phase, "baseline");
+  assert.equal(summary.stats.message, "stats payload contract mismatch: data object required");
+  assert.equal(summary.checks.status, "failed");
+  assert.deepEqual(summary.checks.items[0], {
+    name: "stats_available",
+    status: "failed",
+    actual: "error",
+    expected: "ok",
+    reason: "stats payload contract mismatch: data object required",
+  });
+});
+
+test("runCacheSmoke rejects malformed usage-cache numeric counters", async () => {
+  const fetcher = async (url) => {
+    if (String(url).includes("/api/log/channel_affinity_usage_cache")) {
+      return jsonResponse({
+        success: true,
+        data: {
+          rule_name: "codex cli trace",
+          using_group: "default",
+          key_fp: FIXTURE_CACHE_KEY_FP,
+          hit: "not-a-number",
+          total: 8,
+          cached_tokens: -1,
+          prompt_cache_hit_tokens: 128,
+        },
+      });
+    }
+    return jsonResponse({
+      usage: {
+        input_tokens: 10,
+        input_tokens_details: { cached_tokens: 4 },
+      },
+    });
+  };
+
+  const summary = await runCacheSmoke({
+    baseURL: "https://new-api.example.test",
+    apiKey: "fixture-relay-secret",
+    adminToken: "admin-token-secret",
+    adminCookie: "",
+    adminUserID: "1",
+    model: "glm-5.2",
+    promptCacheKey: "session-secret",
+    input: "cache smoke prompt",
+    maxOutputTokens: 16,
+    requestCount: 2,
+    requestDelayMs: 0,
+    usingGroup: "default",
+    ruleName: "codex cli trace",
+    timeoutMs: 1000,
+    requireStats: true,
+    fetcher,
+  });
+
+  assert.equal(summary.stats.status, "error");
+  assert.equal(summary.stats.phase, "baseline");
+  assert.equal(summary.stats.message, "stats numeric payload malformed: hit,cached_tokens");
+  assert.equal(summary.checks.status, "failed");
+  assert.equal(summary.checks.items[0].reason, "stats numeric payload malformed: hit,cached_tokens");
+});
+
 test("runCacheSmoke rejects mismatched baseline usage-cache stats identity", async () => {
   const fetcher = async (url) => {
     if (String(url).includes("/api/log/channel_affinity_usage_cache")) {

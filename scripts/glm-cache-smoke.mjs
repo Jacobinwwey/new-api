@@ -23,6 +23,17 @@ const EMAIL_PATTERN = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
 const WINDOWS_ABSOLUTE_PATH_PATTERN = /\b[A-Za-z]:\\[^\s"'<>]+/g;
 const POSIX_ABSOLUTE_PATH_PATTERN =
   /(^|[\s"'(])\/(?:home|root|opt|var|srv|etc|mnt|tmp|data)\/[^\s"'<>)]*/g;
+const STATS_NUMERIC_FIELDS = [
+  "hit",
+  "total",
+  "cached_tokens",
+  "prompt_cache_hit_tokens",
+  "prompt_tokens",
+  "completion_tokens",
+  "total_tokens",
+  "window_seconds",
+  "last_seen_at",
+];
 
 export function cacheKeyFingerprint(value) {
   const raw = String(value || "").trim();
@@ -289,7 +300,19 @@ async function readUsageStats(config, fetcher, keyFingerprint) {
     if (payload && payload.success === false) {
       return { status: "error", message: sanitizeText(payload.message || "stats request failed", config) };
     }
-    const stats = sanitizeStats(payload?.data || {});
+    if (!isObjectRecord(payload?.data)) {
+      return {
+        status: "error",
+        message: "stats payload contract mismatch: data object required",
+      };
+    }
+    const { stats, malformedFields } = sanitizeStats(payload.data);
+    if (malformedFields.length > 0) {
+      return {
+        status: "error",
+        message: `stats numeric payload malformed: ${malformedFields.join(",")}`,
+      };
+    }
     const identityMismatch = usageStatsIdentityMismatch(stats, config, keyFingerprint);
     if (identityMismatch) {
       return { status: "error", message: `stats identity mismatch: ${identityMismatch}` };
@@ -489,21 +512,41 @@ function summarizeRequests(results) {
 }
 
 function sanitizeStats(stats) {
-  return {
+  const malformedFields = [];
+  const normalized = {
     rule_name: String(stats.rule_name || ""),
     using_group: String(stats.using_group || ""),
     key_fp: String(stats.key_fp || ""),
-    hit: Number(stats.hit || 0),
-    total: Number(stats.total || 0),
-    cached_tokens: Number(stats.cached_tokens || 0),
-    prompt_cache_hit_tokens: Number(stats.prompt_cache_hit_tokens || 0),
-    prompt_tokens: Number(stats.prompt_tokens || 0),
-    completion_tokens: Number(stats.completion_tokens || 0),
-    total_tokens: Number(stats.total_tokens || 0),
-    window_seconds: Number(stats.window_seconds || 0),
-    last_seen_at: Number(stats.last_seen_at || 0),
-    cached_token_rate_mode: String(stats.cached_token_rate_mode || ""),
   };
+  for (const field of STATS_NUMERIC_FIELDS) {
+    normalized[field] = readStatsNumber(stats, field, malformedFields);
+  }
+  normalized.cached_token_rate_mode = String(stats.cached_token_rate_mode || "");
+  return { stats: normalized, malformedFields };
+}
+
+function readStatsNumber(stats, field, malformedFields) {
+  if (
+    !Object.prototype.hasOwnProperty.call(stats, field) ||
+    stats[field] === undefined ||
+    stats[field] === null
+  ) {
+    return 0;
+  }
+  if (typeof stats[field] === "string" && stats[field].trim() === "") {
+    malformedFields.push(field);
+    return 0;
+  }
+  const value = Number(stats[field]);
+  if (!Number.isFinite(value) || value < 0) {
+    malformedFields.push(field);
+    return 0;
+  }
+  return value;
+}
+
+function isObjectRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function sum(items, key) {

@@ -245,6 +245,7 @@ End-to-end verification:
 | Cache accounting parity in fork | Implemented | `UsageFromChatUsage` now preserves cached-token details in both Chat-style and Responses-style accounting fields. |
 | Cache accounting test isolation | Implemented locally | Channel-affinity usage-cache tests now use deterministic per-test cache keys instead of wall-clock nanosecond keys. This removes cross-test counter bleed in fast repeated runs and makes cache-hit accounting verification stronger before real `glm-5.2` E2E. |
 | `glm-5.2` Codex affinity coverage | Implemented locally | The default Codex channel-affinity rule now matches both `gpt-*` and `glm-*` models on `/v1/responses`, using `prompt_cache_key` as the key source and the same Codex header pass-through template. This fixes a concrete cache-hit path gap where `glm-5.2` would skip affinity despite carrying a stable prompt cache key. |
+| Channel-affinity cache-stats UI quality gate | Implemented locally | The cache-stats dialog row-building logic is now a pure helper with regression tests for hit-rate, cached-token, target fallback, and empty-state rows. The dialog no longer depends on a promise chain or nested ternary rendering, and the full `src/features/system-settings/general/channel-affinity` frontend directory now passes targeted oxlint. This improves cache observability quality before real `glm-5.2` E2E, but it does not replace live upstream cache-hit verification. |
 | OpenCode account model | Implemented | Added `opencode_accounts` model, migration registration, validation, encrypted secret storage, and masked public view. |
 | Reversible encryption helper | Implemented | Added AES-GCM `EncryptSecret` / `DecryptSecret` using `CRYPTO_SECRET`-derived key and versioned ciphertext. |
 | Root-only OpenCode account API | Implemented | Added CRUD, login-session, extract, quota refresh, and activate routes under `/api/opencode/accounts`. Quota refresh now accepts quota-only browser payloads and updates structured `quota_limit` / `quota_used` fields. |
@@ -481,7 +482,7 @@ The `web/classic` build failure was traced to `date-fns-tz@1.3.8` resolving its 
 
 Known verification limits:
 
-- Full frontend lint currently fails on pre-existing files outside this change set. The OpenCode-related frontend paths pass targeted lint.
+- The channel-affinity frontend directory and OpenCode-related frontend paths pass targeted lint. Broad full-frontend lint is still treated as a separate historical quality gate and should not be used as evidence of live OpenCode account or `glm-5.2` cache-hit behavior.
 - `go test ./common ./model ./service ./controller ./router ./service/relayconvert -count=1` currently exposes pre-existing SQLite test setup failures such as missing `users`, `tasks`, and `system_tasks` tables in unrelated tests. The OpenCode-specific backend tests pass.
 - Real OpenCode Google login, account extraction, channel activation against a live subscription account, and repeated `glm-5.2` cache-hit measurement still require operator-controlled credentials and must not be committed to the repository.
 
@@ -740,6 +741,7 @@ web/default/src/routes/_authenticated/opencode-accounts/index.tsx
 | fork 内 cache accounting parity | 已实现 | `UsageFromChatUsage` 现在同时保留 Chat 风格与 Responses 风格计费字段中的 cached-token details。 |
 | Cache accounting 测试隔离 | 本地已实现 | channel-affinity usage-cache 测试现在使用确定性的 per-test cache key，不再依赖 wall-clock nanosecond key。这样快速重复运行时不会发生跨测试 counter 串扰，在真实 `glm-5.2` E2E 前提升 cache-hit accounting 验证可信度。 |
 | `glm-5.2` Codex affinity 覆盖 | 本地已实现 | 默认 Codex channel-affinity 规则现在会在 `/v1/responses` 同时匹配 `gpt-*` 与 `glm-*` 模型，并继续使用 `prompt_cache_key` 作为 key source 与同一套 Codex header 透传模板。这修复了一个具体 cache-hit 链路缺口：`glm-5.2` 即使携带稳定 prompt cache key，先前也不会触发 affinity。 |
+| Channel-affinity cache-stats UI 质量门 | 本地已实现 | cache-stats dialog 的行构造逻辑现在抽成纯 helper，并用回归测试覆盖命中率、cached-token、目标字段兜底与空状态行。dialog 不再依赖 promise chain 或嵌套三元渲染，完整 `src/features/system-settings/general/channel-affinity` 前端目录现在已通过 targeted oxlint。这提升了真实 `glm-5.2` E2E 前的 cache 可观察性质量，但不能替代真实上游 cache-hit 验证。 |
 | OpenCode account model | 已实现 | 已增加 `opencode_accounts` model、迁移注册、校验、加密 secret 存储与 masked public view。 |
 | 可逆加密 helper | 已实现 | 已增加 AES-GCM `EncryptSecret` / `DecryptSecret`，使用 `CRYPTO_SECRET` 派生 key，密文带版本前缀。 |
 | Root-only OpenCode account API | 已实现 | `/api/opencode/accounts` 下已包含 CRUD、登录会话、提取、quota refresh 与 activate 路由。quota refresh 现在支持只包含 quota 的浏览器 payload，并会更新结构化 `quota_limit` / `quota_used` 字段。 |
@@ -976,7 +978,7 @@ Sidecar smoke：
 
 已知验证边界：
 
-- 全量前端 lint 目前失败在本次变更外的既有文件；OpenCode 相关前端路径的定向 lint 已通过。
+- channel-affinity 前端目录与 OpenCode 相关前端路径已通过 targeted lint。更广的全量前端 lint 仍应视为独立的历史质量门，不能作为真实 OpenCode 账号或 `glm-5.2` cache-hit 行为的证据。
 - `go test ./common ./model ./service ./controller ./router ./service/relayconvert -count=1` 当前暴露既有 SQLite 测试初始化问题，典型错误是无关测试缺少 `users`、`tasks`、`system_tasks` 表；本次 OpenCode 后端相关测试已通过。
 - 真实 OpenCode Google 登录、账号提取、订阅账号 channel 激活，以及多轮 `glm-5.2` cache-hit 统计验证仍需要操作者控制的真实凭证，不能写入仓库。
 

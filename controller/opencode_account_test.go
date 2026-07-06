@@ -193,7 +193,7 @@ func TestGetOpenCodeAccountDiagnosticsReturnsNonSecretPayload(t *testing.T) {
 	assert.NotContains(t, recorder.Body.String(), "configured-crypto-secret")
 }
 
-func TestDeleteOpenCodeAccountStopsLoginSessionBeforeDeleting(t *testing.T) {
+func TestDeleteOpenCodeAccountPurgesLoginSessionBeforeDeleting(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
@@ -240,7 +240,7 @@ console.log(JSON.stringify({ success: true, status: { account_id: accountID, run
 	require.Equal(t, http.StatusOK, recorder.Code)
 	marker, err := os.ReadFile(markerPath)
 	require.NoError(t, err)
-	assert.Contains(t, string(marker), "--action\nstop")
+	assert.Contains(t, string(marker), "--action\npurge")
 	assert.Contains(t, string(marker), "--account-id\n77")
 
 	var account model.OpenCodeAccount
@@ -248,7 +248,7 @@ console.log(JSON.stringify({ success: true, status: { account_id: accountID, run
 	assert.True(t, errors.Is(err, gorm.ErrRecordNotFound))
 }
 
-func TestDeleteOpenCodeAccountPreservesAccountWhenStopFails(t *testing.T) {
+func TestDeleteOpenCodeAccountPreservesAccountWhenPurgeFails(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
@@ -260,7 +260,7 @@ func TestDeleteOpenCodeAccountPreservesAccountWhenStopFails(t *testing.T) {
 	require.NoError(t, db.AutoMigrate(&model.OpenCodeAccount{}))
 	require.NoError(t, db.Create(&model.OpenCodeAccount{
 		Id:        78,
-		Label:     "delete-stop-fails",
+		Label:     "delete-purge-fails",
 		ChannelID: 9,
 	}).Error)
 
@@ -268,7 +268,7 @@ func TestDeleteOpenCodeAccountPreservesAccountWhenStopFails(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(tempRoot, "scripts"), 0o700))
 	require.NoError(t, os.WriteFile(
 		filepath.Join(tempRoot, "scripts", "opencode-auth-session.mjs"),
-		[]byte(`console.log(JSON.stringify({ success: false, message: "stop failed for test" }));`),
+		[]byte(`console.log(JSON.stringify({ success: false, message: "purge failed for test" }));`),
 		0o700,
 	))
 	previousWorkingDirectory, err := os.Getwd()
@@ -286,9 +286,9 @@ func TestDeleteOpenCodeAccountPreservesAccountWhenStopFails(t *testing.T) {
 	DeleteOpenCodeAccount(ctx)
 
 	require.Equal(t, http.StatusOK, recorder.Code)
-	assert.Contains(t, recorder.Body.String(), "stop failed for test")
+	assert.Contains(t, recorder.Body.String(), "purge failed for test")
 
 	var account model.OpenCodeAccount
 	require.NoError(t, db.First(&account, 78).Error)
-	assert.Equal(t, "delete-stop-fails", account.Label)
+	assert.Equal(t, "delete-purge-fails", account.Label)
 }

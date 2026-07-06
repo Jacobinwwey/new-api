@@ -76,6 +76,10 @@ func StopOpenCodeLoginSession(ctx context.Context, accountID int) (OpenCodeLogin
 	return runOpenCodeAuthStatusAction(ctx, "stop", accountID, nil, "")
 }
 
+func PurgeOpenCodeLoginSession(ctx context.Context, accountID int) (OpenCodeLoginSessionStatus, error) {
+	return runOpenCodeAuthStatusAction(ctx, "purge", accountID, nil, "")
+}
+
 func CaptureOpenCodeLoginScreenshot(ctx context.Context, accountID int) (OpenCodeLoginScreenshot, error) {
 	resp, err := runOpenCodeAuthSidecar(ctx, "screenshot", accountID, nil, "")
 	if err != nil {

@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import { existsSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { execFile } from "node:child_process";
 import test from "node:test";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { promisify } from "node:util";
 import vm from "node:vm";
 
 import {
@@ -9,6 +15,16 @@ import {
   retryTransientBrowserAction,
   shouldProbeOpenCodeResourceURL,
 } from "./opencode-auth-session.mjs";
+
+const execFileAsync = promisify(execFile);
+const sidecarScriptPath = fileURLToPath(new URL("./opencode-auth-session.mjs", import.meta.url));
+
+async function runSidecar(args) {
+  const { stdout } = await execFileAsync(process.execPath, [sidecarScriptPath, ...args], {
+    windowsHide: true,
+  });
+  return JSON.parse(stdout);
+}
 
 test("retryTransientBrowserAction retries transient failures and returns the successful value", async () => {
   let attempts = 0;
@@ -118,4 +134,37 @@ test("isDirectScriptExecution accepts symlinked argv script paths", () => {
     isDirectScriptExecution(pathToFileURL(realScript).href, symlinkScript, resolvePath),
     true,
   );
+});
+
+test("purge action removes account state and browser profile artifacts", async () => {
+  const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-purge-test-"));
+  const accountID = 42;
+  const stateFile = path.join(stateDir, `account-${accountID}.json`);
+  const profileDir = path.join(stateDir, `profile-${accountID}`);
+  await fs.mkdir(profileDir, { recursive: true });
+  await fs.writeFile(path.join(profileDir, "profile-cookie-store"), "browser profile residue");
+  await fs.writeFile(
+    stateFile,
+    JSON.stringify({
+      accountID,
+      browserPid: 0,
+      xvfbPid: 0,
+      port: 1,
+      startedAt: 1,
+    }),
+  );
+
+  const result = await runSidecar([
+    "--action",
+    "purge",
+    "--account-id",
+    String(accountID),
+    "--state-dir",
+    stateDir,
+  ]);
+
+  assert.equal(result.success, true);
+  assert.equal(result.status.status, "stopped");
+  assert.equal(existsSync(stateFile), false);
+  assert.equal(existsSync(profileDir), false);
 });

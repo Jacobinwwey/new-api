@@ -169,7 +169,7 @@ func DeleteOpenCodeAccount(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if _, err := service.StopOpenCodeLoginSession(c.Request.Context(), id); err != nil {
+	if _, err := service.PurgeOpenCodeLoginSession(c.Request.Context(), id); err != nil {
 		common.ApiError(c, err)
 		return
 	}

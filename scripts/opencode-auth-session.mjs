@@ -522,6 +522,23 @@ async function stopSession(args) {
   json({ success: true, status: { account_id: accountID, running: false, status: "stopped" } });
 }
 
+async function purgeSession(args) {
+  const accountID = Number(args["account-id"]);
+  const stateDir = args["state-dir"];
+  let state;
+  try {
+    state = await readState(stateDir, accountID);
+  } catch {
+    state = {};
+  }
+  await Promise.all([stopProcess(state.browserPid), stopProcess(state.xvfbPid)]);
+  await Promise.all([
+    fs.rm(statePath(stateDir, accountID), { force: true }),
+    fs.rm(profileDir(stateDir, accountID), { recursive: true, force: true }),
+  ]);
+  json({ success: true, status: { account_id: accountID, running: false, status: "stopped" } });
+}
+
 async function main() {
   const args = parseArgs(process.argv);
   const action = args.action;
@@ -538,6 +555,7 @@ async function main() {
     else if (action === "key") await keySession(args);
     else if (action === "extract") await extractSession(args);
     else if (action === "stop") await stopSession(args);
+    else if (action === "purge") await purgeSession(args);
     else fail(`unsupported action: ${action}`);
   } catch (error) {
     fail(error.message || "opencode auth session failed");

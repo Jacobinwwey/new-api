@@ -15,6 +15,11 @@ const AFFINITY_STATS_PROBE = {
   usingGroup: "default",
   keyFingerprint: "00000000",
 };
+const SECRET_ASSIGNMENT_PATTERN =
+  /\b(api[_-]?key|cookie|workspace[_-]?id|access[_-]?token|refresh[_-]?token|id[_-]?token|authorization)\s*[:=]\s*["']?[^"',\s&}]+/gi;
+const OAUTH_QUERY_PATTERN = /([?&](?:code|state|access_token|refresh_token|id_token)=)[^&\s]+/gi;
+const BEARER_TOKEN_PATTERN = /\bBearer\s+[A-Za-z0-9._~+/=-]{12,}/gi;
+const EMAIL_PATTERN = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
 
 export function buildOpenCodePreflightConfig(argv = process.argv, env = process.env) {
   const args = parseArgs(argv);
@@ -494,6 +499,10 @@ function sanitizeText(text, config) {
     if (!secret) continue;
     result = result.split(secret).join("<redacted>");
   }
+  result = result.replace(BEARER_TOKEN_PATTERN, "Bearer <redacted>");
+  result = result.replace(OAUTH_QUERY_PATTERN, "$1<redacted>");
+  result = result.replace(SECRET_ASSIGNMENT_PATTERN, (_match, key) => `${key}=<redacted>`);
+  result = result.replace(EMAIL_PATTERN, "<redacted-email>");
   return result;
 }
 

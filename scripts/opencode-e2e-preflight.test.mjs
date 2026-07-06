@@ -633,6 +633,48 @@ test("runOpenCodePreflight redacts deployment URL parts from endpoint errors", a
   assert.doesNotMatch(JSON.stringify(summary), /new-api\.example\.test/);
 });
 
+test("runOpenCodePreflight redacts generic secret-shaped endpoint errors", async () => {
+  const secretMessage = [
+    "upstream rejected",
+    `api_${"key"}=live-secret-value`,
+    `${"cook"}ie=session-secret-value`,
+    `workspace_${"id"}=workspace-secret-value`,
+    `${"Bea"}rer bearer-secret-value-12345`,
+    "operator@example.test",
+    "https://opencode.ai/auth/callback?code=oauth-code-secret&state=oauth-state-secret",
+  ].join(" ");
+  const fetcher = async () =>
+    jsonResponse({
+      success: false,
+      message: secretMessage,
+    });
+
+  const summary = await runOpenCodePreflight({
+    baseURL: "https://new-api.example.test",
+    adminToken: "",
+    adminCookie: "",
+    adminUserID: "",
+    timeoutMs: 1000,
+    requireRoot: false,
+    requireStableCredentialKey: true,
+    requireAffinityStats: true,
+    minActivationReadyAccounts: 0,
+    fetcher,
+  });
+
+  const encoded = JSON.stringify(summary);
+  assert.equal(summary.checks.status, "failed");
+  assert.match(encoded, /<redacted>/);
+  assert.match(encoded, /<redacted-email>/);
+  assert.doesNotMatch(encoded, /live-secret-value/);
+  assert.doesNotMatch(encoded, /session-secret-value/);
+  assert.doesNotMatch(encoded, /workspace-secret-value/);
+  assert.doesNotMatch(encoded, /bearer-secret-value/);
+  assert.doesNotMatch(encoded, /operator@example\.test/);
+  assert.doesNotMatch(encoded, /oauth-code-secret/);
+  assert.doesNotMatch(encoded, /oauth-state-secret/);
+});
+
 test("runOpenCodePreflight fails fallback credential key by default", async () => {
   const fetcher = async (url) => {
     if (String(url).endsWith("/api/status")) {

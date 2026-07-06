@@ -190,6 +190,24 @@ func TestExtractChannelAffinityValue_RequestHeader(t *testing.T) {
 	require.Equal(t, "tenant-123", value)
 }
 
+func TestBuildChannelAffinityCacheKeySuffixDoesNotExposeAffinityValue(t *testing.T) {
+	rule := operation_setting.ChannelAffinityRule{
+		Name:              "codex cli trace",
+		IncludeRuleName:   true,
+		IncludeModelName:  true,
+		IncludeUsingGroup: true,
+	}
+	affinityValue := "sensitive-affinity-value-with-stable-cache-key"
+
+	suffix := buildChannelAffinityCacheKeySuffix(rule, "glm-5.2", "default", affinityValue)
+
+	require.NotContains(t, suffix, affinityValue)
+	require.Contains(t, suffix, "codex cli trace")
+	require.Contains(t, suffix, "glm-5.2")
+	require.Contains(t, suffix, "default")
+	require.Contains(t, suffix, affinityFingerprint(affinityValue))
+}
+
 func TestGetPreferredChannelByAffinity_RequestHeaderKeySource(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

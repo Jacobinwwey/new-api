@@ -345,8 +345,16 @@ func buildChannelAffinityCacheKeySuffix(rule operation_setting.ChannelAffinityRu
 	if rule.IncludeUsingGroup && usingGroup != "" {
 		parts = append(parts, usingGroup)
 	}
-	parts = append(parts, affinityValue)
+	parts = append(parts, channelAffinityCacheKeyValuePart(affinityValue))
 	return strings.Join(parts, ":")
+}
+
+func channelAffinityCacheKeyValuePart(affinityValue string) string {
+	affinityValue = strings.TrimSpace(affinityValue)
+	if affinityValue == "" {
+		return ""
+	}
+	return "sha1_" + common.Sha1([]byte(affinityValue))
 }
 
 func setChannelAffinityContext(c *gin.Context, meta channelAffinityMeta) {

@@ -1,5 +1,9 @@
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+import { createServer } from "node:http";
 import assert from "node:assert/strict";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   buildAdminHeaders,
@@ -10,6 +14,8 @@ import {
   cacheKeyFingerprint,
   runCacheSmoke,
 } from "./glm-cache-smoke.mjs";
+
+const SMOKE_SCRIPT_PATH = fileURLToPath(new URL("./glm-cache-smoke.mjs", import.meta.url));
 
 test("cacheKeyFingerprint returns the New API affinity fingerprint without exposing the key", () => {
   const key = "session-value-that-must-not-be-printed";
@@ -47,6 +53,14 @@ test("buildCacheSmokeConfig reads secrets from environment only", () => {
       "3",
       "--warmup-requests",
       "2",
+      "--require-stats",
+      "true",
+      "--min-request-hit-rate",
+      "0.5",
+      "--min-stats-hit-rate",
+      "0.75",
+      "--min-cache-signal-tokens",
+      "128",
     ],
     {
       NEW_API_KEY: "fixture-relay-secret",
@@ -63,6 +77,30 @@ test("buildCacheSmokeConfig reads secrets from environment only", () => {
   assert.equal(config.promptCacheKey, "session-secret");
   assert.equal(config.requestCount, 3);
   assert.equal(config.warmupRequestCount, 2);
+  assert.equal(config.requireStats, true);
+  assert.equal(config.minRequestHitRate, 0.5);
+  assert.equal(config.minStatsHitRate, 0.75);
+  assert.equal(config.minCacheSignalTokens, 128);
+});
+
+test("buildCacheSmokeConfig rejects invalid smoke expectation thresholds", () => {
+  assert.throws(
+    () =>
+      buildCacheSmokeConfig(
+        [
+          "node",
+          "scripts/glm-cache-smoke.mjs",
+          "--base-url",
+          "https://new-api.example.test",
+          "--min-request-hit-rate",
+          "1.5",
+        ],
+        {
+          NEW_API_KEY: "fixture-relay-secret",
+        },
+      ),
+    /min-request-hit-rate must be a number between 0 and 1/,
+  );
 });
 
 test("buildCacheSmokeConfig defaults to a deterministic cacheable probe input", () => {
@@ -184,6 +222,7 @@ test("runCacheSmoke never returns raw secrets in the summary", async () => {
   assert.equal(summary.requests.total, 3);
   assert.equal(summary.stats.status, "ok");
   assert.equal(summary.stats.data.cached_tokens, 128);
+  assert.equal(summary.checks.status, "skipped");
   assert.match(summary.key_fp, /^[a-f0-9]{8}$/);
   assert.doesNotMatch(encoded, /fixture-relay-secret/);
   assert.doesNotMatch(encoded, /admin-token-secret/);
@@ -374,6 +413,202 @@ test("runCacheSmoke measures deltas after warmup requests", async () => {
     completion_tokens: 0,
     total_tokens: 0,
   });
+});
+
+test("runCacheSmoke passes configured cache-hit checks when measured signals meet thresholds", async () => {
+  let statsReads = 0;
+  const fetcher = async (url) => {
+    if (String(url).includes("/api/log/channel_affinity_usage_cache")) {
+      statsReads += 1;
+      return jsonResponse({
+        success: true,
+        data:
+          statsReads === 1
+            ? {
+                rule_name: "codex cli trace",
+                using_group: "default",
+                key_fp: "deadbeef",
+                hit: 10,
+                total: 20,
+                cached_tokens: 1000,
+              }
+            : {
+                rule_name: "codex cli trace",
+                using_group: "default",
+                key_fp: "deadbeef",
+                hit: 14,
+                total: 24,
+                cached_tokens: 1400,
+              },
+      });
+    }
+    return jsonResponse({
+      usage: {
+        input_tokens: 20,
+        input_tokens_details: { cached_tokens: 12 },
+      },
+    });
+  };
+
+  const summary = await runCacheSmoke({
+    baseURL: "https://new-api.example.test",
+    apiKey: "fixture-relay-secret",
+    adminToken: "admin-token-secret",
+    adminCookie: "",
+    adminUserID: "1",
+    model: "glm-5.2",
+    promptCacheKey: "session-secret",
+    input: "cache smoke prompt",
+    maxOutputTokens: 16,
+    requestCount: 4,
+    requestDelayMs: 0,
+    usingGroup: "default",
+    ruleName: "codex cli trace",
+    timeoutMs: 1000,
+    minRequestHitRate: 0.75,
+    requireStats: true,
+    minStatsHitRate: 0.75,
+    minCacheSignalTokens: 256,
+    fetcher,
+  });
+
+  assert.equal(summary.checks.status, "passed");
+  assert.deepEqual(
+    summary.checks.items.map((item) => item.name),
+    ["request_hit_rate", "stats_available", "stats_hit_rate", "cache_signal_tokens"],
+  );
+});
+
+test("runCacheSmoke fails configured checks for low request hit rate", async () => {
+  const fetcher = async () =>
+    jsonResponse({
+      usage: {
+        input_tokens: 20,
+      },
+    });
+
+  const summary = await runCacheSmoke({
+    baseURL: "https://new-api.example.test",
+    apiKey: "fixture-relay-secret",
+    adminToken: "",
+    adminCookie: "",
+    adminUserID: "",
+    model: "glm-5.2",
+    promptCacheKey: "session-secret",
+    input: "cache smoke prompt",
+    maxOutputTokens: 16,
+    requestCount: 2,
+    requestDelayMs: 0,
+    usingGroup: "default",
+    ruleName: "codex cli trace",
+    timeoutMs: 1000,
+    minRequestHitRate: 0.5,
+    fetcher,
+  });
+
+  assert.equal(summary.checks.status, "failed");
+  assert.deepEqual(summary.checks.items[0], {
+    name: "request_hit_rate",
+    status: "failed",
+    actual: 0,
+    expected_min: 0.5,
+  });
+});
+
+test("runCacheSmoke fails configured checks when required stats are unavailable", async () => {
+  const fetcher = async () =>
+    jsonResponse({
+      usage: {
+        input_tokens: 20,
+        input_tokens_details: { cached_tokens: 10 },
+      },
+    });
+
+  const summary = await runCacheSmoke({
+    baseURL: "https://new-api.example.test",
+    apiKey: "fixture-relay-secret",
+    adminToken: "",
+    adminCookie: "",
+    adminUserID: "",
+    model: "glm-5.2",
+    promptCacheKey: "session-secret",
+    input: "cache smoke prompt",
+    maxOutputTokens: 16,
+    requestCount: 2,
+    requestDelayMs: 0,
+    usingGroup: "default",
+    ruleName: "codex cli trace",
+    timeoutMs: 1000,
+    requireStats: true,
+    minStatsHitRate: 0.5,
+    fetcher,
+  });
+
+  assert.equal(summary.stats.status, "skipped");
+  assert.equal(summary.checks.status, "failed");
+  assert.equal(summary.checks.items[0].name, "stats_available");
+  assert.equal(summary.checks.items[0].reason, "missing_admin_auth");
+});
+
+test("CLI exits non-zero after printing summary when configured checks fail", async () => {
+  const server = createServer((request, response) => {
+    if (request.url === "/v1/responses") {
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ usage: { input_tokens: 20 } }));
+      return;
+    }
+    response.writeHead(404, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({ success: false, message: "not found" }));
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  try {
+    const address = server.address();
+    const child = spawn(
+      process.execPath,
+      [
+        SMOKE_SCRIPT_PATH,
+        "--base-url",
+        `http://127.0.0.1:${address.port}`,
+        "--requests",
+        "2",
+        "--delay-ms",
+        "0",
+        "--min-request-hit-rate",
+        "0.5",
+      ],
+      {
+        env: {
+          ...process.env,
+          NEW_API_KEY: "fixture-relay-secret",
+          NEW_API_ADMIN_TOKEN: "",
+          NEW_API_ADMIN_COOKIE: "",
+          NEW_API_ADMIN_USER_ID: "",
+          GLM_CACHE_SMOKE_KEY: "session-secret",
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+
+    const [code] = await once(child, "exit");
+    assert.equal(code, 1);
+    assert.equal(stderr, "");
+    const summary = JSON.parse(stdout);
+    assert.equal(summary.checks.status, "failed");
+    assert.equal(summary.checks.items[0].name, "request_hit_rate");
+    assert.doesNotMatch(stdout, /fixture-relay-secret/);
+    assert.doesNotMatch(stdout, /session-secret/);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
 });
 
 test("runCacheSmoke clamps usage-cache deltas when counters reset", async () => {

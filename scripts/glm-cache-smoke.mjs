@@ -11,6 +11,8 @@ const DEFAULT_WARMUP_REQUEST_COUNT = 0;
 const DEFAULT_REQUEST_DELAY_MS = 750;
 const DEFAULT_TIMEOUT_MS = 120000;
 const DEFAULT_MAX_OUTPUT_TOKENS = 64;
+const DEFAULT_MIN_HIT_RATE = 0;
+const DEFAULT_MIN_CACHE_SIGNAL_TOKENS = 0;
 
 export function cacheKeyFingerprint(value) {
   const raw = String(value || "").trim();
@@ -100,6 +102,26 @@ export function buildCacheSmokeConfig(argv = process.argv, env = process.env) {
     ruleName: String(args["rule-name"] || DEFAULT_RULE_NAME).trim(),
     timeoutMs: readInteger(args["timeout-ms"], DEFAULT_TIMEOUT_MS, 1000),
     skipStats: args["skip-stats"] === "true",
+    requireStats: readBoolean(
+      args["require-stats"] || env.GLM_CACHE_SMOKE_REQUIRE_STATS,
+      false,
+      "require-stats",
+    ),
+    minRequestHitRate: readRatio(
+      args["min-request-hit-rate"] || env.GLM_CACHE_SMOKE_MIN_REQUEST_HIT_RATE,
+      DEFAULT_MIN_HIT_RATE,
+      "min-request-hit-rate",
+    ),
+    minStatsHitRate: readRatio(
+      args["min-stats-hit-rate"] || env.GLM_CACHE_SMOKE_MIN_STATS_HIT_RATE,
+      DEFAULT_MIN_HIT_RATE,
+      "min-stats-hit-rate",
+    ),
+    minCacheSignalTokens: readNonNegativeInteger(
+      args["min-cache-signal-tokens"] || env.GLM_CACHE_SMOKE_MIN_CACHE_SIGNAL_TOKENS,
+      DEFAULT_MIN_CACHE_SIGNAL_TOKENS,
+      "min-cache-signal-tokens",
+    ),
   };
 }
 
@@ -122,7 +144,7 @@ export async function runCacheSmoke(config) {
       ? baselineStats
       : await readUsageStats(config, fetcher, keyFingerprint);
 
-  return {
+  const summary = {
     model: config.model,
     rule_name: config.ruleName,
     using_group: config.usingGroup,
@@ -131,6 +153,8 @@ export async function runCacheSmoke(config) {
     requests: summarizeRequests(results),
     stats: buildUsageStatsReport(baselineStats, finalStats),
   };
+  summary.checks = evaluateCacheSmokeChecks(summary, config);
+  return summary;
 }
 
 function parseArgs(argv) {
@@ -158,6 +182,40 @@ function readInteger(raw, fallback, minimum) {
     return fallback;
   }
   return value;
+}
+
+function readNonNegativeInteger(raw, fallback, name) {
+  if (raw === undefined || raw === null || raw === "") return fallback;
+  const value = Number.parseInt(String(raw), 10);
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error(`${name} must be a non-negative integer`);
+  }
+  return value;
+}
+
+function readRatio(raw, fallback, name) {
+  if (raw === undefined || raw === null || raw === "") return fallback;
+  const value = Number(String(raw));
+  if (!Number.isFinite(value) || value < 0 || value > 1) {
+    throw new Error(`${name} must be a number between 0 and 1`);
+  }
+  return value;
+}
+
+function readBoolean(raw, fallback, name) {
+  if (raw === undefined || raw === null || raw === "") return fallback;
+  switch (String(raw).trim().toLowerCase()) {
+    case "1":
+    case "true":
+    case "yes":
+      return true;
+    case "0":
+    case "false":
+    case "no":
+      return false;
+    default:
+      throw new Error(`${name} must be true or false`);
+  }
 }
 
 async function postResponsesRequest(config, fetcher) {
@@ -269,6 +327,81 @@ function computeStatsDelta(baseline, current) {
   return { delta, resetDetected };
 }
 
+function evaluateCacheSmokeChecks(summary, config) {
+  const items = [];
+  if (Number(config.minRequestHitRate || 0) > 0) {
+    const actual = ratio(summary.requests.hit, summary.requests.total);
+    items.push({
+      name: "request_hit_rate",
+      status: actual >= config.minRequestHitRate ? "passed" : "failed",
+      actual,
+      expected_min: config.minRequestHitRate,
+    });
+  }
+
+  const expectsStats =
+    config.requireStats ||
+    Number(config.minStatsHitRate || 0) > 0 ||
+    Number(config.minCacheSignalTokens || 0) > 0;
+  if (expectsStats) {
+    const statsOK = summary.stats.status === "ok";
+    items.push({
+      name: "stats_available",
+      status: statsOK ? "passed" : "failed",
+      actual: summary.stats.status,
+      expected: "ok",
+      reason: summary.stats.reason || summary.stats.message || "",
+    });
+    if (statsOK && summary.stats.reset_detected) {
+      items.push({
+        name: "stats_not_reset",
+        status: "failed",
+        actual: "reset_detected",
+        expected: "stable_counter_window",
+      });
+    }
+    if (Number(config.minStatsHitRate || 0) > 0) {
+      const actual = statsOK ? ratio(summary.stats.delta.hit, summary.stats.delta.total) : 0;
+      items.push({
+        name: "stats_hit_rate",
+        status: statsOK && actual >= config.minStatsHitRate ? "passed" : "failed",
+        actual,
+        expected_min: config.minStatsHitRate,
+      });
+    }
+    if (Number(config.minCacheSignalTokens || 0) > 0) {
+      const actual = statsOK ? cacheSignalTokens(summary.stats.delta) : 0;
+      items.push({
+        name: "cache_signal_tokens",
+        status: statsOK && actual >= config.minCacheSignalTokens ? "passed" : "failed",
+        actual,
+        expected_min: config.minCacheSignalTokens,
+      });
+    }
+  }
+
+  if (items.length === 0) {
+    return { status: "skipped", items };
+  }
+  return {
+    status: items.some((item) => item.status === "failed") ? "failed" : "passed",
+    items,
+  };
+}
+
+function ratio(numerator, denominator) {
+  const bottom = Number(denominator || 0);
+  if (bottom <= 0) return 0;
+  return Number((Number(numerator || 0) / bottom).toFixed(4));
+}
+
+function cacheSignalTokens(statsDelta) {
+  return Math.max(
+    Number(statsDelta.cached_tokens || 0),
+    Number(statsDelta.prompt_cache_hit_tokens || 0),
+  );
+}
+
 async function fetchWithTimeout(fetcher, url, init, timeoutMs) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -370,6 +503,9 @@ async function main() {
     const config = buildCacheSmokeConfig(process.argv, process.env);
     const summary = await runCacheSmoke(config);
     process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
+    if (summary.checks.status === "failed") {
+      process.exitCode = 1;
+    }
   } catch (error) {
     process.stderr.write(`${error.message || "glm cache smoke failed"}\n`);
     process.exitCode = 1;

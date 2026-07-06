@@ -143,7 +143,8 @@ export function sanitizeBrowserStatusURL(rawURL) {
   if (!value) return "";
   try {
     const url = new URL(value);
-    if (!["http:", "https:"].includes(url.protocol)) return value;
+    if (url.protocol === "about:" && url.pathname === "blank") return "about:blank";
+    if (!["http:", "https:"].includes(url.protocol)) return "";
     url.username = "";
     url.password = "";
     url.search = "";

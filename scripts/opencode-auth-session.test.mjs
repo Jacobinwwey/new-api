@@ -97,6 +97,10 @@ test("sanitizeBrowserStatusURL strips authorization payload from browser URLs", 
   assert.equal(callbackURL, "https://opencode.ai/auth/callback");
   assert.equal(credentialURL, "https://opencode.ai/auth");
   assert.equal(sanitizeBrowserStatusURL("about:blank"), "about:blank");
+  assert.equal(sanitizeBrowserStatusURL("about:blank#fragment-secret"), "about:blank");
+  assert.equal(sanitizeBrowserStatusURL("data:text/plain,embedded-secret"), "");
+  assert.equal(sanitizeBrowserStatusURL("file:///local/browser-profile/token.txt"), "");
+  assert.equal(sanitizeBrowserStatusURL("javascript:alert('embedded-secret')"), "");
   assert.equal(sanitizeBrowserStatusURL("not a url with oauth-code-secret"), "");
 
   for (const sanitized of [callbackURL, credentialURL]) {

@@ -40,12 +40,24 @@ func TestSanitizeOpenCodeLoginSessionStatusDropsAuthorizationPayload(t *testing.
 	assert.NotContains(t, status.URL, "fragment")
 }
 
-func TestSanitizeOpenCodeLoginSessionStatusKeepsNonHTTPBrowserURL(t *testing.T) {
+func TestSanitizeOpenCodeLoginSessionStatusKeepsAboutBlank(t *testing.T) {
 	status := sanitizeOpenCodeLoginSessionStatus(OpenCodeLoginSessionStatus{
-		URL: "about:blank",
+		URL: "about:blank#fragment",
 	})
 
 	assert.Equal(t, "about:blank", status.URL)
+}
+
+func TestSanitizeOpenCodeLoginSessionStatusDropsUnsafeNonHTTPBrowserURL(t *testing.T) {
+	for _, rawURL := range []string{
+		"data:text/plain,embedded-secret",
+		"file:///local/browser-profile/token.txt",
+		"javascript:alert('embedded-secret')",
+	} {
+		status := sanitizeOpenCodeLoginSessionStatus(OpenCodeLoginSessionStatus{URL: rawURL})
+
+		assert.Empty(t, status.URL)
+	}
 }
 
 func TestFindOpenCodeAuthSidecarPathSearchesExecutableDirectory(t *testing.T) {

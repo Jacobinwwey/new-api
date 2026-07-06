@@ -180,7 +180,10 @@ func sanitizeOpenCodeBrowserURL(rawURL string) string {
 		return ""
 	}
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return rawURL
+		if parsed.Scheme == "about" && strings.EqualFold(parsed.Opaque, "blank") {
+			return "about:blank"
+		}
+		return ""
 	}
 	parsed.User = nil
 	parsed.RawQuery = ""

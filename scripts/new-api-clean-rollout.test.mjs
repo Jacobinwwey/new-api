@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   RUNTIME_SCRIPTS,
+  WEB_DEFAULT_CHECK_COMMANDS,
   buildRolloutConfig,
   parseExecStartPath,
   redactText,
@@ -144,4 +145,12 @@ test("runtime script install set includes live E2E orchestration dependencies", 
       "opencode-live-e2e.mjs",
     ]),
   );
+});
+
+test("web default checks cover OpenCode account UI behavior before rollout build", () => {
+  assert.deepEqual(WEB_DEFAULT_CHECK_COMMANDS, [
+    "bun test src/features/opencode-accounts/lib.test.ts",
+    "bunx oxlint -c .oxlintrc.json src/features/opencode-accounts src/routes/_authenticated/opencode-accounts",
+    "bun run typecheck",
+  ]);
 });

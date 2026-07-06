@@ -18,6 +18,11 @@ export const RUNTIME_SCRIPTS = [
   "tailscale-link-preflight.mjs",
   "opencode-live-e2e.mjs",
 ];
+export const WEB_DEFAULT_CHECK_COMMANDS = [
+  "bun test src/features/opencode-accounts/lib.test.ts",
+  "bunx oxlint -c .oxlintrc.json src/features/opencode-accounts src/routes/_authenticated/opencode-accounts",
+  "bun run typecheck",
+];
 
 const SECRET_ASSIGNMENT_PATTERN =
   /\b(api[_-]?key|cookie|workspace[_-]?id|access[_-]?token|refresh[_-]?token|id[_-]?token|authorization)\s*[:=]\s*["']?[^"',\s&}]+/gi;
@@ -154,10 +159,18 @@ export async function runCleanRollout(config) {
 
     if (config.runWebBuilds) {
       await runStep(
-        "web_default_build",
+        "web_default_checks",
         [
           `cd ${shellQuote(path.join(srcDir, "web/default"))}`,
           "bun install --silent",
+          ...WEB_DEFAULT_CHECK_COMMANDS,
+        ].join(" && "),
+        stepTimeoutMs,
+      );
+      await runStep(
+        "web_default_build",
+        [
+          `cd ${shellQuote(path.join(srcDir, "web/default"))}`,
           `DISABLE_ESLINT_PLUGIN=true VITE_REACT_APP_VERSION=${shellQuote(config.revision)} bun run build`,
         ].join(" && "),
         stepTimeoutMs,

@@ -482,17 +482,39 @@ function sum(items, key) {
 
 function sanitizeText(text, config) {
   let result = String(text || "");
-  for (const secret of [
+  for (const fragment of sensitiveTextFragments(config)) {
+    if (!fragment) continue;
+    result = result.split(fragment).join("<redacted>");
+  }
+  return result;
+}
+
+function sensitiveTextFragments(config) {
+  const fragments = [
     config.apiKey,
     config.adminToken,
     config.adminCookie,
     config.promptCacheKey,
+    ...inputTextFragments(config.input),
     ...deploymentURLParts(config.baseURL),
-  ]) {
-    if (!secret) continue;
-    result = result.split(secret).join("<redacted>");
+  ].filter(Boolean);
+  return Array.from(new Set(fragments)).sort((left, right) => right.length - left.length);
+}
+
+function inputTextFragments(input) {
+  const raw = String(input || "");
+  if (!raw) return [];
+  const fragments = [raw];
+  try {
+    const encoded = JSON.stringify(raw);
+    fragments.push(encoded);
+    if (encoded.length >= 2) {
+      fragments.push(encoded.slice(1, -1));
+    }
+  } catch {
+    // JSON.stringify on a string is expected to succeed; keep raw redaction if it ever does not.
   }
-  return result;
+  return fragments;
 }
 
 function deploymentURLParts(rawBaseURL) {

@@ -231,11 +231,12 @@ test("runCacheSmoke never returns raw secrets in the summary", async () => {
 });
 
 test("runCacheSmoke rejects business failures from relay responses with redaction", async () => {
+  const prompt = "customer-private-line\nsecond-secret-line";
   const fetcher = async () =>
     jsonResponse({
       success: false,
       message:
-        "relay rejected fixture-relay-secret for session-secret at https://new-api.example.test/v1/responses",
+        `relay rejected fixture-relay-secret for session-secret and ${JSON.stringify(prompt)} at https://new-api.example.test/v1/responses`,
     });
 
   await assert.rejects(
@@ -247,7 +248,7 @@ test("runCacheSmoke rejects business failures from relay responses with redactio
       adminUserID: "",
       model: "glm-5.2",
       promptCacheKey: "session-secret",
-      input: "cache smoke prompt",
+      input: prompt,
       maxOutputTokens: 16,
       requestCount: 2,
       requestDelayMs: 0,
@@ -262,6 +263,8 @@ test("runCacheSmoke rejects business failures from relay responses with redactio
       assert.doesNotMatch(message, /response is not JSON/);
       assert.doesNotMatch(message, /fixture-relay-secret/);
       assert.doesNotMatch(message, /session-secret/);
+      assert.doesNotMatch(message, /customer-private-line/);
+      assert.doesNotMatch(message, /second-secret-line/);
       assert.doesNotMatch(message, /new-api\.example\.test/);
       return true;
     },
@@ -614,14 +617,21 @@ test("CLI exits non-zero after printing summary when configured checks fail", as
 });
 
 test("CLI redacts deployment URL parts from relay failure stderr", async () => {
+  const prompt = "customer-private-cli-line\nsecond-cli-secret-line";
   const server = createServer((request, response) => {
-    response.writeHead(200, { "Content-Type": "application/json" });
-    response.end(
-      JSON.stringify({
-        success: false,
-        message: `relay failed at http://${request.headers.host}${request.url} for fixture-relay-secret and session-secret`,
-      }),
-    );
+    let body = "";
+    request.on("data", (chunk) => {
+      body += chunk;
+    });
+    request.on("end", () => {
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end(
+        JSON.stringify({
+          success: false,
+          message: `relay failed at http://${request.headers.host}${request.url} for fixture-relay-secret, session-secret, and ${body}`,
+        }),
+      );
+    });
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 
@@ -637,6 +647,8 @@ test("CLI redacts deployment URL parts from relay failure stderr", async () => {
         "2",
         "--delay-ms",
         "0",
+        "--input",
+        prompt,
       ],
       {
         env: {
@@ -667,6 +679,8 @@ test("CLI redacts deployment URL parts from relay failure stderr", async () => {
     assert.doesNotMatch(stderr, /127\.0\.0\.1/);
     assert.doesNotMatch(stderr, /fixture-relay-secret/);
     assert.doesNotMatch(stderr, /session-secret/);
+    assert.doesNotMatch(stderr, /customer-private-cli-line/);
+    assert.doesNotMatch(stderr, /second-cli-secret-line/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

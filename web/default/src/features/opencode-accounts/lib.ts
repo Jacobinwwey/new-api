@@ -3,6 +3,11 @@ type OpenCodePageRefreshSource = {
   refetch: () => unknown
 }
 
+type OpenCodeBusinessResponse = {
+  success: boolean
+  message?: string
+}
+
 type OpenCodePageRefreshSources = {
   accounts: OpenCodePageRefreshSource
   channels: OpenCodePageRefreshSource
@@ -13,6 +18,16 @@ export type OpenCodeAccountDeleteTarget = {
   id: number
   label: string
 } | null
+
+export function requireSuccessfulOpenCodeResponse<
+  T extends OpenCodeBusinessResponse,
+>(response: T | null | undefined, fallbackMessage: string) {
+  if (!response?.success) {
+    throw new Error(response?.message || fallbackMessage)
+  }
+
+  return response
+}
 
 export function refreshOpenCodeAccountPageData(
   sources: OpenCodePageRefreshSources

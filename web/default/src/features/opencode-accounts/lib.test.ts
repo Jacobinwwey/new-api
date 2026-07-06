@@ -7,6 +7,7 @@ import {
   isOpenCodeAccountPageRefreshing,
   openCodeAccountWorkspaceGridRows,
   refreshOpenCodeAccountPageData,
+  requireSuccessfulOpenCodeResponse,
 } from './lib'
 
 function createRefreshSource() {
@@ -26,6 +27,38 @@ function createRefreshSource() {
 }
 
 describe('OpenCode account page helpers', () => {
+  test('keeps successful API responses on the success path', () => {
+    const response = {
+      success: true,
+      data: { id: 7 },
+    }
+
+    assert.equal(
+      requireSuccessfulOpenCodeResponse(response, 'request failed'),
+      response
+    )
+  })
+
+  test('throws business API failures before callers run success handlers', () => {
+    assert.throws(
+      () =>
+        requireSuccessfulOpenCodeResponse(
+          { success: false, message: 'purge failed' },
+          'request failed'
+        ),
+      /purge failed/
+    )
+    assert.throws(
+      () =>
+        requireSuccessfulOpenCodeResponse({ success: false }, 'request failed'),
+      /request failed/
+    )
+    assert.throws(
+      () => requireSuccessfulOpenCodeResponse(null, 'request failed'),
+      /request failed/
+    )
+  })
+
   test('refreshes accounts, channels, and diagnostics together', () => {
     const accounts = createRefreshSource()
     const channels = createRefreshSource()

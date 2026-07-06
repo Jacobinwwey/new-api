@@ -1,5 +1,6 @@
 import { api } from '@/lib/api'
 
+import { requireSuccessfulOpenCodeResponse } from './lib'
 import type {
   ApiResponse,
   OpenCodeAccount,
@@ -12,16 +13,23 @@ import type {
 } from './types'
 
 export async function listOpenCodeAccounts() {
-  const res =
-    await api.get<ApiResponse<OpenCodeAccount[]>>('/api/opencode/accounts')
-  return res.data
+  const res = await api.get<ApiResponse<OpenCodeAccount[]>>(
+    '/api/opencode/accounts'
+  )
+  return requireSuccessfulOpenCodeResponse(
+    res.data,
+    'Failed to list OpenCode accounts'
+  )
 }
 
 export async function getOpenCodeAccountDiagnostics() {
   const res = await api.get<ApiResponse<OpenCodeAccountDiagnostics>>(
     '/api/opencode/accounts/diagnostics'
   )
-  return res.data
+  return requireSuccessfulOpenCodeResponse(
+    res.data,
+    'Failed to load OpenCode account diagnostics'
+  )
 }
 
 export async function createOpenCodeAccount(request: OpenCodeAccountRequest) {
@@ -29,21 +37,30 @@ export async function createOpenCodeAccount(request: OpenCodeAccountRequest) {
     '/api/opencode/accounts',
     request
   )
-  return res.data
+  return requireSuccessfulOpenCodeResponse(
+    res.data,
+    'Failed to create OpenCode account'
+  )
 }
 
 export async function deleteOpenCodeAccount(id: number) {
   const res = await api.delete<ApiResponse<null>>(
     `/api/opencode/accounts/${id}`
   )
-  return res.data
+  return requireSuccessfulOpenCodeResponse(
+    res.data,
+    'Failed to delete OpenCode account'
+  )
 }
 
 export async function startOpenCodeLogin(id: number) {
   const res = await api.post<ApiResponse<OpenCodeLoginStatus>>(
     `/api/opencode/accounts/${id}/login/start`
   )
-  return res.data
+  return requireSuccessfulOpenCodeResponse(
+    res.data,
+    'Failed to start OpenCode login session'
+  )
 }
 
 export async function getOpenCodeLoginStatus(id: number) {
@@ -51,7 +68,10 @@ export async function getOpenCodeLoginStatus(id: number) {
     `/api/opencode/accounts/${id}/login/status`,
     { disableDuplicate: true }
   )
-  return res.data
+  return requireSuccessfulOpenCodeResponse(
+    res.data,
+    'Failed to load OpenCode login status'
+  )
 }
 
 export async function getOpenCodeLoginScreenshot(id: number) {
@@ -59,7 +79,10 @@ export async function getOpenCodeLoginScreenshot(id: number) {
     `/api/opencode/accounts/${id}/login/screenshot`,
     { disableDuplicate: true }
   )
-  return res.data
+  return requireSuccessfulOpenCodeResponse(
+    res.data,
+    'Failed to capture OpenCode login screenshot'
+  )
 }
 
 export async function clickOpenCodeLogin(
@@ -70,7 +93,10 @@ export async function clickOpenCodeLogin(
     `/api/opencode/accounts/${id}/login/click`,
     request
   )
-  return res.data
+  return requireSuccessfulOpenCodeResponse(
+    res.data,
+    'Failed to click OpenCode login session'
+  )
 }
 
 export async function keyOpenCodeLogin(
@@ -81,33 +107,48 @@ export async function keyOpenCodeLogin(
     `/api/opencode/accounts/${id}/login/key`,
     request
   )
-  return res.data
+  return requireSuccessfulOpenCodeResponse(
+    res.data,
+    'Failed to type into OpenCode login session'
+  )
 }
 
 export async function extractOpenCodeLogin(id: number) {
   const res = await api.post<ApiResponse<OpenCodeAccount>>(
     `/api/opencode/accounts/${id}/login/extract`
   )
-  return res.data
+  return requireSuccessfulOpenCodeResponse(
+    res.data,
+    'Failed to extract OpenCode account material'
+  )
 }
 
 export async function stopOpenCodeLogin(id: number) {
   const res = await api.post<ApiResponse<OpenCodeLoginStatus>>(
     `/api/opencode/accounts/${id}/login/stop`
   )
-  return res.data
+  return requireSuccessfulOpenCodeResponse(
+    res.data,
+    'Failed to stop OpenCode login session'
+  )
 }
 
 export async function refreshOpenCodeQuota(id: number) {
   const res = await api.post<ApiResponse<OpenCodeAccount>>(
     `/api/opencode/accounts/${id}/quota/refresh`
   )
-  return res.data
+  return requireSuccessfulOpenCodeResponse(
+    res.data,
+    'Failed to refresh OpenCode quota'
+  )
 }
 
 export async function activateOpenCodeAccount(id: number) {
   const res = await api.post<ApiResponse<OpenCodeAccount>>(
     `/api/opencode/accounts/${id}/activate`
   )
-  return res.data
+  return requireSuccessfulOpenCodeResponse(
+    res.data,
+    'Failed to activate OpenCode account'
+  )
 }

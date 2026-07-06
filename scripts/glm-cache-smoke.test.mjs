@@ -156,6 +156,42 @@ test("runCacheSmoke never returns raw secrets in the summary", async () => {
   assert.equal(calls.filter((call) => call.url.endsWith("/v1/responses")).length, 3);
 });
 
+test("runCacheSmoke rejects business failures from relay responses with redaction", async () => {
+  const fetcher = async () =>
+    jsonResponse({
+      success: false,
+      message: "relay rejected fixture-relay-secret for session-secret",
+    });
+
+  await assert.rejects(
+    runCacheSmoke({
+      baseURL: "https://new-api.example.test",
+      apiKey: "fixture-relay-secret",
+      adminToken: "",
+      adminCookie: "",
+      adminUserID: "",
+      model: "glm-5.2",
+      promptCacheKey: "session-secret",
+      input: "cache smoke prompt",
+      maxOutputTokens: 16,
+      requestCount: 2,
+      requestDelayMs: 0,
+      usingGroup: "default",
+      ruleName: "codex cli trace",
+      timeoutMs: 1000,
+      fetcher,
+    }),
+    (error) => {
+      const message = String(error.message || "");
+      assert.match(message, /relay rejected/);
+      assert.doesNotMatch(message, /response is not JSON/);
+      assert.doesNotMatch(message, /fixture-relay-secret/);
+      assert.doesNotMatch(message, /session-secret/);
+      return true;
+    },
+  );
+});
+
 function jsonResponse(body) {
   return {
     ok: true,

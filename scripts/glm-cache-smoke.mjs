@@ -207,11 +207,16 @@ async function parseJSONResponse(response, config) {
       `HTTP ${response.status} ${response.statusText || ""}: ${sanitizeText(text, config)}`.trim(),
     );
   }
+  let payload;
   try {
-    return JSON.parse(text || "{}");
+    payload = JSON.parse(text || "{}");
   } catch {
     throw new Error(`response is not JSON: ${sanitizeText(text, config)}`);
   }
+  if (payload && payload.success === false) {
+    throw new Error(sanitizeText(payload.message || "request failed", config));
+  }
+  return payload;
 }
 
 function summarizeResponse(payload) {

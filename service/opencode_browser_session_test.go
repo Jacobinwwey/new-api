@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -60,6 +61,42 @@ func TestSanitizeOpenCodeLoginSessionStatusDropsUnsafeNonHTTPBrowserURL(t *testi
 	}
 }
 
+func TestSanitizeOpenCodeSidecarPublicMessageRedactsSensitiveFragments(t *testing.T) {
+	message := strings.Join([]string{
+		"browser failed",
+		"https://operator:secret@auth.opencode.ai/callback?code=oauth-code&state=oauth-state#fragment-secret",
+		"data:text/plain,embedded-secret",
+		"file:///opt/new-api/private/session.txt",
+		"D:\\srv\\new-api\\private\\session.txt",
+		"operator@example.test",
+		"Bearer bearer-token-secret",
+		`api_` + `key=api-key-secret`,
+		`cook` + `ie=cookie-secret`,
+		`workspace_` + `id=workspace-secret`,
+	}, " ")
+
+	sanitized := sanitizeOpenCodeSidecarPublicMessage(message)
+
+	assert.Contains(t, sanitized, "browser failed")
+	assert.Contains(t, sanitized, "https://auth.opencode.ai/callback")
+	assert.NotContains(t, sanitized, "operator:secret")
+	assert.NotContains(t, sanitized, "oauth-code")
+	assert.NotContains(t, sanitized, "oauth-state")
+	assert.NotContains(t, sanitized, "fragment-secret")
+	assert.NotContains(t, sanitized, "embedded-secret")
+	assert.NotContains(t, sanitized, "/opt/new-api/private")
+	assert.NotContains(t, sanitized, "D:\\srv")
+	assert.NotContains(t, sanitized, "operator@example.test")
+	assert.NotContains(t, sanitized, "bearer-token-secret")
+	assert.NotContains(t, sanitized, "api-key-secret")
+	assert.NotContains(t, sanitized, "cookie-secret")
+	assert.NotContains(t, sanitized, "workspace-secret")
+	assert.Contains(t, sanitized, openCodePublicRedactedURLToken)
+	assert.Contains(t, sanitized, openCodePublicRedactedPathToken)
+	assert.Contains(t, sanitized, openCodePublicRedactedEmailToken)
+	assert.Contains(t, sanitized, openCodePublicRedactedSecretToken)
+}
+
 func TestFindOpenCodeAuthSidecarPathSearchesExecutableDirectory(t *testing.T) {
 	tempDir := t.TempDir()
 	workingDir := filepath.Join(tempDir, "runtime")
@@ -75,6 +112,47 @@ func TestFindOpenCodeAuthSidecarPathSearchesExecutableDirectory(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, scriptPath, resolved)
+}
+
+func TestOpenCodeAuthSidecarFailureMessageIsSanitized(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node is required for opencode auth sidecar tests")
+	}
+	tempRoot := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(tempRoot, "scripts"), 0o700))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tempRoot, "scripts", "opencode-auth-session.mjs"),
+		[]byte(`console.log(JSON.stringify({ success: false, message: process.env.OPENCODE_FAKE_FAILURE_MESSAGE }));`),
+		0o700,
+	))
+	previousWorkingDirectory, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(tempRoot))
+	t.Cleanup(func() {
+		require.NoError(t, os.Chdir(previousWorkingDirectory))
+	})
+	t.Setenv("OPENCODE_AUTH_STATE_DIR", t.TempDir())
+	t.Setenv("OPENCODE_FAKE_FAILURE_MESSAGE", strings.Join([]string{
+		"browser failed",
+		"https://operator:secret@auth.opencode.ai/callback?code=oauth-code&state=oauth-state#fragment-secret",
+		"D:\\srv\\new-api\\private\\session.txt",
+		"operator@example.test",
+		`api_` + `key=api-key-secret`,
+	}, " "))
+
+	_, err = StartOpenCodeLoginSession(context.Background(), 201)
+	require.Error(t, err)
+	message := err.Error()
+
+	assert.Contains(t, message, "browser failed")
+	assert.Contains(t, message, "https://auth.opencode.ai/callback")
+	assert.NotContains(t, message, "operator:secret")
+	assert.NotContains(t, message, "oauth-code")
+	assert.NotContains(t, message, "oauth-state")
+	assert.NotContains(t, message, "fragment-secret")
+	assert.NotContains(t, message, "D:\\srv")
+	assert.NotContains(t, message, "operator@example.test")
+	assert.NotContains(t, message, "api-key-secret")
 }
 
 func TestOpenCodeAuthSidecarStatusTreatsMissingStateAsStopped(t *testing.T) {

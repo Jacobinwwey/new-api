@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -17,6 +18,20 @@ import (
 )
 
 const openCodeAuthURL = "https://opencode.ai/auth"
+
+var (
+	openCodePublicHTTPURLPattern      = regexp.MustCompile(`https?://[^\s"'<>]+`)
+	openCodePublicUnsafeURLPattern    = regexp.MustCompile(`(?i)\b(?:data|file|javascript):[^\s"'<>]+`)
+	openCodePublicBearerPattern       = regexp.MustCompile(`(?i)\bbearer\s+[a-z0-9._-]+`)
+	openCodePublicSecretKVPattern     = regexp.MustCompile(`(?i)\b(api[-_]?key|cookie|workspace[-_]?id|authorization|access_token|refresh_token|id_token|code|state)=([^&\s"'<>]+)`)
+	openCodePublicEmailPattern        = regexp.MustCompile(`[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}`)
+	openCodePublicWindowsPathPattern  = regexp.MustCompile(`(?i)\b[a-z]:\\[^\s"'<>]+`)
+	openCodePublicUnixPathPattern     = regexp.MustCompile(`\B/(?:home|root|opt|var|srv|etc|mnt|tmp|data)/[^\s"'<>]+`)
+	openCodePublicRedactedURLToken    = "<redacted-url>"
+	openCodePublicRedactedSecretToken = "<redacted>"
+	openCodePublicRedactedEmailToken  = "<redacted-email>"
+	openCodePublicRedactedPathToken   = "<redacted-path>"
+)
 
 type OpenCodeLoginSessionStatus struct {
 	AccountID int    `json:"account_id"`
@@ -137,6 +152,7 @@ func runOpenCodeAuthSidecar(ctx context.Context, action string, accountID int, a
 		if message == "" {
 			message = err.Error()
 		}
+		message = sanitizeOpenCodeSidecarPublicMessage(message)
 		return openCodeAuthSidecarResponse{}, fmt.Errorf("opencode auth sidecar failed: %s", message)
 	}
 	var resp openCodeAuthSidecarResponse
@@ -147,6 +163,7 @@ func runOpenCodeAuthSidecar(ctx context.Context, action string, accountID int, a
 		if resp.Message == "" {
 			resp.Message = "opencode auth sidecar returned failure"
 		}
+		resp.Message = sanitizeOpenCodeSidecarPublicMessage(resp.Message)
 		return resp, errors.New(resp.Message)
 	}
 	return resp, nil
@@ -189,6 +206,27 @@ func sanitizeOpenCodeBrowserURL(rawURL string) string {
 	parsed.RawQuery = ""
 	parsed.Fragment = ""
 	return parsed.String()
+}
+
+func sanitizeOpenCodeSidecarPublicMessage(message string) string {
+	message = strings.TrimSpace(message)
+	if message == "" {
+		return ""
+	}
+	message = openCodePublicHTTPURLPattern.ReplaceAllStringFunc(message, func(rawURL string) string {
+		sanitized := sanitizeOpenCodeBrowserURL(rawURL)
+		if sanitized == "" {
+			return openCodePublicRedactedURLToken
+		}
+		return sanitized
+	})
+	message = openCodePublicUnsafeURLPattern.ReplaceAllString(message, openCodePublicRedactedURLToken)
+	message = openCodePublicBearerPattern.ReplaceAllString(message, "Bearer "+openCodePublicRedactedSecretToken)
+	message = openCodePublicSecretKVPattern.ReplaceAllString(message, "${1}="+openCodePublicRedactedSecretToken)
+	message = openCodePublicEmailPattern.ReplaceAllString(message, openCodePublicRedactedEmailToken)
+	message = openCodePublicWindowsPathPattern.ReplaceAllString(message, openCodePublicRedactedPathToken)
+	message = openCodePublicUnixPathPattern.ReplaceAllString(message, openCodePublicRedactedPathToken)
+	return message
 }
 
 func commonDecodeOpenCodeSidecar(output []byte, target *openCodeAuthSidecarResponse) error {

@@ -112,7 +112,7 @@ test("runOpenCodePreflight passes stable diagnostics and summarizes accounts wit
             label: "missing",
             active: false,
             activation_ready: false,
-            credential_integrity: "decrypt_failed",
+            credential_integrity: "decrypt_failed: opencode-api-key-controller-test",
             email_masked: "",
             missing_activation_fields: [`api_${"key"}`, "channel_id"],
           },
@@ -181,6 +181,7 @@ test("runOpenCodePreflight passes stable diagnostics and summarizes accounts wit
   assert.doesNotMatch(encoded, /root-token-secret/);
   assert.doesNotMatch(encoded, /u\*\*\*@example\.test/);
   assert.doesNotMatch(encoded, /api_key/);
+  assert.doesNotMatch(encoded, /opencode-api-key-controller-test/);
   assert.doesNotMatch(encoded, /new-api\.example\.test/);
 });
 

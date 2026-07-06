@@ -9,6 +9,7 @@ const DEFAULT_MIN_ACTIVATION_READY_ACCOUNTS = 0;
 const DEFAULT_MIN_ACTIVE_ACCOUNTS = 0;
 const DEFAULT_MIN_ACTIVE_READY_ACCOUNTS = 0;
 const CREDENTIAL_KEY_SOURCES = new Set(["crypto_secret", "session_secret_fallback"]);
+const CREDENTIAL_INTEGRITY_CATEGORIES = new Set(["ok", "decrypt_failed", "unknown"]);
 const AFFINITY_STATS_PROBE = {
   ruleName: "codex cli trace",
   usingGroup: "default",
@@ -401,7 +402,7 @@ function summarizeAccounts(data) {
     if (account?.activation_ready) activationReady += 1;
     if (account?.active) active += 1;
     if (account?.active && account?.activation_ready) activeReady += 1;
-    const integrity = String(account?.credential_integrity || "unknown");
+    const integrity = credentialIntegrityCategory(account?.credential_integrity);
     credentialIntegrity[integrity] = (credentialIntegrity[integrity] || 0) + 1;
     for (const field of account?.missing_activation_fields || []) {
       const key = missingActivationFieldCategory(field);
@@ -417,6 +418,18 @@ function summarizeAccounts(data) {
     credential_integrity: credentialIntegrity,
     missing_activation_fields: missingActivationFields,
   };
+}
+
+function credentialIntegrityCategory(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return "unknown";
+  if (CREDENTIAL_INTEGRITY_CATEGORIES.has(normalized)) {
+    return normalized;
+  }
+  if (normalized.includes("decrypt")) {
+    return "decrypt_failed";
+  }
+  return "other";
 }
 
 function missingActivationFieldCategory(field) {

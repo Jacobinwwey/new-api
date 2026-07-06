@@ -535,7 +535,7 @@ Remote clean artifact rollout:
   clean rollout helper remote dry-run for pushed commit 2a9baeed passed git_clone/revision/node_scripts and skipped apply
   clean rollout helper full remote apply for pushed commit 3cbf0e5f passed git_clone/revision/node_scripts/go_targeted/web_default_build/web_classic_build/go_build/service_contract/backup/install/restart/http_smoke
   independent post-apply smoke confirmed service active, local HTTP status OK, runtime script syntax OK, cache contract gate markers present, and sidecar empty-state status OK
-  local Tailscale link preflight now fails the stale managed target with redacted evidence: target present but expired/offline, zero Tailscale/TUN pongs, and TCP timeout on the New API and Deskflow ports
+  earlier local Tailscale link preflight failed the stale managed target with redacted evidence: target present but expired/offline, zero Tailscale/TUN pongs, and TCP timeout on the New API and Deskflow ports
   local OpenCode live E2E runner tests and syntax check pass; clean rollout helper now includes that gate before future artifact switches
   local OpenCode live E2E skipped-stage hardening tests pass: unexpected skipped OpenCode/cache stages fail acceptance while intentional blocked/disabled skips remain diagnostic
   local OpenCode live E2E stage-exception tests pass: thrown stage errors become redacted failed summaries and preserve fail-fast behavior
@@ -1161,7 +1161,7 @@ Sidecar smoke：
   clean rollout helper 针对已推送提交 2a9baeed 的远端 dry-run 通过 git_clone/revision/node_scripts，并跳过 apply
   clean rollout helper 针对已推送提交 3cbf0e5f 的远端完整 apply 通过 git_clone/revision/node_scripts/go_targeted/web_default_build/web_classic_build/go_build/service_contract/backup/install/restart/http_smoke
   apply 后独立 smoke 确认服务 active、本机 HTTP status OK、runtime 脚本语法 OK、cache contract gate 标记存在、sidecar 空状态 status OK
-  本地 Tailscale link preflight 现在会用脱敏证据让陈旧托管目标失败：目标存在但 expired/offline，Tailscale/TUN pong 为 0，New API 与 Deskflow 端口 TCP timeout
+  此前本地 Tailscale link preflight 曾用脱敏证据确认陈旧托管目标会失败：目标存在但 expired/offline，Tailscale/TUN pong 为 0，New API 与 Deskflow 端口 TCP timeout
   本地 OpenCode live E2E runner 测试与语法检查通过；clean rollout helper 后续切换 artifact 前会覆盖该 gate
   本地 OpenCode live E2E skipped-stage hardening 测试通过：意外 skipped 的 OpenCode/cache stage 会让验收失败，主动 blocked/disabled 的 skip 仍保留诊断语义
   本地 OpenCode live E2E stage-exception 测试通过：stage 抛出的异常会变成脱敏 failed summary，并保持 fail-fast 行为

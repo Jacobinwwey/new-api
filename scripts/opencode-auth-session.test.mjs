@@ -168,3 +168,61 @@ test("purge action removes account state and browser profile artifacts", async (
   assert.equal(existsSync(stateFile), false);
   assert.equal(existsSync(profileDir), false);
 });
+
+test("purge action rejects invalid state without deleting browser profile artifacts", async () => {
+  const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-invalid-state-test-"));
+  const accountID = 43;
+  const stateFile = path.join(stateDir, `account-${accountID}.json`);
+  const profileDir = path.join(stateDir, `profile-${accountID}`);
+  await fs.mkdir(profileDir, { recursive: true });
+  await fs.writeFile(path.join(profileDir, "profile-cookie-store"), "browser profile residue");
+  await fs.writeFile(stateFile, "{invalid json");
+
+  const result = await runSidecar([
+    "--action",
+    "purge",
+    "--account-id",
+    String(accountID),
+    "--state-dir",
+    stateDir,
+  ]);
+
+  assert.equal(result.success, false);
+  assert.match(result.message, /opencode auth state for account 43 is invalid/);
+  assert.equal(existsSync(stateFile), true);
+  assert.equal(existsSync(profileDir), true);
+});
+
+test("status action treats only missing state as a stopped session", async () => {
+  const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-missing-state-test-"));
+
+  const result = await runSidecar([
+    "--action",
+    "status",
+    "--account-id",
+    "44",
+    "--state-dir",
+    stateDir,
+  ]);
+
+  assert.equal(result.success, true);
+  assert.equal(result.status.status, "stopped");
+});
+
+test("status action rejects invalid state", async () => {
+  const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-status-invalid-state-test-"));
+  const accountID = 45;
+  await fs.writeFile(path.join(stateDir, `account-${accountID}.json`), "{invalid json");
+
+  const result = await runSidecar([
+    "--action",
+    "status",
+    "--account-id",
+    String(accountID),
+    "--state-dir",
+    stateDir,
+  ]);
+
+  assert.equal(result.success, false);
+  assert.match(result.message, /opencode auth state for account 45 is invalid/);
+});

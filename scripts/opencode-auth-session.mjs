@@ -55,8 +55,26 @@ function profileDir(stateDir, accountID) {
 
 async function readState(stateDir, accountID) {
   const file = statePath(stateDir, accountID);
-  const raw = await fs.readFile(file, "utf8");
-  return JSON.parse(raw);
+  let raw;
+  try {
+    raw = await fs.readFile(file, "utf8");
+  } catch (error) {
+    if (error && error.code === "ENOENT") {
+      const missing = new Error("opencode auth state is missing");
+      missing.code = "ENOENT";
+      throw missing;
+    }
+    throw new Error(`opencode auth state for account ${accountID} is unreadable`);
+  }
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new Error(`opencode auth state for account ${accountID} is invalid`);
+  }
+}
+
+function isMissingStateError(error) {
+  return error && error.code === "ENOENT";
 }
 
 async function writeState(stateDir, accountID, state) {
@@ -363,7 +381,8 @@ async function startSession(args) {
         return;
       }
     }
-  } catch {
+  } catch (error) {
+    if (!isMissingStateError(error)) throw error;
     /* no prior session */
   }
 
@@ -446,7 +465,8 @@ async function statusSession(args) {
   let state;
   try {
     state = await readState(args["state-dir"], accountID);
-  } catch {
+  } catch (error) {
+    if (!isMissingStateError(error)) throw error;
     json({ success: true, status: { account_id: accountID, running: false, status: "stopped" } });
     return;
   }
@@ -514,7 +534,8 @@ async function stopSession(args) {
   let state;
   try {
     state = await readState(stateDir, accountID);
-  } catch {
+  } catch (error) {
+    if (!isMissingStateError(error)) throw error;
     json({ success: true, status: { account_id: accountID, running: false, status: "stopped" } });
     return;
   }
@@ -528,7 +549,8 @@ async function purgeSession(args) {
   let state;
   try {
     state = await readState(stateDir, accountID);
-  } catch {
+  } catch (error) {
+    if (!isMissingStateError(error)) throw error;
     state = {};
   }
   await Promise.all([stopProcess(state.browserPid), stopProcess(state.xvfbPid)]);

@@ -72,18 +72,19 @@ The current `main` is missing the pieces required by the requested OpenCode conn
 | Remote Web authorization, not local CLI | No remote browser subsystem exists | Need remote browser lifecycle, viewport bridge, extraction API | Add Root-only CDP-backed isolated browser sessions |
 | Google login supported | Current New API OAuth is for New API users, not OpenCode account import | Must not collect Google password | Let operator log in on official OpenCode/Google pages |
 | Multi-account switching | Channels support multiple keys/channels manually | No account inventory or activate action | Add account table and bind accounts to channels |
-| Maximize cache-hit accounting for `glm-5.2` | Relay usage conversion exists, but current fork only maps cache details into `InputTokensDetails` in `UsageFromChatUsage` | Accounting compatibility should preserve both Chat and Responses usage detail fields | Land cache accounting parity tests before connector activation tests |
+| Maximize cache-hit accounting for `glm-5.2` | Relay usage conversion now preserves cached-token details across Chat-style and Responses-style fields, and channel-affinity usage stats record cache-hit counters | Real warm-cache behavior still needs live OpenCode credentials and repeated `glm-5.2` calls | Keep the compatibility tests in-repo, then verify live cache-hit accounting after account import and activation |
 | Robust secret handling | RootAuth and secure verification patterns exist | No reversible encryption for imported provider secrets | Add AES-GCM secret encryption using stable `CRYPTO_SECRET` |
 | No clipboard limit change | Unrelated to this connector | No action required | Preserve existing Deskflow-related choice outside this repository |
 
-### Remote-Validated Work Not Yet Landed in This Fork
+### Cache-Related Work Status
 
-The remote service previously validated two cache-related fixes and `glm-5.2` cache hit behavior. They are not represented in this fork's current `main`:
+The current fork now represents the Responses usage compatibility fix that previously existed only in the remote work stream:
 
-- A replay/cache-key hardening patch around request-body cache key generation. The expected file path from the remote working tree is not present in the fork's current `main`.
-- A Responses usage compatibility fix where chat usage cache details are preserved for both chat-compatible accounting and Responses-compatible accounting.
+- `UsageFromChatUsage` preserves cache details in both `PromptTokensDetails` and `InputTokensDetails`.
+- Channel-affinity usage-cache stats record cached-token and prompt-cache-hit counters with relay-format-aware rate modes.
+- Tests cover both the compatibility conversion and usage-cache observation paths.
 
-This matters because OpenCode account switching must not regress cache hit reporting. The connector should be implemented only after the cache accounting behavior is landed and covered by tests in this repository.
+The remaining cache question is not a repository representation issue; it is a live upstream behavior question. Real `glm-5.2` warm-cache verification still requires an imported OpenCode subscription account and repeated calls through New API. A separate replay/cache-key hardening patch from the old remote working tree has not been mapped to a current fork path, so it should be validated during the live E2E instead of assumed complete.
 
 ### Recommended Architecture
 
@@ -254,6 +255,7 @@ End-to-end verification:
 | Stale browser state handling | Implemented | `login/start` now reuses an existing browser only when the recorded PID is alive and the CDP endpoint is reachable; stale PID/state combinations fall through to a fresh browser startup. |
 | Stop lifecycle cleanup | Implemented | `login/stop` now waits for recorded browser/Xvfb processes to exit after SIGTERM and falls back to a force kill, reducing stale browser process leakage before returning `stopped`. |
 | Delete lifecycle cleanup | Implemented locally | Deleting an OpenCode account now purges the account's browser session artifacts before deleting the database row: the sidecar stops recorded processes and removes the account state file plus browser profile directory. If purge fails, the account is preserved so the operator can retry cleanup instead of losing the durable handle while browser artifacts may still exist. |
+| Sidecar state corruption handling | Implemented locally | Missing state remains an idempotent `stopped` session, but unreadable or invalid state now returns a structured sidecar failure. Start/status/stop/purge no longer treat corrupt state as "no session", so account deletion fails closed instead of deleting the durable row while an orphaned browser profile or process may remain. |
 | Screenshot transient retry | Implemented | `login/screenshot` now retries transient browser/CDP screenshot failures for this read-only action, matching the remote smoke finding where an immediate retry succeeded after one screenshot failure. |
 | Sidecar symlinked artifact entrypoint | Implemented and locally verified | The sidecar CLI now resolves `process.argv[1]` through realpath before comparing it with `import.meta.url`, so executing the script through the `new-api-current` symlink still runs `main()`. This closes a deployment-only false-smoke risk where direct release paths worked but symlinked artifact paths produced no output. |
 | Extractor | Implemented | Candidate-based scanner covers OpenCode-domain cookies, local/session storage, and JSON responses; tests cover ranking and empty-state rejection. |
@@ -312,6 +314,8 @@ Stop now owns process cleanup more completely. It no longer returns immediately 
 Account deletion now participates in the same lifecycle boundary. The controller purges the account's browser session before deleting the durable row; the sidecar stops recorded processes and removes the account state file plus browser profile directory. If purge fails, deletion fails closed and leaves the account available for retry. The tradeoff is that a broken sidecar can temporarily block deletion, but that is safer than deleting the only durable account handle while remote browser artifacts may still exist.
 
 This delete-purge hardening is currently local and repository-verified only. It should not be treated as live on the remote service until the remote Tailscale peer key issue is resolved and a clean artifact rollout plus HTTP/sidecar smoke validation is repeated.
+
+State corruption now has its own lifecycle semantics. A missing state file still means no login browser has been started and returns `stopped`; an unreadable or invalid state file is a real integrity failure. Start, status, stop, and purge now surface that failure instead of silently falling through. This deliberately favors a noisy, retryable operator state over deleting the persistent account while potentially leaving an untracked browser profile or process behind.
 
 Screenshot capture now retries transient browser/CDP failures. This is intentionally scoped to screenshot because it is a read-only operation; click and key input remain single-shot to avoid repeating user actions. The change addresses the observed remote behavior where authorization-page screenshot failed once but succeeded immediately on retry.
 
@@ -538,18 +542,19 @@ https://opencode.ai/auth
 | 远端 Web 授权，不是本地 CLI | 当前没有远端浏览器子系统 | 需要浏览器生命周期、画面桥、提取 API | 新增 Root-only CDP 隔离浏览器会话 |
 | 支持 Google 登录 | 当前 New API OAuth 用于 New API 用户，不用于导入 OpenCode 账号 | 不能采集 Google 密码 | 让操作者在官方 OpenCode/Google 页面完成登录 |
 | 多账号快速切换 | 渠道支持多个 key/channel，但主要靠手工维护 | 没有账号库存和 activate 动作 | 增加账号表，并绑定账号到渠道 |
-| 最大化 `glm-5.2` cache-hit 统计 | relay usage 转换存在，但当前 fork 的 `UsageFromChatUsage` 只把 cache details 写入 `InputTokensDetails` | 计费兼容层应同时保留 Chat 与 Responses 侧 usage detail | 先合入 cache accounting parity 测试与修复，再做连接器激活测试 |
+| 最大化 `glm-5.2` cache-hit 统计 | relay usage 转换现在会在 Chat 风格与 Responses 风格字段中同时保留 cached-token details，channel-affinity usage stats 也会记录 cache-hit 计数 | 真实 warm-cache 行为仍需要真实 OpenCode 凭证和多轮 `glm-5.2` 调用验证 | 保留仓库内兼容性测试，并在账号导入与激活后执行真实 cache-hit accounting 验证 |
 | 稳健处理 secret | 已有 RootAuth 和安全验证模式 | 没有导入 provider secret 所需的可逆加密 | 基于稳定 `CRYPTO_SECRET` 增加 AES-GCM secret 加密 |
 | 不限制 clipboardSharingSize | 与本连接器无关 | 不需要动作 | Deskflow 相关选择保留在本仓库之外 |
 
-### 远端已验证但尚未落入本 fork 的工作
+### Cache 相关工作状态
 
-远端服务此前已经验证过两类 cache 相关修复以及 `glm-5.2` cache hit 行为。但这些内容尚未体现在当前 fork 的 `main` 中：
+当前 fork 已经包含此前只在远端工作流中验证过的 Responses usage 兼容修复：
 
-- request-body cache key 生成相关的 replay/cache-key 加固补丁。远端工作树中的预期文件路径在当前 fork `main` 中不存在。
-- Responses usage 兼容修复：将 chat usage 中的 cache details 同时保留给 chat-compatible 计费与 Responses-compatible 计费。
+- `UsageFromChatUsage` 会在 `PromptTokensDetails` 与 `InputTokensDetails` 中同时保留 cache details。
+- channel-affinity usage-cache stats 会按 relay format 记录 cached-token 与 prompt-cache-hit 计数。
+- 仓库测试已经覆盖 compatibility conversion 与 usage-cache observation 路径。
 
-这点很关键，因为 OpenCode 账号切换不能让 cache hit 统计倒退。账号连接器应在 cache accounting 行为进入本仓库并有测试覆盖之后再继续实现。
+剩余 cache 问题不再是“仓库是否已有代码表示”，而是真实上游行为验证问题。真实 `glm-5.2` warm-cache 验证仍需要导入 OpenCode 订阅账号，并通过 New API 多轮调用。旧远端工作树中的 replay/cache-key 加固补丁尚未映射到当前 fork 的具体路径，因此应在真实 E2E 中验证 request-body cache key 稳定性，而不是假定已经完成。
 
 ### 推荐架构
 
@@ -720,6 +725,7 @@ web/default/src/routes/_authenticated/opencode-accounts/index.tsx
 | 陈旧浏览器状态处理 | 已实现 | `login/start` 现在只会在记录的 PID 存活且 CDP endpoint 可达时复用既有浏览器；陈旧 PID/state 组合会继续走新浏览器启动流程。 |
 | Stop 生命周期清理 | 已实现 | `login/stop` 现在会在 SIGTERM 后等待记录的 browser/Xvfb 进程退出，并在未退出时使用强制清理兜底，减少返回 `stopped` 前遗留浏览器进程的概率。 |
 | Delete 生命周期清理 | 本地已实现 | 删除 OpenCode 账号现在会先 purge 该账号的浏览器会话 artifact，再删除数据库记录：sidecar 会停止记录的进程，并删除账号 state 文件与浏览器 profile 目录。如果 purge 失败，账号会保留，操作者可以重试清理，避免在可能仍有浏览器 artifact 存在时丢失持久化操作句柄。 |
+| Sidecar state 损坏处理 | 本地已实现 | state 文件缺失仍然是幂等的 `stopped` 会话，但 state 不可读或 JSON 无效现在会返回结构化 sidecar 失败。start/status/stop/purge 不再把损坏 state 当成“没有会话”，因此账号删除会 fail closed，避免在可能仍有孤立浏览器 profile 或进程时删除持久账号行。 |
 | Screenshot 瞬时失败重试 | 已实现 | `login/screenshot` 现在会对浏览器/CDP 的瞬时截图失败执行重试；该动作是只读操作，符合远端 smoke 中 screenshot 首次失败、立即重试成功的实际现象。 |
 | Sidecar symlinked artifact entrypoint | 已实现并完成本地验证 | sidecar CLI 现在会先对 `process.argv[1]` 做 realpath 解析，再与 `import.meta.url` 比较，因此通过 `new-api-current` symlink 执行脚本时仍会运行 `main()`。这修复了一个只在部署态出现的 false-smoke 风险：直接 release 路径可运行，但 symlink artifact 路径无输出。 |
 | Extractor | 已实现 | 候选扫描覆盖 OpenCode 域 cookie、local/session storage 与 JSON responses；测试覆盖排序和空状态拒绝。 |
@@ -778,6 +784,8 @@ stop 现在更完整地拥有进程清理语义。它不再发送 SIGTERM 后立
 账号删除现在也进入同一生命周期边界。controller 会在删除持久账号行前先 purge 该账号的浏览器会话；sidecar 会停止记录的进程，并删除账号 state 文件与浏览器 profile 目录。如果 purge 失败，删除会 fail closed，并保留账号以便重试。这里的取舍是：sidecar 故障可能暂时阻塞删除，但这比在远端浏览器 artifact 可能仍存在时删除唯一的持久账号句柄更安全。
 
 当前 delete-purge hardening 只完成本地与仓库级验证，不能视为已经在远端服务生效。必须等远端 Tailscale peer key 问题修复后，重新执行 clean artifact 上线、HTTP smoke 与 sidecar smoke 验证。
+
+state 损坏现在也有明确的生命周期语义。state 文件缺失仍表示尚未启动登录浏览器，返回 `stopped`；state 不可读或 JSON 无效则是完整性失败。start、status、stop、purge 现在都会暴露该失败，而不是静默进入“无会话”路径。这个选择刻意偏向有噪声但可重试的操作者状态，而不是在可能留下未跟踪浏览器 profile 或进程时删除持久账号。
 
 截图捕获现在会对浏览器/CDP 的瞬时失败执行重试。这个重试刻意只用于 screenshot，因为它是只读操作；click 和 key input 仍然保持单次执行，避免重复用户动作。该修复对应远端授权页 smoke 中 screenshot 首次失败、立即重试成功的实际现象。
 

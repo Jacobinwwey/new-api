@@ -10,11 +10,13 @@ import { promisify } from "node:util";
 import vm from "node:vm";
 
 import {
+  browserProcessArgsMatchState,
   buildOpenCodeBrowserStateExpression,
   isDirectScriptExecution,
   retryTransientBrowserAction,
   sanitizeBrowserStatusURL,
   shouldProbeOpenCodeResourceURL,
+  xvfbProcessArgsMatchState,
 } from "./opencode-auth-session.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -147,14 +149,41 @@ test("buildOpenCodeBrowserStateExpression collects same-site JSON responses", as
 });
 
 test("isDirectScriptExecution accepts symlinked argv script paths", () => {
-  const realScript = "/tmp/new-api-release/scripts/opencode-auth-session.mjs";
-  const symlinkScript = "/tmp/new-api-current/scripts/opencode-auth-session.mjs";
+  const realScript = "/workspace/release-a/scripts/opencode-auth-session.mjs";
+  const symlinkScript = "/workspace/current/scripts/opencode-auth-session.mjs";
   const resolvePath = (candidate) => (candidate === symlinkScript ? realScript : candidate);
 
   assert.equal(
     isDirectScriptExecution(pathToFileURL(realScript).href, symlinkScript, resolvePath),
     true,
   );
+});
+
+test("recorded process matching only accepts sidecar-owned browser processes", () => {
+  const state = {
+    port: 43123,
+    profile: "/tmp/opencode-auth/profile-7",
+    display: ":207",
+  };
+
+  assert.equal(
+    browserProcessArgsMatchState(
+      [
+        "chromium",
+        "--remote-debugging-port=43123",
+        "--remote-debugging-address=127.0.0.1",
+        "--user-data-dir=/tmp/opencode-auth/profile-7",
+      ],
+      state,
+    ),
+    true,
+  );
+  assert.equal(browserProcessArgsMatchState(["node", "unrelated-test-process"], state), false);
+  assert.equal(browserProcessArgsMatchState(["chromium", "--remote-debugging-port=43123"], state), false);
+
+  assert.equal(xvfbProcessArgsMatchState(["Xvfb", ":207", "-screen", "0", "1280x900x24"], state), true);
+  assert.equal(xvfbProcessArgsMatchState(["Xvfb", ":208", "-screen", "0", "1280x900x24"], state), false);
+  assert.equal(xvfbProcessArgsMatchState(["node", ":207"], state), false);
 });
 
 test("purge action removes account state and browser profile artifacts", async () => {

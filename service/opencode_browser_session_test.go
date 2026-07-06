@@ -185,12 +185,13 @@ func TestOpenCodeAuthSidecarStartReportsInvalidChromiumBinary(t *testing.T) {
 	}
 	scriptPath, err := filepath.Abs(filepath.Join("..", "scripts", "opencode-auth-session.mjs"))
 	require.NoError(t, err)
+	stateDir := t.TempDir()
 
 	command := exec.Command("node",
 		scriptPath,
 		"--action", "start",
 		"--account-id", "198",
-		"--state-dir", t.TempDir(),
+		"--state-dir", stateDir,
 		"--url", "about:blank",
 	)
 	command.Env = append(os.Environ(), "CHROMIUM_BIN=definitely-missing-opencode-browser-binary")
@@ -203,6 +204,7 @@ func TestOpenCodeAuthSidecarStartReportsInvalidChromiumBinary(t *testing.T) {
 	require.False(t, response.Success, string(output))
 	assert.Contains(t, response.Message, "chromium")
 	assert.Contains(t, response.Message, "definitely-missing-opencode-browser-binary")
+	assert.NoFileExists(t, filepath.Join(stateDir, "account-198.json"))
 }
 
 func TestOpenCodeAuthSidecarStartDoesNotReusePidWithoutCDP(t *testing.T) {

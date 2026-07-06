@@ -240,6 +240,40 @@ async function stopProcess(pid) {
   await waitForProcessExit(pid, 1000);
 }
 
+async function readProcessArgs(pid) {
+  if (!pid || os.platform() === "win32") return [];
+  try {
+    const raw = await fs.readFile(`/proc/${pid}/cmdline`, "utf8");
+    return raw.split("\0").filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+export function browserProcessArgsMatchState(args, state) {
+  const values = Array.isArray(args) ? args.map(String) : [];
+  const profile = String(state?.profile || "");
+  const port = Number(state?.port || 0);
+  if (!profile || !port) return false;
+  return values.includes(`--user-data-dir=${profile}`) && values.includes(`--remote-debugging-port=${port}`);
+}
+
+export function xvfbProcessArgsMatchState(args, state) {
+  const values = Array.isArray(args) ? args.map(String) : [];
+  const display = String(state?.display || "");
+  if (!display) return false;
+  return values[0]?.includes("Xvfb") && values.includes(display);
+}
+
+async function stopRecordedSessionProcesses(state) {
+  const browserArgs = await readProcessArgs(state?.browserPid);
+  const xvfbArgs = await readProcessArgs(state?.xvfbPid);
+  await Promise.all([
+    browserProcessArgsMatchState(browserArgs, state) ? stopProcess(state.browserPid) : Promise.resolve(),
+    xvfbProcessArgsMatchState(xvfbArgs, state) ? stopProcess(state.xvfbPid) : Promise.resolve(),
+  ]);
+}
+
 async function allocatePort() {
   return new Promise((resolve, reject) => {
     const server = net.createServer();
@@ -397,6 +431,7 @@ async function startSession(args) {
         json({ success: true, status: existingStatus });
         return;
       }
+      await stopRecordedSessionProcesses(existing);
     }
   } catch (error) {
     if (!isMissingStateError(error)) throw error;
@@ -438,12 +473,19 @@ async function startSession(args) {
   const browserStartup = watchProcessStartup(browser, "chromium", browserCommand);
   browser.unref();
 
-  const startupChecks = [waitForBrowser(port), browserStartup.promise];
-  if (xvfbStartup) startupChecks.push(xvfbStartup.promise);
-  const startupResult = await Promise.race(startupChecks);
-  if (startupResult instanceof Error) throw startupResult;
-  browserStartup.ready();
-  if (xvfbStartup) xvfbStartup.ready();
+  try {
+    const startupChecks = [waitForBrowser(port), browserStartup.promise];
+    if (xvfbStartup) startupChecks.push(xvfbStartup.promise);
+    const startupResult = await Promise.race(startupChecks);
+    if (startupResult instanceof Error) throw startupResult;
+    browserStartup.ready();
+    if (xvfbStartup) xvfbStartup.ready();
+  } catch (error) {
+    browserStartup.ready();
+    if (xvfbStartup) xvfbStartup.ready();
+    await Promise.all([stopProcess(browser.pid), stopProcess(xvfb?.pid)]);
+    throw error;
+  }
   const state = {
     accountID,
     port,

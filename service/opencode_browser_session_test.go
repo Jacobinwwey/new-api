@@ -249,11 +249,12 @@ func TestOpenCodeAuthSidecarStopWaitsForRecordedProcessExit(t *testing.T) {
 	scriptPath, err := filepath.Abs(filepath.Join("..", "scripts", "opencode-auth-session.mjs"))
 	require.NoError(t, err)
 	stateDir := t.TempDir()
+	profileDir := filepath.Join(stateDir, "profile-200")
 
 	child := exec.Command("node", "-e", `
 		process.on("SIGTERM", () => setTimeout(() => process.exit(0), 350));
 		setInterval(() => {}, 1000);
-	`)
+	`, "--remote-debugging-port=9", "--user-data-dir="+profileDir)
 	require.NoError(t, child.Start())
 	waitDone := make(chan struct{})
 	go func() {
@@ -274,7 +275,7 @@ func TestOpenCodeAuthSidecarStopWaitsForRecordedProcessExit(t *testing.T) {
 		"accountID": 200,
 		"port": 9,
 		"display": ":400",
-		"profile": "",
+		"profile": `+strconv.Quote(profileDir)+`,
 		"browserPid": `+strconv.Itoa(child.Process.Pid)+`,
 		"xvfbPid": 0,
 		"startedAt": 1
@@ -301,4 +302,62 @@ func TestOpenCodeAuthSidecarStopWaitsForRecordedProcessExit(t *testing.T) {
 			return false
 		}
 	}, 100*time.Millisecond, 10*time.Millisecond)
+}
+
+func TestOpenCodeAuthSidecarStopDoesNotKillUnmatchedRecordedPid(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node is required for opencode auth sidecar tests")
+	}
+	scriptPath, err := filepath.Abs(filepath.Join("..", "scripts", "opencode-auth-session.mjs"))
+	require.NoError(t, err)
+	stateDir := t.TempDir()
+
+	child := exec.Command("node", "-e", `
+		process.on("SIGTERM", () => process.exit(23));
+		setInterval(() => {}, 1000);
+	`)
+	require.NoError(t, child.Start())
+	waitDone := make(chan struct{})
+	go func() {
+		_ = child.Wait()
+		close(waitDone)
+	}()
+	t.Cleanup(func() {
+		select {
+		case <-waitDone:
+			return
+		default:
+			_ = child.Process.Kill()
+		}
+		<-waitDone
+	})
+
+	require.NoError(t, os.WriteFile(filepath.Join(stateDir, "account-201.json"), []byte(`{
+		"accountID": 201,
+		"port": 9,
+		"display": ":401",
+		"profile": `+strconv.Quote(filepath.Join(stateDir, "profile-201"))+`,
+		"browserPid": `+strconv.Itoa(child.Process.Pid)+`,
+		"xvfbPid": 0,
+		"startedAt": 1
+	}`), 0o600))
+
+	output, err := exec.Command("node",
+		scriptPath,
+		"--action", "stop",
+		"--account-id", "201",
+		"--state-dir", stateDir,
+		"--url", openCodeAuthURL,
+	).Output()
+	require.NoError(t, err)
+
+	var response openCodeAuthSidecarResponse
+	require.NoError(t, common.Unmarshal(output, &response))
+	require.True(t, response.Success, string(output))
+
+	select {
+	case <-waitDone:
+		t.Fatal("unmatched recorded pid was stopped")
+	case <-time.After(150 * time.Millisecond):
+	}
 }

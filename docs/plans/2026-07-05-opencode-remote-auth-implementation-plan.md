@@ -276,8 +276,8 @@ End-to-end verification:
 | Browser startup cleanup | Implemented and remotely applied | Browser startup failures now stop any browser/Xvfb process spawned by the failed attempt before returning a structured error. When a recorded browser PID is alive but CDP is unreachable, `login/start` only stops it if the live process command line matches the recorded sidecar-owned browser profile and debugging port, avoiding arbitrary PID kills from corrupt state while still cleaning real stale browser sessions. Pushed commit `b6168a5c` passed clean rollout verification and remote apply, and post-apply smoke confirmed the deployed sidecar still returns the expected empty stopped status. |
 | Sidecar path resolution | Implemented and remotely verified | The Go service now resolves the sidecar script from both the process working directory and the running executable directory, walking upward from each. This keeps remote browser operations stable when systemd working directory and clean artifact directory differ; the pushed `main` artifact verified this path through remote build, focused tests, restart, HTTP smoke, and sidecar empty-state status. |
 | Stale browser state handling | Implemented | `login/start` now reuses an existing browser only when the recorded PID is alive and the CDP endpoint is reachable; stale PID/state combinations fall through to a fresh browser startup. |
-| Stop lifecycle cleanup | Implemented | `login/stop` now waits for recorded browser/Xvfb processes to exit after SIGTERM and falls back to a force kill, reducing stale browser process leakage before returning `stopped`. |
-| Delete lifecycle cleanup | Implemented locally | Deleting an OpenCode account now purges the account's browser session artifacts before deleting the database row: the sidecar stops recorded processes and removes the account state file plus browser profile directory. If purge fails, the account is preserved so the operator can retry cleanup instead of losing the durable handle while browser artifacts may still exist. |
+| Stop lifecycle cleanup | Implemented locally | `login/stop` now reads the recorded browser/Xvfb command line and stops only processes whose complete argv tokens match the sidecar-owned browser profile/debugging port or Xvfb display. It then waits after SIGTERM and falls back to force kill. This keeps corrupt-but-valid state from turning an arbitrary live PID into a kill target while still reducing stale browser leakage before returning `stopped`. |
+| Delete lifecycle cleanup | Implemented locally | Deleting an OpenCode account now purges the account's browser session artifacts before deleting the database row: the sidecar uses the same recorded-process ownership gate before stopping browser/Xvfb, then removes the account state file plus browser profile directory. If purge fails, the account is preserved so the operator can retry cleanup instead of losing the durable handle while browser artifacts may still exist. |
 | Delete missing-account guard | Implemented locally | Delete now confirms the durable OpenCode account row exists before invoking sidecar purge. Missing account IDs return the same sanitized business error used by update/extract/quota flows and do not trigger browser artifact cleanup for an unowned account ID. |
 | Sidecar state corruption handling | Implemented locally | Missing state remains an idempotent `stopped` session, but unreadable or invalid state now returns a structured sidecar failure. Start/status/stop/purge no longer treat corrupt state as "no session", so account deletion fails closed instead of deleting the durable row while an orphaned browser profile or process may remain. |
 | Screenshot transient retry | Implemented | `login/screenshot` now retries transient browser/CDP screenshot failures for this read-only action, matching the remote smoke finding where an immediate retry succeeded after one screenshot failure. |
@@ -345,9 +345,9 @@ The latest sidecar path-resolution hardening is deployed from pushed `main` comm
 
 Existing browser reuse is now gated by CDP reachability, not by PID liveness alone. A process ID can remain alive or be reused while the recorded debugging port is dead; treating that as a reusable session makes the UI report a stopped session after a start request. The sidecar now continues into a fresh startup unless the existing session is actually reachable.
 
-Stop now owns process cleanup more completely. It no longer returns immediately after sending SIGTERM; it waits for recorded browser/Xvfb processes to exit and uses a force-kill fallback when they do not. This makes lifecycle smoke tests and repeated login attempts less likely to accumulate stale headless browser processes.
+Stop now owns process cleanup more completely, but cleanup is no longer PID-only. The sidecar first checks that the live process command line still matches the recorded browser profile/debugging port or Xvfb display as complete argv tokens, then sends SIGTERM, waits, and uses a force-kill fallback when needed. The explicit tradeoff is that a malformed or externally edited state file may leave an unmatched process for manual cleanup, but it cannot make New API kill an unrelated process that reused or was injected into the recorded PID slot.
 
-Account deletion now participates in the same lifecycle boundary. The controller purges the account's browser session before deleting the durable row; the sidecar stops recorded processes and removes the account state file plus browser profile directory. If purge fails, deletion fails closed and leaves the account available for retry. The tradeoff is that a broken sidecar can temporarily block deletion, but that is safer than deleting the only durable account handle while remote browser artifacts may still exist.
+Account deletion now participates in the same lifecycle boundary. The controller purges the account's browser session before deleting the durable row; the sidecar applies the same process-ownership check before stopping browser/Xvfb, then removes the account state file plus browser profile directory. If purge fails, deletion fails closed and leaves the account available for retry. The tradeoff is that a broken sidecar can temporarily block deletion, but that is safer than deleting the only durable account handle while remote browser artifacts may still exist.
 
 Delete now validates ownership before side effects. A missing account ID is a durable-state problem, not a sidecar cleanup request, so the controller returns the sanitized account-not-found business failure before invoking purge. This keeps external browser cleanup scoped to accounts that New API still owns and makes stale UI/API calls retry-safe without deleting arbitrary account-numbered browser artifacts.
 
@@ -464,6 +464,7 @@ go test ./service -run "TestObserveChannelAffinityUsageCacheByRelayFormat" -coun
 go test ./model ./controller ./service -run "TestCreateOpenCodeAccount|TestUpdateOpenCodeAccountRejectsUnknownChannelBinding|TestOpenCodeAccountPublicView|TestOpenCodeAccountResponseMarks|TestActivateOpenCodeAccount" -count=1
 go test ./service -run "TestChannelAffinityHitCodexTemplatePassHeadersEffective|TestGetPreferredChannelByAffinity_RequestHeaderKeySource|TestApplyChannelAffinityOverrideTemplate" -count=1
 go test ./model ./controller ./service ./router ./service/relayconvert -run "TestActivateOpenCodeAccountReturnsNotFoundWhenAccountMissing|TestActivateOpenCodeAccountRequiresExistingChannel|TestOpenCodeLoginSessionActionsSkipSidecarWhenAccountMissing|TestDeleteOpenCodeAccountPurgesLoginSessionBeforeDeleting|TestDeleteOpenCodeAccountPreservesAccountWhenPurgeFails|TestDeleteOpenCodeAccountSkipsPurgeWhenAccountMissing|TestGetOpenCodeAccountDiagnosticsReturnsNonSecretPayload|TestOpenCodeAccountDiagnosticsReportsCredentialKeySource|TestCreateOpenCodeAccount|TestOpenCodeAccountPublicViewReportsCredentialDecryptFailure|TestOpenCodeAccountResponse|TestOpenCodeAccountPublicViewReportsCredentialKeySource|TestMergeExtractedOpenCodeSecrets|TestApplyExtractedOpenCodeAccount|TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState|TestActivateOpenCodeAccount|TestBuildOpenCodeAuthCommandSpecPassesKeyTextThroughStdin|TestFindOpenCodeAuthSidecarPathSearchesExecutableDirectory|TestOpenCodeAuthSidecarStatusTreatsMissingStateAsStopped|TestOpenCodeAccountRoutesRegisterExpectedPaths|TestUsageFromChatUsagePreservesCachedTokensForBothAccountingPaths|TestObserveChannelAffinityUsageCacheByRelayFormat" -count=1
+go test ./service -run "TestOpenCodeAuthSidecarStopWaitsForRecordedProcessExit|TestOpenCodeAuthSidecarStopDoesNotKillUnmatchedRecordedPid|TestOpenCodeAuthSidecarStartDoesNotReusePidWithoutCDP|TestOpenCodeAuthSidecarStartReportsInvalidChromiumBinary" -count=1
 go test ./common ./model ./service ./controller ./router ./service/relayconvert -count=1
 bun run typecheck
 bun test src/features/opencode-accounts/lib.test.ts
@@ -473,6 +474,7 @@ bun run build in web/classic
 go build .
 node --test scripts/opencode-auth-session.test.mjs
 node --check scripts/opencode-auth-session.mjs
+node --test scripts/glm-cache-smoke.test.mjs scripts/opencode-e2e-preflight.test.mjs scripts/opencode-auth-session.test.mjs scripts/new-api-clean-rollout.test.mjs scripts/tailscale-link-preflight.test.mjs scripts/opencode-live-e2e.test.mjs
 node --test scripts/glm-cache-smoke.test.mjs
 node --check scripts/glm-cache-smoke.mjs
 node --test scripts/new-api-clean-rollout.test.mjs
@@ -924,8 +926,8 @@ web/default/src/routes/_authenticated/opencode-accounts/index.tsx
 | 浏览器启动清理 | 已实现并完成远端 apply | 浏览器启动失败现在会在返回结构化错误前停止本次尝试已经拉起的 browser/Xvfb 进程。当记录的 browser PID 存活但 CDP 不可达时，`login/start` 只会在实时进程命令行同时匹配已记录的 sidecar-owned browser profile 和 debugging port 时才停止它，避免损坏 state 中的任意 PID 导致误杀，同时仍能清理真实陈旧浏览器会话。已推送提交 `b6168a5c` 通过 clean rollout verification 与远端 apply，apply 后 smoke 确认部署态 sidecar 仍返回预期的空状态 stopped。 |
 | Sidecar path resolution | 已实现并完成远端验证 | Go 服务现在会从进程工作目录和当前可执行文件目录两个起点解析 sidecar 脚本，并分别向上查找。这样当 systemd working directory 与 clean artifact 目录不一致时，远端浏览器操作仍能稳定找到 sidecar；已推送的 `main` artifact 已通过远端构建、定向测试、服务重启、HTTP smoke 与 sidecar 空状态检查验证该路径。 |
 | 陈旧浏览器状态处理 | 已实现 | `login/start` 现在只会在记录的 PID 存活且 CDP endpoint 可达时复用既有浏览器；陈旧 PID/state 组合会继续走新浏览器启动流程。 |
-| Stop 生命周期清理 | 已实现 | `login/stop` 现在会在 SIGTERM 后等待记录的 browser/Xvfb 进程退出，并在未退出时使用强制清理兜底，减少返回 `stopped` 前遗留浏览器进程的概率。 |
-| Delete 生命周期清理 | 本地已实现 | 删除 OpenCode 账号现在会先 purge 该账号的浏览器会话 artifact，再删除数据库记录：sidecar 会停止记录的进程，并删除账号 state 文件与浏览器 profile 目录。如果 purge 失败，账号会保留，操作者可以重试清理，避免在可能仍有浏览器 artifact 存在时丢失持久化操作句柄。 |
+| Stop 生命周期清理 | 本地已实现 | `login/stop` 现在会读取记录的 browser/Xvfb 命令行，只停止完整 argv token 同时匹配 sidecar-owned browser profile/debugging port 或 Xvfb display 的进程；随后在 SIGTERM 后等待退出，并在未退出时使用强制清理兜底。这样损坏但语法有效的 state 不能把任意存活 PID 变成 kill target，同时仍能减少返回 `stopped` 前遗留浏览器进程的概率。 |
+| Delete 生命周期清理 | 本地已实现 | 删除 OpenCode 账号现在会先 purge 该账号的浏览器会话 artifact，再删除数据库记录：sidecar 会先走同一 recorded-process ownership gate，再停止 browser/Xvfb，并删除账号 state 文件与浏览器 profile 目录。如果 purge 失败，账号会保留，操作者可以重试清理，避免在可能仍有浏览器 artifact 存在时丢失持久化操作句柄。 |
 | 删除缺失账号保护 | 本地已实现 | delete 现在会先确认持久 OpenCode account 行存在，再调用 sidecar purge。缺失账号 ID 会返回与 update/extract/quota 流程一致的脱敏业务错误，并且不会为一个 New API 不再拥有的账号 ID 触发浏览器 artifact 清理。 |
 | Sidecar state 损坏处理 | 本地已实现 | state 文件缺失仍然是幂等的 `stopped` 会话，但 state 不可读或 JSON 无效现在会返回结构化 sidecar 失败。start/status/stop/purge 不再把损坏 state 当成“没有会话”，因此账号删除会 fail closed，避免在可能仍有孤立浏览器 profile 或进程时删除持久账号行。 |
 | Screenshot 瞬时失败重试 | 已实现 | `login/screenshot` 现在会对浏览器/CDP 的瞬时截图失败执行重试；该动作是只读操作，符合远端 smoke 中 screenshot 首次失败、立即重试成功的实际现象。 |
@@ -993,9 +995,9 @@ sidecar 脚本解析现在不再假设进程工作目录就是 artifact 根目�
 
 既有浏览器复用现在以 CDP 可达性为准，而不是只看 PID 是否存活。进程 ID 可能仍存活或被复用，但记录的调试端口已经不可用；如果把这种状态当成可复用会话，前端会在 start 后看到 stopped。现在除非既有会话真实可达，否则 sidecar 会继续拉起新浏览器。
 
-stop 现在更完整地拥有进程清理语义。它不再发送 SIGTERM 后立刻返回，而是等待记录的 browser/Xvfb 进程退出，并在未退出时使用强制清理兜底。这样 lifecycle smoke 与重复登录尝试更不容易堆积陈旧 headless browser 进程。
+stop 现在更完整地拥有进程清理语义，但清理不再只是 PID 语义。sidecar 会先确认实时进程命令行仍以完整 argv token 匹配记录的 browser profile/debugging port 或 Xvfb display，然后发送 SIGTERM、等待退出，并在需要时使用强制清理兜底。明确取舍是：格式错误或被外部编辑过的 state 可能留下一个需要人工清理的不匹配进程，但它不能让 New API 杀掉一个复用或被注入到记录 PID 槽里的无关进程。
 
-账号删除现在也进入同一生命周期边界。controller 会在删除持久账号行前先 purge 该账号的浏览器会话；sidecar 会停止记录的进程，并删除账号 state 文件与浏览器 profile 目录。如果 purge 失败，删除会 fail closed，并保留账号以便重试。这里的取舍是：sidecar 故障可能暂时阻塞删除，但这比在远端浏览器 artifact 可能仍存在时删除唯一的持久账号句柄更安全。
+账号删除现在也进入同一生命周期边界。controller 会在删除持久账号行前先 purge 该账号的浏览器会话；sidecar 会先应用同一进程所有权检查，再停止 browser/Xvfb，并删除账号 state 文件与浏览器 profile 目录。如果 purge 失败，删除会 fail closed，并保留账号以便重试。这里的取舍是：sidecar 故障可能暂时阻塞删除，但这比在远端浏览器 artifact 可能仍存在时删除唯一的持久账号句柄更安全。
 
 当前 delete-purge hardening 已经随已推送的 `main` 提交 `5e18beaa` 走过后续 clean artifact 上线路径。但这仍不等价于真实账号 E2E：尚未导入、激活或使用操作者控制的 OpenCode 订阅账号执行 `glm-5.2` cache-hit 测量。
 
@@ -1111,6 +1113,7 @@ go test ./service -run "TestObserveChannelAffinityUsageCacheByRelayFormat" -coun
 go test ./model ./controller ./service -run "TestCreateOpenCodeAccount|TestUpdateOpenCodeAccountRejectsUnknownChannelBinding|TestOpenCodeAccountPublicView|TestOpenCodeAccountResponseMarks|TestActivateOpenCodeAccount" -count=1
 go test ./service -run "TestChannelAffinityHitCodexTemplatePassHeadersEffective|TestGetPreferredChannelByAffinity_RequestHeaderKeySource|TestApplyChannelAffinityOverrideTemplate" -count=1
 go test ./model ./controller ./service ./router ./service/relayconvert -run "TestActivateOpenCodeAccountReturnsNotFoundWhenAccountMissing|TestActivateOpenCodeAccountRequiresExistingChannel|TestOpenCodeLoginSessionActionsSkipSidecarWhenAccountMissing|TestDeleteOpenCodeAccountPurgesLoginSessionBeforeDeleting|TestDeleteOpenCodeAccountPreservesAccountWhenPurgeFails|TestDeleteOpenCodeAccountSkipsPurgeWhenAccountMissing|TestGetOpenCodeAccountDiagnosticsReturnsNonSecretPayload|TestOpenCodeAccountDiagnosticsReportsCredentialKeySource|TestCreateOpenCodeAccount|TestOpenCodeAccountPublicViewReportsCredentialDecryptFailure|TestOpenCodeAccountResponse|TestOpenCodeAccountPublicViewReportsCredentialKeySource|TestMergeExtractedOpenCodeSecrets|TestApplyExtractedOpenCodeAccount|TestExtractOpenCodeSecretsFromBrowserState|TestExtractOpenCodeQuotaFromBrowserState|TestActivateOpenCodeAccount|TestBuildOpenCodeAuthCommandSpecPassesKeyTextThroughStdin|TestFindOpenCodeAuthSidecarPathSearchesExecutableDirectory|TestOpenCodeAuthSidecarStatusTreatsMissingStateAsStopped|TestOpenCodeAccountRoutesRegisterExpectedPaths|TestUsageFromChatUsagePreservesCachedTokensForBothAccountingPaths|TestObserveChannelAffinityUsageCacheByRelayFormat" -count=1
+go test ./service -run "TestOpenCodeAuthSidecarStopWaitsForRecordedProcessExit|TestOpenCodeAuthSidecarStopDoesNotKillUnmatchedRecordedPid|TestOpenCodeAuthSidecarStartDoesNotReusePidWithoutCDP|TestOpenCodeAuthSidecarStartReportsInvalidChromiumBinary" -count=1
 go test ./common ./model ./service ./controller ./router ./service/relayconvert -count=1
 bun run typecheck
 bun test src/features/opencode-accounts/lib.test.ts
@@ -1121,6 +1124,7 @@ web/classic 下 bun run build
 go build .
 node --test scripts/opencode-auth-session.test.mjs
 node --check scripts/opencode-auth-session.mjs
+node --test scripts/glm-cache-smoke.test.mjs scripts/opencode-e2e-preflight.test.mjs scripts/opencode-auth-session.test.mjs scripts/new-api-clean-rollout.test.mjs scripts/tailscale-link-preflight.test.mjs scripts/opencode-live-e2e.test.mjs
 node --test scripts/glm-cache-smoke.test.mjs
 node --check scripts/glm-cache-smoke.mjs
 node --test scripts/new-api-clean-rollout.test.mjs

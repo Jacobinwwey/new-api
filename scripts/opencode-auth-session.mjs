@@ -241,13 +241,56 @@ async function stopProcess(pid) {
 }
 
 async function readProcessArgs(pid) {
-  if (!pid || os.platform() === "win32") return [];
+  const processID = Number(pid);
+  if (!Number.isInteger(processID) || processID <= 0) return [];
+  if (os.platform() === "win32") {
+    return new Promise((resolve) => {
+      const query = spawn(
+        "powershell.exe",
+        [
+          "-NoProfile",
+          "-Command",
+          `(Get-CimInstance Win32_Process -Filter "ProcessId = ${processID}").CommandLine`,
+        ],
+        { stdio: ["ignore", "pipe", "ignore"], windowsHide: true },
+      );
+      let stdout = "";
+      query.stdout?.on("data", (chunk) => {
+        stdout += chunk;
+      });
+      query.once("error", () => resolve([]));
+      query.once("close", () => {
+        const commandLine = stdout.trim();
+        resolve(commandLine ? [commandLine] : []);
+      });
+    });
+  }
   try {
-    const raw = await fs.readFile(`/proc/${pid}/cmdline`, "utf8");
+    const raw = await fs.readFile(`/proc/${processID}/cmdline`, "utf8");
     return raw.split("\0").filter(Boolean);
   } catch {
     return [];
   }
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function processArgMatches(values, expected) {
+  if (!values.length || !expected) return false;
+  if (values.length > 1) return values.includes(expected);
+  const quotedOrWhitespaceBoundary = String.raw`(?:^|[\s"'])`;
+  const quotedOrWhitespaceTerminator = String.raw`(?=$|[\s"'])`;
+  return new RegExp(`${quotedOrWhitespaceBoundary}${escapeRegExp(expected)}${quotedOrWhitespaceTerminator}`).test(
+    values[0],
+  );
+}
+
+function processExecutableMatches(values, marker) {
+  if (!values.length || !marker) return false;
+  if (values.length > 1) return path.basename(values[0]).includes(marker);
+  return values[0].includes(marker);
 }
 
 export function browserProcessArgsMatchState(args, state) {
@@ -255,14 +298,17 @@ export function browserProcessArgsMatchState(args, state) {
   const profile = String(state?.profile || "");
   const port = Number(state?.port || 0);
   if (!profile || !port) return false;
-  return values.includes(`--user-data-dir=${profile}`) && values.includes(`--remote-debugging-port=${port}`);
+  return (
+    processArgMatches(values, `--user-data-dir=${profile}`) &&
+    processArgMatches(values, `--remote-debugging-port=${port}`)
+  );
 }
 
 export function xvfbProcessArgsMatchState(args, state) {
   const values = Array.isArray(args) ? args.map(String) : [];
   const display = String(state?.display || "");
   if (!display) return false;
-  return values[0]?.includes("Xvfb") && values.includes(display);
+  return processExecutableMatches(values, "Xvfb") && processArgMatches(values, display);
 }
 
 async function stopRecordedSessionProcesses(state) {
@@ -598,7 +644,7 @@ async function stopSession(args) {
     json({ success: true, status: { account_id: accountID, running: false, status: "stopped" } });
     return;
   }
-  await Promise.all([stopProcess(state.browserPid), stopProcess(state.xvfbPid)]);
+  await stopRecordedSessionProcesses(state);
   json({ success: true, status: { account_id: accountID, running: false, status: "stopped" } });
 }
 
@@ -612,7 +658,7 @@ async function purgeSession(args) {
     if (!isMissingStateError(error)) throw error;
     state = {};
   }
-  await Promise.all([stopProcess(state.browserPid), stopProcess(state.xvfbPid)]);
+  await stopRecordedSessionProcesses(state);
   await Promise.all([
     fs.rm(statePath(stateDir, accountID), { force: true }),
     fs.rm(profileDir(stateDir, accountID), { recursive: true, force: true }),

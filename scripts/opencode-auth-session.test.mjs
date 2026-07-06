@@ -180,10 +180,62 @@ test("recorded process matching only accepts sidecar-owned browser processes", (
   );
   assert.equal(browserProcessArgsMatchState(["node", "unrelated-test-process"], state), false);
   assert.equal(browserProcessArgsMatchState(["chromium", "--remote-debugging-port=43123"], state), false);
+  assert.equal(
+    browserProcessArgsMatchState(
+      [
+        "chromium",
+        "--remote-debugging-port=431230",
+        "--remote-debugging-address=127.0.0.1",
+        "--user-data-dir=/tmp/opencode-auth/profile-7",
+      ],
+      state,
+    ),
+    false,
+  );
+  assert.equal(
+    browserProcessArgsMatchState(
+      [
+        "chromium",
+        "--remote-debugging-port=43123",
+        "--remote-debugging-address=127.0.0.1",
+        "--user-data-dir=/tmp/opencode-auth/profile-70",
+      ],
+      state,
+    ),
+    false,
+  );
 
   assert.equal(xvfbProcessArgsMatchState(["Xvfb", ":207", "-screen", "0", "1280x900x24"], state), true);
   assert.equal(xvfbProcessArgsMatchState(["Xvfb", ":208", "-screen", "0", "1280x900x24"], state), false);
+  assert.equal(xvfbProcessArgsMatchState(["Xvfb", ":2070", "-screen", "0", "1280x900x24"], state), false);
+  assert.equal(xvfbProcessArgsMatchState(["node", "Xvfb", ":207"], state), false);
   assert.equal(xvfbProcessArgsMatchState(["node", ":207"], state), false);
+});
+
+test("recorded process matching accepts Windows command line strings without prefix collisions", () => {
+  const state = {
+    port: 43123,
+    profile: String.raw`D:\OpenCode Auth\profile-7`,
+  };
+
+  assert.equal(
+    browserProcessArgsMatchState(
+      [
+        String.raw`"C:\Program Files\Chromium\Application\chrome.exe" "--remote-debugging-port=43123" "--user-data-dir=D:\OpenCode Auth\profile-7"`,
+      ],
+      state,
+    ),
+    true,
+  );
+  assert.equal(
+    browserProcessArgsMatchState(
+      [
+        String.raw`"C:\Program Files\Chromium\Application\chrome.exe" "--remote-debugging-port=431230" "--user-data-dir=D:\OpenCode Auth\profile-7"`,
+      ],
+      state,
+    ),
+    false,
+  );
 });
 
 test("purge action removes account state and browser profile artifacts", async () => {

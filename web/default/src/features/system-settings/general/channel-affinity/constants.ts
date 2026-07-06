@@ -54,6 +54,23 @@ function buildPassHeadersTemplate(headers: string[]) {
   }
 }
 
+function buildCodexCliTraceTemplate(headers: string[]) {
+  return {
+    operations: [
+      {
+        mode: 'sync_fields',
+        from: 'header:session_id',
+        to: 'json:prompt_cache_key',
+      },
+      {
+        mode: 'pass_headers',
+        value: [...headers],
+        keep_origin: true,
+      },
+    ],
+  }
+}
+
 export type RuleTemplate = Omit<AffinityRule, 'id'>
 
 export const RULE_TEMPLATES: Record<string, RuleTemplate> = {
@@ -65,7 +82,7 @@ export const RULE_TEMPLATES: Record<string, RuleTemplate> = {
       { type: 'gjson', path: 'prompt_cache_key' },
       { type: 'request_header', key: 'Session_id' },
     ],
-    param_override_template: buildPassHeadersTemplate(
+    param_override_template: buildCodexCliTraceTemplate(
       CODEX_CLI_HEADER_PASSTHROUGH_HEADERS
     ),
     value_regex: '',

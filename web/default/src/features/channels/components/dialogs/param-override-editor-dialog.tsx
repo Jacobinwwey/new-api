@@ -321,9 +321,20 @@ const buildPassHeadersTemplate = (headers: string[]) => ({
   ],
 })
 
-const CODEX_CLI_HEADER_PASSTHROUGH_TEMPLATE = buildPassHeadersTemplate(
-  CODEX_CLI_HEADER_PASSTHROUGH_HEADERS
-)
+const CODEX_CLI_HEADER_PASSTHROUGH_TEMPLATE = {
+  operations: [
+    {
+      mode: 'sync_fields',
+      from: 'header:session_id',
+      to: 'json:prompt_cache_key',
+    },
+    {
+      mode: 'pass_headers',
+      value: [...CODEX_CLI_HEADER_PASSTHROUGH_HEADERS],
+      keep_origin: true,
+    },
+  ],
+}
 const CLAUDE_CLI_HEADER_PASSTHROUGH_TEMPLATE = buildPassHeadersTemplate(
   CLAUDE_CLI_HEADER_PASSTHROUGH_HEADERS
 )

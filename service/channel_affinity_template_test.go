@@ -397,3 +397,58 @@ func TestChannelAffinityHitCodexTemplateFallsBackToSessionHeader(t *testing.T) {
 	require.Equal(t, "Session_id", meta.KeySourceKey)
 	require.Empty(t, meta.KeySourcePath)
 }
+
+func TestChannelAffinityCodexTemplateSyncsSessionHeaderToPromptCacheKey(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	setting := operation_setting.GetChannelAffinitySetting()
+	require.NotNil(t, setting)
+
+	var codexRule *operation_setting.ChannelAffinityRule
+	for i := range setting.Rules {
+		rule := &setting.Rules[i]
+		if strings.EqualFold(strings.TrimSpace(rule.Name), "codex cli trace") {
+			codexRule = rule
+			break
+		}
+	}
+	require.NotNil(t, codexRule)
+
+	sessionID := fmt.Sprintf("codex-session-sync-%d", time.Now().UnixNano())
+	cacheKeySuffix := buildChannelAffinityCacheKeySuffix(*codexRule, "glm-5.2", "default", sessionID)
+
+	cache := getChannelAffinityCache()
+	require.NoError(t, cache.SetWithTTL(cacheKeySuffix, 9527, time.Minute))
+	t.Cleanup(func() {
+		_, _ = cache.DeleteMany([]string{cacheKeySuffix})
+	})
+
+	rec := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(rec)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"glm-5.2"}`))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	ctx.Request.Header.Set("Session_id", sessionID)
+
+	channelID, found := GetPreferredChannelByAffinity(ctx, "glm-5.2", "default")
+	require.True(t, found)
+	require.Equal(t, 9527, channelID)
+
+	mergedOverride, applied := ApplyChannelAffinityOverrideTemplate(ctx, map[string]interface{}{})
+	require.True(t, applied)
+
+	info := &relaycommon.RelayInfo{
+		RequestHeaders: map[string]string{
+			"Session_id": sessionID,
+			"User-Agent": "codex-cli-test",
+		},
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ParamOverride: mergedOverride,
+		},
+	}
+
+	upstreamJSON, err := relaycommon.ApplyParamOverrideWithRelayInfo([]byte(`{"model":"glm-5.2"}`), info)
+	require.NoError(t, err)
+	require.JSONEq(t, fmt.Sprintf(`{"model":"glm-5.2","prompt_cache_key":%q}`, sessionID), string(upstreamJSON))
+	require.True(t, info.UseRuntimeHeadersOverride)
+	require.Equal(t, sessionID, info.RuntimeHeadersOverride["session_id"])
+}

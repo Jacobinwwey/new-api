@@ -31,6 +31,9 @@ func ActivateOpenCodeAccount(accountID int) (*model.OpenCodeAccount, error) {
 	err = model.DB.Transaction(func(tx *gorm.DB) error {
 		var channel model.Channel
 		if err := tx.First(&channel, account.ChannelID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errors.New("opencode account channel not found")
+			}
 			return err
 		}
 		channelKey, err := buildOpenCodeChannelCredential(channel, secrets)

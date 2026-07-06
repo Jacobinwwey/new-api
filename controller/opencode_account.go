@@ -363,6 +363,9 @@ func ActivateOpenCodeAccount(c *gin.Context) {
 	if !ok {
 		return
 	}
+	if !ensureOpenCodeAccountExists(c, id) {
+		return
+	}
 	account, err := service.ActivateOpenCodeAccount(id)
 	if err != nil {
 		common.ApiError(c, err)

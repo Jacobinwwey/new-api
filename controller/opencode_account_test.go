@@ -430,3 +430,25 @@ console.log(JSON.stringify({ success: true, status: { account_id: 404, running: 
 		})
 	}
 }
+
+func TestActivateOpenCodeAccountReturnsNotFoundWhenAccountMissing(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	originalDB := model.DB
+	model.DB = db
+	t.Cleanup(func() {
+		model.DB = originalDB
+	})
+	require.NoError(t, db.AutoMigrate(&model.OpenCodeAccount{}))
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Params = gin.Params{{Key: "id", Value: "404"}}
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/opencode/accounts/404/activate", nil)
+
+	ActivateOpenCodeAccount(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), "未找到该 OpenCode 账号")
+}

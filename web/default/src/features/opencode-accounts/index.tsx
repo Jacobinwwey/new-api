@@ -53,6 +53,11 @@ import {
   startOpenCodeLogin,
   stopOpenCodeLogin,
 } from './api'
+import {
+  isOpenCodeAccountPageRefreshing,
+  openCodeAccountWorkspaceGridRows,
+  refreshOpenCodeAccountPageData,
+} from './lib'
 import type { OpenCodeAccount } from './types'
 
 const VIEWPORT_WIDTH = 1280
@@ -107,10 +112,10 @@ export function OpenCodeAccounts() {
   const refreshAccounts = () =>
     queryClient.invalidateQueries({ queryKey: ['opencode-accounts'] })
 
-  const refreshOpenCodeData = () => {
-    void accountsQuery.refetch()
-    void channelsQuery.refetch()
-    void diagnosticsQuery.refetch()
+  const refreshSources = {
+    accounts: accountsQuery,
+    channels: channelsQuery,
+    diagnostics: diagnosticsQuery,
   }
 
   const createMutation = useMutation({
@@ -244,12 +249,8 @@ export function OpenCodeAccounts() {
       <SectionPageLayout.Actions>
         <Button
           variant='outline'
-          onClick={refreshOpenCodeData}
-          disabled={
-            accountsQuery.isFetching ||
-            channelsQuery.isFetching ||
-            diagnosticsQuery.isFetching
-          }
+          onClick={() => refreshOpenCodeAccountPageData(refreshSources)}
+          disabled={isOpenCodeAccountPageRefreshing(refreshSources)}
         >
           <RefreshCw data-icon='inline-start' />
           {t('Refresh')}
@@ -259,9 +260,7 @@ export function OpenCodeAccounts() {
         <div
           className={cn(
             'grid h-full min-h-0 gap-4',
-            usesFallbackCredentialKey
-              ? 'grid-rows-[auto_minmax(0,1fr)]'
-              : 'grid-rows-[minmax(0,1fr)]'
+            openCodeAccountWorkspaceGridRows(usesFallbackCredentialKey)
           )}
         >
           {usesFallbackCredentialKey ? <CredentialKeySourceWarning /> : null}

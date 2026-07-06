@@ -107,6 +107,12 @@ export function OpenCodeAccounts() {
   const refreshAccounts = () =>
     queryClient.invalidateQueries({ queryKey: ['opencode-accounts'] })
 
+  const refreshOpenCodeData = () => {
+    void accountsQuery.refetch()
+    void channelsQuery.refetch()
+    void diagnosticsQuery.refetch()
+  }
+
   const createMutation = useMutation({
     mutationFn: createOpenCodeAccount,
     onSuccess: async (response) => {
@@ -238,201 +244,220 @@ export function OpenCodeAccounts() {
       <SectionPageLayout.Actions>
         <Button
           variant='outline'
-          onClick={() => accountsQuery.refetch()}
-          disabled={accountsQuery.isFetching}
+          onClick={refreshOpenCodeData}
+          disabled={
+            accountsQuery.isFetching ||
+            channelsQuery.isFetching ||
+            diagnosticsQuery.isFetching
+          }
         >
           <RefreshCw data-icon='inline-start' />
           {t('Refresh')}
         </Button>
       </SectionPageLayout.Actions>
       <SectionPageLayout.Content>
-        {usesFallbackCredentialKey ? <CredentialKeySourceWarning /> : null}
-        <div className='grid min-h-0 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(480px,0.9fr)]'>
-          <section className='bg-background min-w-0 rounded-lg border'>
-            <div className='grid gap-3 border-b p-3 md:grid-cols-[minmax(0,1fr)_minmax(220px,280px)_120px_auto]'>
-              <Input
-                value={label}
-                onChange={(event) => setLabel(event.target.value)}
-                placeholder={t('Account label')}
-              />
-              <Select
-                items={channels.map((channel) => ({
-                  value: String(channel.id),
-                  label: formatChannelOption(channel, t),
-                }))}
-                value={selectedChannel ? String(selectedChannel.id) : null}
-                onValueChange={(value) => {
-                  if (value !== null) {
-                    setChannelID(value)
-                  }
-                }}
-              >
-                <SelectTrigger className='w-full min-w-0'>
-                  <SelectValue placeholder={t('Select channel')} />
-                </SelectTrigger>
-                <SelectContent alignItemWithTrigger={false}>
-                  <SelectGroup>
-                    {channels.map((channel) => (
-                      <SelectItem key={channel.id} value={String(channel.id)}>
-                        {formatChannelOption(channel, t)}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-              <Input
-                value={channelID}
-                onChange={(event) => setChannelID(event.target.value)}
-                placeholder={t('ID')}
-                inputMode='numeric'
-              />
-              <Button
-                onClick={handleCreate}
-                disabled={createMutation.isPending}
-              >
-                <Check data-icon='inline-start' />
-                {t('Create')}
-              </Button>
-            </div>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>{t('Label')}</TableHead>
-                  <TableHead>{t('Channel')}</TableHead>
-                  <TableHead>{t('Secrets')}</TableHead>
-                  <TableHead>{t('Status')}</TableHead>
-                  <TableHead className='w-16 text-right'>
-                    {t('Actions')}
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {accounts.map((account) => (
-                  <AccountRow
-                    key={account.id}
-                    account={account}
-                    selected={account.id === selectedID}
-                    onSelect={() => setSelectedID(account.id)}
-                    onDelete={() => deleteMutation.mutate(account.id)}
-                  />
-                ))}
-                {accounts.length === 0 ? (
-                  <TableRow>
-                    <TableCell
-                      colSpan={5}
-                      className='text-muted-foreground h-24 text-center'
-                    >
-                      {t('No OpenCode accounts')}
-                    </TableCell>
-                  </TableRow>
-                ) : null}
-              </TableBody>
-            </Table>
-          </section>
-
-          <section className='bg-background grid min-w-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-3 rounded-lg border p-3'>
-            <div className='grid min-w-0 gap-2'>
-              <div className='flex min-w-0 flex-wrap items-center gap-2'>
-                <Badge variant={loginStatus?.running ? 'default' : 'outline'}>
-                  {loginStatus?.running ? t('Running') : t('Stopped')}
-                </Badge>
-                <span className='text-muted-foreground min-w-0 truncate text-sm'>
-                  {loginStatus?.url ||
-                    selectedAccount?.label ||
-                    t('No account selected')}
-                </span>
-              </div>
-            </div>
-            <div className='flex flex-wrap items-center gap-2'>
-              <Button
-                variant='outline'
-                onClick={() => runSelected((id) => startMutation.mutate(id))}
-                disabled={startMutation.isPending}
-              >
-                <Play data-icon='inline-start' />
-                {t('Login')}
-              </Button>
-              <Button
-                variant='outline'
-                onClick={() =>
-                  runSelected((id) => screenshotMutation.mutate(id))
-                }
-                disabled={screenshotMutation.isPending}
-              >
-                <MousePointerClick data-icon='inline-start' />
-                {t('Screenshot')}
-              </Button>
-              <Button
-                variant='outline'
-                onClick={() => runSelected((id) => extractMutation.mutate(id))}
-                disabled={extractMutation.isPending}
-              >
-                <Download data-icon='inline-start' />
-                {t('Extract')}
-              </Button>
-              <Button
-                variant='outline'
-                onClick={() => runSelected((id) => quotaMutation.mutate(id))}
-                disabled={quotaMutation.isPending}
-              >
-                <RefreshCw data-icon='inline-start' />
-                {t('Quota')}
-              </Button>
-              <Button
-                variant='outline'
-                onClick={() => runSelected((id) => activateMutation.mutate(id))}
-                disabled={
-                  activateMutation.isPending ||
-                  selectedAccount?.activation_ready !== true
-                }
-              >
-                <Check data-icon='inline-start' />
-                {t('Activate')}
-              </Button>
-              <Button
-                variant='outline'
-                onClick={() => runSelected((id) => stopMutation.mutate(id))}
-                disabled={stopMutation.isPending}
-              >
-                <Square data-icon='inline-start' />
-                {t('Stop')}
-              </Button>
-            </div>
-            <div className='grid min-h-0 grid-rows-[minmax(0,1fr)_auto] gap-3'>
-              <div className='bg-muted/30 flex min-h-[280px] items-center justify-center overflow-hidden rounded-md border'>
-                {screenshot ? (
-                  <img
-                    src={`data:image/png;base64,${screenshot}`}
-                    alt={t('Remote browser')}
-                    className='h-full max-h-full w-full max-w-full cursor-crosshair object-contain'
-                    onClick={handleScreenshotClick}
-                  />
-                ) : (
-                  <span className='text-muted-foreground text-sm'>
-                    {t('Start login and capture a screenshot')}
-                  </span>
-                )}
-              </div>
-              <div className='grid gap-2 md:grid-cols-[minmax(0,1fr)_auto]'>
+        <div
+          className={cn(
+            'grid h-full min-h-0 gap-4',
+            usesFallbackCredentialKey
+              ? 'grid-rows-[auto_minmax(0,1fr)]'
+              : 'grid-rows-[minmax(0,1fr)]'
+          )}
+        >
+          {usesFallbackCredentialKey ? <CredentialKeySourceWarning /> : null}
+          <div className='grid min-h-0 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(480px,0.9fr)]'>
+            <section className='bg-background min-w-0 rounded-lg border'>
+              <div className='grid gap-3 border-b p-3 md:grid-cols-[minmax(0,1fr)_minmax(220px,280px)_120px_auto]'>
                 <Input
-                  value={textInput}
-                  onChange={(event) => setTextInput(event.target.value)}
-                  placeholder={t('Text to type into remote browser')}
+                  value={label}
+                  onChange={(event) => setLabel(event.target.value)}
+                  placeholder={t('Account label')}
                 />
+                <Select
+                  items={channels.map((channel) => ({
+                    value: String(channel.id),
+                    label: formatChannelOption(channel, t),
+                  }))}
+                  value={selectedChannel ? String(selectedChannel.id) : null}
+                  onValueChange={(value) => {
+                    if (value !== null) {
+                      setChannelID(value)
+                    }
+                  }}
+                >
+                  <SelectTrigger className='w-full min-w-0'>
+                    <SelectValue placeholder={t('Select channel')} />
+                  </SelectTrigger>
+                  <SelectContent alignItemWithTrigger={false}>
+                    <SelectGroup>
+                      {channels.map((channel) => (
+                        <SelectItem key={channel.id} value={String(channel.id)}>
+                          {formatChannelOption(channel, t)}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+                <Input
+                  value={channelID}
+                  onChange={(event) => setChannelID(event.target.value)}
+                  placeholder={t('ID')}
+                  inputMode='numeric'
+                />
+                <Button
+                  onClick={handleCreate}
+                  disabled={createMutation.isPending}
+                >
+                  <Check data-icon='inline-start' />
+                  {t('Create')}
+                </Button>
+              </div>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>{t('Label')}</TableHead>
+                    <TableHead>{t('Channel')}</TableHead>
+                    <TableHead>{t('Secrets')}</TableHead>
+                    <TableHead>{t('Status')}</TableHead>
+                    <TableHead className='w-16 text-right'>
+                      {t('Actions')}
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {accounts.map((account) => (
+                    <AccountRow
+                      key={account.id}
+                      account={account}
+                      selected={account.id === selectedID}
+                      onSelect={() => setSelectedID(account.id)}
+                      onDelete={() => deleteMutation.mutate(account.id)}
+                    />
+                  ))}
+                  {accounts.length === 0 ? (
+                    <TableRow>
+                      <TableCell
+                        colSpan={5}
+                        className='text-muted-foreground h-24 text-center'
+                      >
+                        {t('No OpenCode accounts')}
+                      </TableCell>
+                    </TableRow>
+                  ) : null}
+                </TableBody>
+              </Table>
+            </section>
+
+            <section className='bg-background grid min-w-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-3 rounded-lg border p-3'>
+              <div className='grid min-w-0 gap-2'>
+                <div className='flex min-w-0 flex-wrap items-center gap-2'>
+                  <Badge
+                    variant={loginStatus?.running ? 'default' : 'outline'}
+                  >
+                    {loginStatus?.running ? t('Running') : t('Stopped')}
+                  </Badge>
+                  <span className='text-muted-foreground min-w-0 truncate text-sm'>
+                    {loginStatus?.url ||
+                      selectedAccount?.label ||
+                      t('No account selected')}
+                  </span>
+                </div>
+              </div>
+              <div className='flex flex-wrap items-center gap-2'>
+                <Button
+                  variant='outline'
+                  onClick={() => runSelected((id) => startMutation.mutate(id))}
+                  disabled={startMutation.isPending}
+                >
+                  <Play data-icon='inline-start' />
+                  {t('Login')}
+                </Button>
                 <Button
                   variant='outline'
                   onClick={() =>
-                    runSelected((id) =>
-                      keyMutation.mutate({ id, text: textInput })
-                    )
+                    runSelected((id) => screenshotMutation.mutate(id))
                   }
-                  disabled={!textInput || keyMutation.isPending}
+                  disabled={screenshotMutation.isPending}
                 >
-                  {t('Type Text')}
+                  <MousePointerClick data-icon='inline-start' />
+                  {t('Screenshot')}
+                </Button>
+                <Button
+                  variant='outline'
+                  onClick={() =>
+                    runSelected((id) => extractMutation.mutate(id))
+                  }
+                  disabled={extractMutation.isPending}
+                >
+                  <Download data-icon='inline-start' />
+                  {t('Extract')}
+                </Button>
+                <Button
+                  variant='outline'
+                  onClick={() => runSelected((id) => quotaMutation.mutate(id))}
+                  disabled={quotaMutation.isPending}
+                >
+                  <RefreshCw data-icon='inline-start' />
+                  {t('Quota')}
+                </Button>
+                <Button
+                  variant='outline'
+                  onClick={() =>
+                    runSelected((id) => activateMutation.mutate(id))
+                  }
+                  disabled={
+                    activateMutation.isPending ||
+                    selectedAccount?.activation_ready !== true
+                  }
+                >
+                  <Check data-icon='inline-start' />
+                  {t('Activate')}
+                </Button>
+                <Button
+                  variant='outline'
+                  onClick={() => runSelected((id) => stopMutation.mutate(id))}
+                  disabled={stopMutation.isPending}
+                >
+                  <Square data-icon='inline-start' />
+                  {t('Stop')}
                 </Button>
               </div>
-            </div>
-          </section>
+              <div className='grid min-h-0 grid-rows-[minmax(0,1fr)_auto] gap-3'>
+                <div className='bg-muted/30 flex min-h-[280px] items-center justify-center overflow-hidden rounded-md border'>
+                  {screenshot ? (
+                    <img
+                      src={`data:image/png;base64,${screenshot}`}
+                      alt={t('Remote browser')}
+                      className='h-full max-h-full w-full max-w-full cursor-crosshair object-contain'
+                      onClick={handleScreenshotClick}
+                    />
+                  ) : (
+                    <span className='text-muted-foreground text-sm'>
+                      {t('Start login and capture a screenshot')}
+                    </span>
+                  )}
+                </div>
+                <div className='grid gap-2 md:grid-cols-[minmax(0,1fr)_auto]'>
+                  <Input
+                    value={textInput}
+                    onChange={(event) => setTextInput(event.target.value)}
+                    placeholder={t('Text to type into remote browser')}
+                  />
+                  <Button
+                    variant='outline'
+                    onClick={() =>
+                      runSelected((id) =>
+                        keyMutation.mutate({ id, text: textInput })
+                      )
+                    }
+                    disabled={!textInput || keyMutation.isPending}
+                  >
+                    {t('Type Text')}
+                  </Button>
+                </div>
+              </div>
+            </section>
+          </div>
         </div>
       </SectionPageLayout.Content>
     </SectionPageLayout>
@@ -443,7 +468,7 @@ function CredentialKeySourceWarning() {
   const { t } = useTranslation()
 
   return (
-    <div className='border-warning/40 bg-warning/10 text-warning mb-4 flex items-start gap-2 rounded-md border px-3 py-2 text-sm'>
+    <div className='border-warning/40 bg-warning/10 text-warning flex items-start gap-2 rounded-md border px-3 py-2 text-sm'>
       <AlertTriangle className='mt-0.5 size-4 shrink-0' />
       <span className='min-w-0'>
         {t(

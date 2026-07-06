@@ -295,6 +295,7 @@ End-to-end verification:
 | Activation error semantics | Implemented locally | Activation now returns the same sanitized account-not-found business failure for missing account IDs, and wraps missing bound channels as explicit channel-not-found failures instead of surfacing raw storage-layer `record not found` text. |
 | Remote clean artifact deployment | Done | Built pushed `main` from an isolated clean checkout, produced self-contained binary-plus-sidecar artifacts, switched the remote service to those artifacts, preserved the existing runtime data path, and verified the service is active. |
 | Clean rollout helper | Implemented and remotely applied | Added `scripts/new-api-clean-rollout.mjs` plus Node tests. The helper codifies the clean-checkout gate, targeted Node/Go/frontend/build checks, systemd service contract validation, backup/install/restart, bounded HTTP readiness wait, rollback, and public-output redaction. It is verification-only by default and switches runtime artifacts only with explicit `--apply true`; it intentionally does not own SSH transport, sudo, systemd unit creation, database migration ownership, or secret provisioning. A remote `--apply false` dry-run against pushed `main` commit `2a9baeed` verified clone, revision matching, Node/script gates, and skipped runtime mutation; the later full `--apply true` rollout for commit `3cbf0e5f` passed all gates and switched the runtime artifact. |
+| Tailscale link preflight | Implemented locally | Added `scripts/tailscale-link-preflight.mjs` plus Node tests. The preflight produces a secret-redacted JSON summary for target peer presence, expired/online state, anonymized node identity hashes, Tailscale-layer pongs, direct-vs-DERP routing, ICMP/TUN pongs, and configured TCP port checks. The current local run against the managed target fails as expected: it finds the stale target peer, marks it expired/offline, records zero Tailscale/TUN pongs, and reports TCP timeouts for the New API and Deskflow ports. The clean rollout helper now includes this script in its Node gate. |
 | Last verified remote rollout | Done | Pushed `main` commit `3cbf0e5f` is the last rollout verified on the remote service. The rollout used the clean rollout helper, passed remote Node script tests/checks, targeted OpenCode/cache Go tests, default and classic frontend builds, and Go binary build before switching runtime artifacts. The service restarted successfully, local HTTP `/api/status` smoke passed, deployed runtime scripts passed `node --check`, `glm-cache-smoke` still contains response-usage and stats contract gates, and sidecar empty-state `status` returned `stopped`. |
 | Real OpenCode login E2E | Pending | Requires an operator-controlled OpenCode subscription account. The repository contains no real account material. |
 | Real `glm-5.2` cache-hit E2E | Pending | Should run only after a real OpenCode account has been imported and activated through New API. |
@@ -401,6 +402,8 @@ The first remote dry-run exposed a real GitHub clone fragility on the remote hos
 
 The helper has now been exercised as the actual rollout path. Commit `3cbf0e5f` passed the full remote gate (`git_clone`, revision match, Node script checks, targeted Go tests, both frontend builds, Go build, artifact check, service contract validation, backup, install, restart, and HTTP smoke) and became the running artifact. A follow-up independent smoke confirmed service active, local HTTP status OK, deployed runtime scripts syntactically valid, cache-smoke contract gates present, and sidecar empty-state status OK. This proves the helper as a deployment mechanism for non-secret artifacts; it still does not prove live OpenCode account import or `glm-5.2` upstream cache billing.
 
+Tailscale health now has its own source-controlled preflight instead of remaining a manual interpretation of `tailscale ping`. The script intentionally outputs only categories and anonymized hashes, not peer names, IPs, account names, or raw node keys. Its default gates are strict enough for the requested Deskflow/New API path: the target peer must be present, not expired, online, directly reachable rather than DERP-only, TUN pingable, and TCP-open on the configured ports. This catches the current failure mode precisely: the managed target resolves to an expired/offline node identity and the tailnet data path for the relevant ports is not usable. The tradeoff is that DERP-only can be allowed with flags for diagnosis, but it should not be treated as the final "fast and robust" state for interactive desktop use.
+
 ### Verification Update
 
 Validated successfully:
@@ -452,6 +455,8 @@ node --test scripts/glm-cache-smoke.test.mjs
 node --check scripts/glm-cache-smoke.mjs
 node --test scripts/new-api-clean-rollout.test.mjs
 node --check scripts/new-api-clean-rollout.mjs
+node --test scripts/tailscale-link-preflight.test.mjs
+node --check scripts/tailscale-link-preflight.mjs
 git diff --check
 diff secret-pattern scan
 ```
@@ -514,6 +519,7 @@ Remote clean artifact rollout:
   clean rollout helper remote dry-run for pushed commit 2a9baeed passed git_clone/revision/node_scripts and skipped apply
   clean rollout helper full remote apply for pushed commit 3cbf0e5f passed git_clone/revision/node_scripts/go_targeted/web_default_build/web_classic_build/go_build/service_contract/backup/install/restart/http_smoke
   independent post-apply smoke confirmed service active, local HTTP status OK, runtime script syntax OK, cache contract gate markers present, and sidecar empty-state status OK
+  local Tailscale link preflight now fails the stale managed target with redacted evidence: target present but expired/offline, zero Tailscale/TUN pongs, and TCP timeout on the New API and Deskflow ports
 ```
 
 The `web/classic` build failure was traced to `date-fns-tz@1.3.8` resolving its peer `date-fns` to the workspace-level `date-fns@4`. That package version blocks private subpath imports such as `date-fns/_lib/cloneObject/index.js`. The fix keeps `web/default` on `date-fns@4` and adds a classic-only Rsbuild alias so Semi UI's `date-fns-tz` resolves to Semi's nested `date-fns@2.30.0`.
@@ -529,7 +535,16 @@ Known verification limits:
 
 ### Immediate Next Steps
 
-1. Restore Tailscale health first. The latest pushed `main` has been deployed and smoke-tested, but the required Tailscale path still has stale node identity and DERP-only/TUN-failing behavior. Retarget the managed SSH alias to the current non-expired Tailscale peer or re-auth/rename the remote Tailscale node so the stable name resolves to the current identity; then confirm counted Tailscale ping, ICMP/TUN ping, and TCP checks to required ports work without relying on the expired peer.
+1. Restore Tailscale health first. The latest pushed `main` has been deployed and smoke-tested, but the required Tailscale path still has stale node identity and DERP-only/TUN-failing behavior. Retarget the managed SSH alias to the current non-expired Tailscale peer or re-auth/rename the remote Tailscale node so the stable name resolves to the current identity; then confirm the machine gate passes:
+
+```bash
+node scripts/tailscale-link-preflight.mjs \
+  --target <stable-tailnet-name> \
+  --ports 3000,24800
+```
+
+Use `--expected-id-hash` or `--expected-public-key-hash` when comparing the stable target name against a known current remote identity hash. Keep `--require-direct true --require-tun true --require-tcp true` for the production Deskflow/New API path; loosening those flags is diagnostic only.
+
 2. Before any future runtime switch, run the clean rollout helper in verification-only mode against the exact pushed commit. Only use `--apply true` when intentionally replacing the running artifact:
 
 ```bash
@@ -867,6 +882,7 @@ web/default/src/routes/_authenticated/opencode-accounts/index.tsx
 | 激活错误语义 | 本地已实现 | activate 现在对缺失账号 ID 返回同一脱敏的账号不存在业务失败；绑定 channel 缺失时返回明确的 channel-not-found 失败，不再把存储层 `record not found` 原文暴露给操作者。 |
 | 远端 clean artifact 部署 | 已完成 | 已从隔离的干净 checkout 构建已推送的 `main`，生成包含二进制与 sidecar 的 artifact，远端服务已切换到这些 artifact，并显式保留既有运行时数据路径，服务状态已验证为 active。 |
 | Clean rollout helper | 已实现并完成远端 apply | 已新增 `scripts/new-api-clean-rollout.mjs` 及 Node 测试。helper 将干净 checkout gate、Node/Go/前端/build 定向检查、systemd service contract 校验、backup/install/restart、有界 HTTP readiness wait、rollback 与公开输出脱敏固化为可复用流程。默认只做 verification-only，只有显式传入 `--apply true` 才会切换 runtime artifact；它不负责 SSH 传输、sudo、systemd unit 创建、数据库迁移所有权或 secret provisioning。针对已推送 `main` 提交 `2a9baeed` 的远端 `--apply false` dry-run 已验证 clone、revision match、Node/script gate 与跳过运行时变更；随后提交 `3cbf0e5f` 的完整 `--apply true` rollout 已通过所有 gate 并切换运行 artifact。 |
+| Tailscale link preflight | 本地已实现 | 已新增 `scripts/tailscale-link-preflight.mjs` 及 Node 测试。preflight 会输出脱敏 JSON 摘要，覆盖目标 peer 是否存在、是否 expired/online、匿名 node identity hash、Tailscale-layer pong、direct-vs-DERP 路由、ICMP/TUN pong，以及配置的 TCP 端口检查。当前针对托管目标的本地运行按预期失败：识别到陈旧目标 peer，标记 expired/offline，Tailscale/TUN pong 为 0，New API 与 Deskflow 端口 TCP timeout。clean rollout helper 现在也会在 Node gate 中覆盖该脚本。 |
 | 上一次已验证远端上线 | 已完成 | 已推送的 `main` 提交 `3cbf0e5f` 是当前在远端服务完成验证的上线版本。本次上线使用 clean rollout helper，切换运行 artifact 前已通过远端 Node 脚本测试/语法检查、OpenCode/cache Go 定向测试、default 与 classic 前端构建，以及 Go 二进制构建。服务成功重启，本机 HTTP `/api/status` smoke 通过，已部署 runtime 脚本通过 `node --check`，`glm-cache-smoke` 仍包含 response-usage 与 stats 两个 contract gate，sidecar 空状态 `status` 返回 `stopped`。 |
 | 真实 OpenCode 登录 E2E | 待执行 | 需要操作者控制的 OpenCode 订阅账号；仓库不包含真实账号材料。 |
 | 真实 `glm-5.2` cache-hit E2E | 待执行 | 只能在真实 OpenCode 账号经 New API 导入并激活后执行。 |
@@ -973,6 +989,8 @@ delete 现在会在产生外部副作用前验证所有权。缺失账号 ID 是
 
 helper 现在已经作为真实上线通道执行过。提交 `3cbf0e5f` 通过完整远端 gate（`git_clone`、revision match、Node 脚本检查、Go 定向测试、两个前端构建、Go build、artifact check、service contract 校验、backup、install、restart 与 HTTP smoke）并成为当前运行 artifact。随后独立 smoke 确认服务 active、本机 HTTP status OK、已部署 runtime 脚本语法有效、cache-smoke contract gate 标记存在、sidecar 空状态 OK。这证明 helper 可以作为非 secret artifact 的部署机制；但它仍不证明真实 OpenCode 账号导入或 `glm-5.2` 上游 cache 计费行为。
 
+Tailscale 健康现在也有源码内 preflight，而不再依赖手工解释 `tailscale ping` 输出。该脚本刻意只输出类别与匿名 hash，不输出 peer 名称、IP、账号名或原始 node key。默认 gate 对当前 Deskflow/New API 路径足够严格：目标 peer 必须存在、未过期、在线、走 direct path 而不是 DERP-only、TUN ping 可达，并且配置端口 TCP open。这能精确抓住当前故障模式：托管目标解析到 expired/offline node identity，并且相关端口的 tailnet 数据面不可用。这里的取舍是：DERP-only 可以通过参数放宽用于诊断，但不能被当作交互式桌面使用的最终“fast and robust”状态。
+
 ### 验证更新
 
 已成功验证：
@@ -1024,6 +1042,8 @@ node --test scripts/glm-cache-smoke.test.mjs
 node --check scripts/glm-cache-smoke.mjs
 node --test scripts/new-api-clean-rollout.test.mjs
 node --check scripts/new-api-clean-rollout.mjs
+node --test scripts/tailscale-link-preflight.test.mjs
+node --check scripts/tailscale-link-preflight.mjs
 git diff --check
 diff secret-pattern scan
 ```
@@ -1086,6 +1106,7 @@ Sidecar smoke：
   clean rollout helper 针对已推送提交 2a9baeed 的远端 dry-run 通过 git_clone/revision/node_scripts，并跳过 apply
   clean rollout helper 针对已推送提交 3cbf0e5f 的远端完整 apply 通过 git_clone/revision/node_scripts/go_targeted/web_default_build/web_classic_build/go_build/service_contract/backup/install/restart/http_smoke
   apply 后独立 smoke 确认服务 active、本机 HTTP status OK、runtime 脚本语法 OK、cache contract gate 标记存在、sidecar 空状态 status OK
+  本地 Tailscale link preflight 现在会用脱敏证据让陈旧托管目标失败：目标存在但 expired/offline，Tailscale/TUN pong 为 0，New API 与 Deskflow 端口 TCP timeout
 ```
 
 `web/classic` 构建失败的根因已经定位为 `date-fns-tz@1.3.8` 将 peer `date-fns` 解析到了 workspace 顶层的 `date-fns@4`。该版本通过 package exports 阻断 `date-fns/_lib/cloneObject/index.js` 等 private subpath。修复方式是保持 `web/default` 使用 `date-fns@4`，只在 classic 的 Rsbuild 配置中增加局部 alias，让 Semi UI 的 `date-fns-tz` 解析到 Semi 自带的 `date-fns@2.30.0`。
@@ -1101,7 +1122,16 @@ Sidecar smoke：
 
 ### 下一步
 
-1. 先恢复 Tailscale 健康。最新已推送的 `main` 已完成远端部署与 smoke，但必需的 Tailscale 路径仍存在陈旧节点身份、DERP-only 与 TUN 流量失败问题。需要把托管 SSH alias 重定向到当前未过期的 Tailscale peer，或重新授权/重命名远端 Tailscale 节点，让稳定名称解析到当前 identity；之后再确认计数型 Tailscale ping、ICMP/TUN ping 与所需端口 TCP 检查都不再依赖 expired peer。
+1. 先恢复 Tailscale 健康。最新已推送的 `main` 已完成远端部署与 smoke，但必需的 Tailscale 路径仍存在陈旧节点身份、DERP-only 与 TUN 流量失败问题。需要把托管 SSH alias 重定向到当前未过期的 Tailscale peer，或重新授权/重命名远端 Tailscale 节点，让稳定名称解析到当前 identity；之后确认机器 gate 通过：
+
+```bash
+node scripts/tailscale-link-preflight.mjs \
+  --target <stable-tailnet-name> \
+  --ports 3000,24800
+```
+
+当需要确认稳定目标名是否指向当前远端 identity 时，使用 `--expected-id-hash` 或 `--expected-public-key-hash`。生产 Deskflow/New API 路径应保持 `--require-direct true --require-tun true --require-tcp true`；放宽这些 gate 只适合作为诊断。
+
 2. 未来再次切换运行 artifact 前，先对精确的已推送提交运行 clean rollout helper 的 verification-only 模式。只有在明确要替换当前运行 artifact 时才使用 `--apply true`：
 
 ```bash

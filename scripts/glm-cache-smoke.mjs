@@ -5,7 +5,7 @@ import { pathToFileURL } from "node:url";
 const DEFAULT_MODEL = "glm-5.2";
 const DEFAULT_RULE_NAME = "codex cli trace";
 const DEFAULT_GROUP = "default";
-const DEFAULT_INPUT = "Return the word ok. Keep the answer short.";
+const DEFAULT_INPUT = buildDefaultCacheProbeInput();
 const DEFAULT_REQUEST_COUNT = 4;
 const DEFAULT_WARMUP_REQUEST_COUNT = 0;
 const DEFAULT_REQUEST_DELAY_MS = 750;
@@ -33,6 +33,21 @@ export function buildCacheUsageStatsURL(baseURL, options) {
   url.searchParams.set("using_group", options.usingGroup);
   url.searchParams.set("key_fp", options.keyFingerprint);
   return url.toString();
+}
+
+export function buildDefaultCacheProbeInput() {
+  const lines = [
+    "Cache probe corpus for New API glm-5.2 prompt-cache verification.",
+    "Keep this prefix byte-stable across warmup and measured requests.",
+  ];
+  for (let index = 1; index <= 96; index += 1) {
+    const id = String(index).padStart(3, "0");
+    lines.push(
+      `cache-probe-line-${id}: stable routing, stable session, stable prompt prefix, stable accounting evidence.`,
+    );
+  }
+  lines.push("Answer with exactly: ok");
+  return lines.join("\n");
 }
 
 export function buildAdminHeaders(options) {

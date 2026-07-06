@@ -5,6 +5,7 @@ import {
   buildAdminHeaders,
   buildCacheSmokeConfig,
   buildCacheUsageStatsURL,
+  buildDefaultCacheProbeInput,
   buildResponsesPayload,
   cacheKeyFingerprint,
   runCacheSmoke,
@@ -62,6 +63,37 @@ test("buildCacheSmokeConfig reads secrets from environment only", () => {
   assert.equal(config.promptCacheKey, "session-secret");
   assert.equal(config.requestCount, 3);
   assert.equal(config.warmupRequestCount, 2);
+});
+
+test("buildCacheSmokeConfig defaults to a deterministic cacheable probe input", () => {
+  const config = buildCacheSmokeConfig(
+    ["node", "scripts/glm-cache-smoke.mjs", "--base-url", "https://new-api.example.test"],
+    {
+      NEW_API_KEY: "fixture-relay-secret",
+    },
+  );
+
+  assert.equal(config.input, buildDefaultCacheProbeInput());
+  assert.ok(config.input.length > 8000);
+  assert.match(config.input, /cache-probe-line-096/);
+});
+
+test("buildCacheSmokeConfig lets explicit input override the cache probe", () => {
+  const config = buildCacheSmokeConfig(
+    [
+      "node",
+      "scripts/glm-cache-smoke.mjs",
+      "--base-url",
+      "https://new-api.example.test",
+      "--input",
+      "custom prompt",
+    ],
+    {
+      NEW_API_KEY: "fixture-relay-secret",
+    },
+  );
+
+  assert.equal(config.input, "custom prompt");
 });
 
 test("buildAdminHeaders supports token and cookie auth without mixing relay keys", () => {

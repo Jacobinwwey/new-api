@@ -334,7 +334,7 @@ The follow-up stopped-session investigation found a different failure mode: the 
 | Frontend screenshot click accuracy | Implemented and remotely applied | Screenshot click coordinates now account for `object-contain` letterboxing before dispatching CDP click events. Clicks in horizontal or vertical padding are ignored, and content-edge coordinates are clamped to the remote viewport. This fixes a real authorization-flow failure mode where responsive admin layouts could make Google/OpenCode page clicks land at the wrong remote coordinate. Pushed commit `16c126d1` passed clean rollout verification and remote apply; pushed commit `cdb13e4e` keeps that mapping and adds sidecar-side finite/in-viewport click validation before CDP dispatch. |
 | Frontend interaction screenshot refresh | Implemented and remotely applied | Login start, remote click, remote text input, and safe control-key press now schedule staged delayed screenshot refreshes for the still-selected account. Stale screenshot responses from a previously selected account are ignored, account selection/creation clears old screenshots, and pending screenshot requests prevent a request burst. This reduces real Google/OpenCode authorization friction without changing the backend sidecar API or storing additional browser material. Pushed code commit `e13a3163` passed local helper tests, typecheck, targeted oxlint, and default frontend build coverage; pushed `main` commit `a64e3ae3` passed clean rollout verification and remote apply. Pushed commit `cdb13e4e` extends the refresh schedule to 350 ms, 1250 ms, 2500 ms, and 5000 ms after remote interactions, matching slower OAuth/Google redirects. |
 | Remote browser click operability | Implemented and remotely applied | Commit `cdb13e4e` hardens the operator click path end to end: the frontend sends clicks from a stable pointer surface, the helper rejects non-content letterbox clicks, the sidecar rejects invalid viewport points, and CDP now emits `mouseMoved`, `mousePressed`, and `mouseReleased` with button state. Local tests cover coordinate and click validation paths. Remote post-apply smoke against the installed sidecar clicked a non-secret page and observed the expected browser-state mutation. |
-| Frontend stopped-session screenshot lifecycle | Implemented locally | Follow-up diagnosis showed click requests can reach the backend while the sidecar later reports `stopped`, leaving the operator with a stale screenshot that cannot be interacted with. The page now clears the screenshot and cancels pending delayed refreshes whenever login status reports `running=false` or `status=stopped`; Stop also clears the viewport immediately. Helper tests cover the stopped-status invalidation decision. | This is a UI truthfulness fix, not a Chromium crash fix. If sessions stop unexpectedly during real login, the next investigation should target browser lifetime and target-page process health. |
+| Frontend stopped-session screenshot lifecycle | Implemented and remotely applied | Follow-up diagnosis showed click requests can reach the backend while the sidecar later reports `stopped`, leaving the operator with a stale screenshot that cannot be interacted with. The page now clears the screenshot and cancels pending delayed refreshes whenever login status reports `running=false` or `status=stopped`; Stop also clears the viewport immediately. Helper tests cover the stopped-status invalidation decision. Pushed commit `afe591d2` passed clean rollout verification-only, full remote apply, and post-apply service/HTTP/auth-smoke checks. | This is a UI truthfulness fix, not a Chromium crash fix. If sessions stop unexpectedly during real login, the next investigation should target browser lifetime and target-page process health. |
 | Frontend delete confirmation | Implemented locally | Account deletion now uses the existing `ConfirmDialog` destructive flow instead of single-click deletion. The dialog names the selected account, disables duplicate confirmation while deletion is in flight, and only clears the remote browser panel when the deleted account was selected. Helper tests cover dialog-open and confirm-enabled decisions without adding a React DOM test stack. |
 | Frontend business-error gating | Implemented locally | OpenCode account API wrappers now reject New API business failures (`success:false`) before React Query can run success handlers. This prevents purge/delete, extract, quota refresh, activation, or browser-session failures from showing success toasts or clearing UI state while the backend has intentionally preserved the account for retry. |
 | OpenCode frontend rollout gate | Implemented and remotely applied | The clean rollout helper now runs the OpenCode account page helper test, targeted oxlint for `src/features/opencode-accounts` and its route, and default-web typecheck before the default frontend build. This catches regressions in the operator-facing import window before a remote artifact switch, without treating unrelated whole-repo historical lint debt as an OpenCode rollout blocker. Pushed `main` commit `99141ff6` passed this gate in remote verification-only mode and again during full apply. |
@@ -347,7 +347,7 @@ The follow-up stopped-session investigation found a different failure mode: the 
 | Tailscale link preflight | Implemented locally | Added `scripts/tailscale-link-preflight.mjs` plus Node tests. The preflight produces a secret-redacted JSON summary for target peer presence, expired/online state, anonymized node identity hashes, Tailscale-layer pongs, direct-vs-DERP routing, ICMP/TUN pongs, and configured TCP port checks. The latest local run against the managed target now finds the expected peer online and not expired, and the deployed New API TCP port is open through tailnet. The remaining failures are direct-path absence, weak TUN ping evidence, and a closed remote Deskflow server port; the last one is expected for the current remote-client/local-server Deskflow topology and should be checked with client-mode evidence instead of a remote 24800 listener. The clean rollout helper now includes this script in its Node gate. |
 | Go test isolation | Implemented and rollout-gated locally | OpenCode model/service tests and controller DB helpers now restore `model.DB` / `model.LOG_DB` after temporary in-memory database swaps. The earlier cross-package SQLite failures were caused by test global-state leakage, not a production migration gap. `go test ./common ./model ./service ./controller ./router ./service/relayconvert -count=1` now passes and is now included in the clean rollout Go gate. |
 | Private-address redaction rollout | Implemented and remotely applied | Pushed `main` commit `8c5d4e25` carried the diagnostic-redaction hardening through verification-only gates, full apply, and post-apply runtime script syntax checks. This proves the deployed helper/script set contains the hardened redaction boundary; it still does not prove network path quality. |
-| Last verified remote rollout | Done | Pushed `main` commit `cdb13e4e` is the latest rollout verified on the remote service. Verification-only exited successfully; a subsequent full apply transcript passed clean checkout, revision, Node scripts, targeted Go, OpenCode frontend checks, default/classic frontend builds, Go build, artifact, service contract, backup, install, restart, HTTP smoke, and auth runtime smoke gates, then reported `deployed_prefix=cdb13e4e`. Independent post-apply smoke confirmed service health, sidecar syntax, click-validation markers, mouse-move dispatch marker, installed sidecar click smoke, sidecar running status, and cleanup. |
+| Last verified remote rollout | Done | Pushed `main` commit `afe591d2` is the latest rollout verified on the remote service. Verification-only passed clean checkout, revision, Node scripts, targeted Go, OpenCode frontend checks, default/classic frontend builds, Go build, and artifact gates. Full apply then passed service contract, backup, install, restart, HTTP smoke, and auth runtime smoke gates, and reported `deployed_prefix=afe591d2`. Independent post-apply smoke confirmed service active, HTTP status OK, updated index assets are served, and official OpenCode auth runtime smoke passes. |
 | Real OpenCode login E2E | Pending | Requires an operator-controlled OpenCode subscription account. The repository contains no real account material. |
 | Real `glm-5.2` cache-hit E2E | Pending | Should run only after a real OpenCode account has been imported and activated through New API. |
 
@@ -504,6 +504,46 @@ node --check scripts/opencode-live-e2e.mjs
 node --check scripts/opencode-auth-session-smoke.mjs
 git diff --check
 diff secret-pattern scan=clean
+```
+
+Latest remote rollout verification for pushed commit `afe591d2`:
+
+```text
+clean rollout verification-only:
+  git_clone=ok
+  revision=ok
+  node_scripts=ok
+  go_targeted=ok
+  web_default_checks=ok
+  web_default_build=ok
+  web_classic_build=ok
+  go_build=ok
+  artifact=ok
+  apply=skipped
+
+clean rollout apply:
+  git_clone=ok
+  revision=ok
+  node_scripts=ok
+  go_targeted=ok
+  web_default_checks=ok
+  web_default_build=ok
+  web_classic_build=ok
+  go_build=ok
+  artifact=ok
+  service_contract=ok
+  backup=ok
+  install=ok
+  restart=ok
+  http_smoke=ok
+  auth_runtime_smoke=ok
+  deployed_prefix=afe591d2
+
+post-apply smoke:
+  service_active=ok
+  http_smoke=ok
+  updated_index_assets=ok
+  auth_runtime_smoke=ok
 ```
 
 Latest remote runtime verification for pushed documentation HEAD `12852976` carrying code commit `0cdfdc74`:
@@ -1266,7 +1306,7 @@ web/default/src/routes/_authenticated/opencode-accounts/index.tsx
 | 前端截图点击坐标准确性 | 已实现并完成远端 apply | screenshot 点击坐标现在会在发送 CDP click 前扣除 `object-contain` 的 letterbox 留白。横向或纵向 padding 区域的点击会被忽略，内容边缘坐标会 clamp 到远端 viewport 内。该修复覆盖一个真实授权流程故障模式：响应式管理后台布局变化时，Google/OpenCode 页面点击可能落到错误的远端坐标。已推送提交 `16c126d1` 通过 clean rollout verification 与远端 apply；已推送提交 `cdb13e4e` 保留该映射，并在 CDP dispatch 前增加 sidecar 侧有限/viewport 内坐标校验。 |
 | 前端交互后截图刷新 | 已实现并完成远端 apply | login start、远端点击、远端文本输入与安全控制键按下成功后，现在会为仍处于选中状态的账号调度分阶段延迟截图刷新。来自旧选中账号的异步截图响应会被忽略，账号切换/创建会清空旧截图，已有截图请求 pending 时不会继续堆叠请求。这样可以降低真实 Google/OpenCode 授权时反复手动点击 Screenshot 的摩擦，同时不改变后端 sidecar API，也不额外持久化浏览器材料。已推送代码提交 `e13a3163`，本地已覆盖 helper 测试、typecheck、targeted oxlint 与 default 前端构建；已推送的 `main` 提交 `a64e3ae3` 通过 clean rollout verification 与远端 apply。已推送提交 `cdb13e4e` 把远端交互后的刷新计划扩展为 350 ms、1250 ms、2500 ms 和 5000 ms，以匹配更慢的 OAuth/Google 跳转。 |
 | 远端浏览器点击可操作性 | 已实现并完成远端 apply | 提交 `cdb13e4e` 端到端加固操作者点击路径：前端从稳定 pointer surface 发送点击，helper 拒绝非内容区 letterbox 点击，sidecar 拒绝无效 viewport 坐标，CDP 现在发送带 button state 的 `mouseMoved`、`mousePressed` 与 `mouseReleased`。本地测试覆盖坐标与点击校验路径。远端 apply 后，已安装 sidecar 对无 secret 页面执行点击并观察到预期浏览器状态变更。 |
-| 前端 stopped-session 截图生命周期 | 本地已实现 | 后续诊断显示 click 请求可以进入后端，但 sidecar 后续报告 `stopped`，导致操作者面对一张不可交互的旧截图。页面现在会在登录状态报告 `running=false` 或 `status=stopped` 时清空截图并取消 pending 延迟刷新；Stop 成功后也立即清空 viewport。helper 测试覆盖 stopped 状态下的截图失效判定。 | 这是 UI truthfulness 修复，不是 Chromium 崩溃修复。如果真实登录期间 session 异常停止，下一步应继续查浏览器生命周期和目标页进程健康。 |
+| 前端 stopped-session 截图生命周期 | 已实现并完成远端 apply | 后续诊断显示 click 请求可以进入后端，但 sidecar 后续报告 `stopped`，导致操作者面对一张不可交互的旧截图。页面现在会在登录状态报告 `running=false` 或 `status=stopped` 时清空截图并取消 pending 延迟刷新；Stop 成功后也立即清空 viewport。helper 测试覆盖 stopped 状态下的截图失效判定。已推送提交 `afe591d2` 通过 clean rollout verification-only、完整远端 apply，以及 apply 后服务/HTTP/auth-smoke 检查。 | 这是 UI truthfulness 修复，不是 Chromium 崩溃修复。如果真实登录期间 session 异常停止，下一步应继续查浏览器生命周期和目标页进程健康。 |
 | 前端删除确认 | 本地已实现 | 账号删除现在使用现有 `ConfirmDialog` destructive flow，而不是单击即删。对话框会显示被选中的账号名，在删除请求执行中禁用重复确认，并且只有删除当前选中账号时才清空远端浏览器面板。helper 测试覆盖 dialog open 与 confirm enabled 判定，未新增 React DOM 测试栈。 |
 | 前端业务失败拦截 | 本地已实现 | OpenCode account API wrapper 现在会在 React Query 执行 success handler 前拒绝 New API 的业务失败响应（`success:false`）。这样 purge/delete、extract、quota refresh、activation 或浏览器会话失败时，不会误弹成功 toast，也不会在后端刻意保留账号以便重试时清空前端状态。 |
 | OpenCode 前端 rollout gate | 已实现并完成远端 apply | clean rollout helper 现在会在 default 前端构建前运行 OpenCode account 页面 helper 测试、针对 `src/features/opencode-accounts` 与其 route 的 targeted oxlint，以及 default-web typecheck。这样远端 artifact 切换前会覆盖操作者实际使用的导入窗口，同时不会把全仓既有历史 lint 债务误当成 OpenCode rollout 阻塞。已推送的 `main` 提交 `99141ff6` 已先通过远端 verification-only，再通过完整 apply。 |
@@ -1279,7 +1319,7 @@ web/default/src/routes/_authenticated/opencode-accounts/index.tsx
 | Tailscale link preflight | 本地已实现 | 已新增 `scripts/tailscale-link-preflight.mjs` 及 Node 测试。preflight 会输出脱敏 JSON 摘要，覆盖目标 peer 是否存在、是否 expired/online、匿名 node identity hash、Tailscale-layer pong、direct-vs-DERP 路由、ICMP/TUN pong，以及配置的 TCP 端口检查。最新本地运行已经能识别到目标 peer 在线且未过期，部署态 New API TCP 端口也可通过 tailnet 打开。剩余失败点是 direct path 未建立、TUN ping 证据不足，以及远端 Deskflow server 端口关闭；最后一项符合当前 remote-client/local-server Deskflow 拓扑，后续应使用 client-mode 证据验证，而不是要求远端监听 24800。clean rollout helper 现在也会在 Node gate 中覆盖该脚本。 |
 | Go 测试隔离 | 本地已实现并纳入 rollout gate | OpenCode model/service 测试与 controller DB helper 现在会在临时内存库切换后恢复 `model.DB` / `model.LOG_DB`。此前跨包 SQLite 失败的根因是测试全局状态泄漏，不是生产迁移缺口。`go test ./common ./model ./service ./controller ./router ./service/relayconvert -count=1` 现在本地通过，并已纳入 clean rollout 的 Go gate。 |
 | 私网地址脱敏远端上线 | 已实现并完成远端 apply | 已推送的 `main` 提交 `8c5d4e25` 已把诊断脱敏加固带过 verification-only gate、完整 apply 与 apply 后 runtime scripts 语法检查。这证明部署态 helper/script set 已包含加固后的脱敏边界；它仍不证明网络路径质量。 |
-| 上一次已验证远端上线 | 已完成 | 已推送的 `main` 提交 `cdb13e4e` 是当前已完成远端验证的最新版本。verification-only 成功退出；随后完整 apply transcript 通过 clean checkout、revision、Node scripts、targeted Go、OpenCode 前端检查、default/classic 前端构建、Go build、artifact、service contract、backup、install、restart、HTTP smoke 与 auth runtime smoke gate，并报告 `deployed_prefix=cdb13e4e`。apply 后独立 smoke 确认服务健康、sidecar 语法、click-validation marker、mouse-move dispatch marker、已安装 sidecar click smoke、sidecar running 状态与 cleanup。 |
+| 上一次已验证远端上线 | 已完成 | 已推送的 `main` 提交 `afe591d2` 是当前已完成远端验证的最新版本。verification-only 已通过 clean checkout、revision、Node scripts、targeted Go、OpenCode 前端检查、default/classic 前端构建、Go build 与 artifact gate。随后完整 apply 通过 service contract、backup、install、restart、HTTP smoke 与 auth runtime smoke gate，并报告 `deployed_prefix=afe591d2`。apply 后独立 smoke 确认服务 active、HTTP status OK、已更新 index assets 正在被服务，以及官方 OpenCode auth runtime smoke 通过。 |
 | 真实 OpenCode 登录 E2E | 待执行 | 需要操作者控制的 OpenCode 订阅账号；仓库不包含真实账号材料。 |
 | 真实 `glm-5.2` cache-hit E2E | 待执行 | 只能在真实 OpenCode 账号经 New API 导入并激活后执行。 |
 
@@ -1436,6 +1476,46 @@ node --check scripts/opencode-live-e2e.mjs
 node --check scripts/opencode-auth-session-smoke.mjs
 git diff --check
 diff secret-pattern scan=clean
+```
+
+已推送提交 `afe591d2` 的最新远端 rollout 验证：
+
+```text
+clean rollout verification-only:
+  git_clone=ok
+  revision=ok
+  node_scripts=ok
+  go_targeted=ok
+  web_default_checks=ok
+  web_default_build=ok
+  web_classic_build=ok
+  go_build=ok
+  artifact=ok
+  apply=skipped
+
+clean rollout apply:
+  git_clone=ok
+  revision=ok
+  node_scripts=ok
+  go_targeted=ok
+  web_default_checks=ok
+  web_default_build=ok
+  web_classic_build=ok
+  go_build=ok
+  artifact=ok
+  service_contract=ok
+  backup=ok
+  install=ok
+  restart=ok
+  http_smoke=ok
+  auth_runtime_smoke=ok
+  deployed_prefix=afe591d2
+
+apply 后独立 smoke:
+  service_active=ok
+  http_smoke=ok
+  updated_index_assets=ok
+  auth_runtime_smoke=ok
 ```
 
 承载代码提交 `0cdfdc74` 的已推送文档 HEAD `12852976` 的最新远端 runtime 验证：

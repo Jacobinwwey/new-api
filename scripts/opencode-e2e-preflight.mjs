@@ -10,6 +10,13 @@ const DEFAULT_MIN_ACTIVE_ACCOUNTS = 0;
 const DEFAULT_MIN_ACTIVE_READY_ACCOUNTS = 0;
 const CREDENTIAL_KEY_SOURCES = new Set(["crypto_secret", "session_secret_fallback"]);
 const CREDENTIAL_INTEGRITY_CATEGORIES = new Set(["ok", "decrypt_failed", "unknown"]);
+const ACCOUNT_ITEM_CONTRACT_FIELDS = [
+  "active",
+  "activation_ready",
+  "credential_integrity",
+  "credential_key_source",
+  "missing_activation_fields",
+];
 const AFFINITY_STATS_PROBE = {
   ruleName: "codex cli trace",
   usingGroup: "default",
@@ -170,6 +177,16 @@ export async function runOpenCodePreflight(config) {
       expected: "array",
     });
     if (accountsPayloadIsArray) {
+      const accountItemContractViolations = accountItemContractViolationCounts(
+        accountsResult.data,
+      );
+      const hasAccountItemContractViolations = objectHasValues(accountItemContractViolations);
+      checks.push({
+        name: "opencode_accounts_item_contract",
+        status: hasAccountItemContractViolations ? "failed" : "passed",
+        actual: hasAccountItemContractViolations ? accountItemContractViolations : "valid",
+        expected: ACCOUNT_ITEM_CONTRACT_FIELDS.join("+"),
+      });
       summary.accounts = summarizeAccounts(accountsResult.data);
       checks.push({
         name: "opencode_accounts_readiness_consistent",
@@ -418,7 +435,8 @@ function summarizeAccounts(data) {
   let active = 0;
   let activeReady = 0;
   for (const account of accounts) {
-    if (account?.active) active += 1;
+    const isActive = account?.active === true;
+    if (isActive) active += 1;
     const integrity = credentialIntegrityCategory(account?.credential_integrity);
     credentialIntegrity[integrity] = (credentialIntegrity[integrity] || 0) + 1;
     const keySource = credentialKeySourceCategory(account?.credential_key_source);
@@ -431,7 +449,7 @@ function summarizeAccounts(data) {
       activationReadyInconsistent += 1;
     }
     if (ready) activationReady += 1;
-    if (account?.active && ready) activeReady += 1;
+    if (isActive && ready) activeReady += 1;
     const contract = activationContractCategory(account, integrity, missingFields, ready);
     activationContract[contract] = (activationContract[contract] || 0) + 1;
     for (const field of missingFields) {
@@ -451,6 +469,46 @@ function summarizeAccounts(data) {
     activation_contract: activationContract,
     missing_activation_fields: missingActivationFields,
   };
+}
+
+function accountItemContractViolationCounts(accounts) {
+  const violations = {};
+  for (const account of accounts) {
+    if (!account || typeof account !== "object" || Array.isArray(account)) {
+      incrementViolation(violations, "item");
+      continue;
+    }
+    if (typeof account.active !== "boolean") {
+      incrementViolation(violations, "active");
+    }
+    if (typeof account.activation_ready !== "boolean") {
+      incrementViolation(violations, "activation_ready");
+    }
+    if (
+      typeof account.credential_integrity !== "string" ||
+      account.credential_integrity.trim() === ""
+    ) {
+      incrementViolation(violations, "credential_integrity");
+    }
+    if (
+      typeof account.credential_key_source !== "string" ||
+      account.credential_key_source.trim() === ""
+    ) {
+      incrementViolation(violations, "credential_key_source");
+    }
+    if (!Array.isArray(account.missing_activation_fields)) {
+      incrementViolation(violations, "missing_activation_fields");
+    }
+  }
+  return violations;
+}
+
+function incrementViolation(violations, key) {
+  violations[key] = (violations[key] || 0) + 1;
+}
+
+function objectHasValues(value) {
+  return Object.keys(value || {}).length > 0;
 }
 
 function credentialIntegrityCategory(value) {

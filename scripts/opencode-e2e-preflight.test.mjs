@@ -573,6 +573,79 @@ test("runOpenCodePreflight fails non-array account payloads", async () => {
   });
 });
 
+test("runOpenCodePreflight fails malformed account item contracts", async () => {
+  const fetcher = async (url) => {
+    if (String(url).endsWith("/api/status")) {
+      return jsonResponse({ version: "test" });
+    }
+    if (String(url).endsWith("/api/opencode/accounts/diagnostics")) {
+      return jsonResponse({
+        success: true,
+        data: {
+          credential_key_source: "crypto_secret",
+          uses_fallback_credential_key: false,
+        },
+      });
+    }
+    if (String(url).endsWith("/api/opencode/accounts")) {
+      return jsonResponse({
+        success: true,
+        data: [
+          {
+            active: "true",
+            activation_ready: true,
+            credential_integrity: "ok",
+            credential_key_source: "crypto_secret",
+            missing_activation_fields: "api_key",
+          },
+        ],
+      });
+    }
+    if (String(url).includes("/api/log/channel_affinity_usage_cache")) {
+      return jsonResponse({
+        success: true,
+        data: {
+          rule_name: "codex cli trace",
+          using_group: "default",
+          key_fp: "00000000",
+        },
+      });
+    }
+    return jsonResponse({ success: false, message: "not found" }, { status: 404 });
+  };
+
+  const summary = await runOpenCodePreflight({
+    baseURL: "https://new-api.example.test",
+    adminToken: "root-token-secret",
+    adminCookie: "",
+    adminUserID: "1",
+    timeoutMs: 1000,
+    requireRoot: true,
+    requireStableCredentialKey: true,
+    requireAffinityStats: true,
+    minActiveReadyAccounts: 1,
+    fetcher,
+  });
+
+  assert.equal(summary.checks.status, "failed");
+  assert.equal(summary.accounts.active, 0);
+  assert.equal(summary.accounts.active_ready, 0);
+  assert.deepEqual(
+    summary.checks.items.find((item) => item.name === "opencode_accounts_item_contract"),
+    {
+      name: "opencode_accounts_item_contract",
+      status: "failed",
+      actual: {
+        active: 1,
+        missing_activation_fields: 1,
+      },
+      expected:
+        "active+activation_ready+credential_integrity+credential_key_source+missing_activation_fields",
+    },
+  );
+  assert.doesNotMatch(JSON.stringify(summary), /api_key|root-token-secret|new-api\.example\.test/);
+});
+
 test("runOpenCodePreflight fails mismatched affinity stats identity", async () => {
   const fetcher = async (url) => {
     if (String(url).endsWith("/api/status")) {

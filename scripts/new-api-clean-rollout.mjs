@@ -11,6 +11,7 @@ const DEFAULT_SERVICE_NAME = "new-api";
 const DEFAULT_STATUS_URL = "http://127.0.0.1:3000/api/status";
 const DEFAULT_TIMEOUT_SECONDS = 900;
 const DEFAULT_READY_TIMEOUT_SECONDS = 90;
+const DEFAULT_AUTH_RUNTIME_SMOKE_TIMEOUT_SECONDS = 60;
 export const RUNTIME_SCRIPTS = [
   "opencode-auth-session.mjs",
   "opencode-auth-session-smoke.mjs",
@@ -95,6 +96,11 @@ export function buildRolloutConfig(argv = process.argv, env = process.env) {
     runGoTests: readBoolean(args["go-tests"] || env.NEW_API_ROLLOUT_GO_TESTS, true, "go-tests"),
     runWebBuilds: readBoolean(args["web-builds"] || env.NEW_API_ROLLOUT_WEB_BUILDS, true, "web-builds"),
     runGoBuild: readBoolean(args["go-build"] || env.NEW_API_ROLLOUT_GO_BUILD, true, "go-build"),
+    runAuthRuntimeSmoke: readBoolean(
+      args["auth-runtime-smoke"] || env.NEW_API_ROLLOUT_AUTH_RUNTIME_SMOKE,
+      true,
+      "auth-runtime-smoke",
+    ),
   };
 }
 
@@ -247,6 +253,16 @@ async function applyRuntimeArtifact(config, srcDir, artifactPath) {
     await waitForHTTP(config.statusURL, config.readyTimeoutSeconds);
     console.log("restart=ok");
     console.log("http_smoke=ok");
+    if (config.runAuthRuntimeSmoke) {
+      const smokeTimeoutSeconds = Math.max(config.readyTimeoutSeconds, DEFAULT_AUTH_RUNTIME_SMOKE_TIMEOUT_SECONDS);
+      await runStep(
+        "auth_runtime_smoke",
+        buildAuthRuntimeSmokeCommand(service, smokeTimeoutSeconds),
+        (smokeTimeoutSeconds + 30) * 1000,
+      );
+    } else {
+      console.log("auth_runtime_smoke=skipped");
+    }
     console.log(`deployed_prefix=${config.revision.slice(0, 8)}`);
   } catch (error) {
     console.log("restart_or_smoke=failed");
@@ -264,6 +280,27 @@ async function applyRuntimeArtifact(config, srcDir, artifactPath) {
     console.log("rollback=ok");
     throw error;
   }
+}
+
+export function buildAuthRuntimeSmokeCommand(service, timeoutSeconds = DEFAULT_AUTH_RUNTIME_SMOKE_TIMEOUT_SECONDS) {
+  const scriptsDir = joinRuntimePath(service.workingDirectory, "scripts");
+  return [
+    "node",
+    shellQuote(joinRuntimePath(scriptsDir, "opencode-auth-session-smoke.mjs")),
+    "--sidecar-path",
+    shellQuote(joinRuntimePath(scriptsDir, "opencode-auth-session.mjs")),
+    "--url",
+    "about:blank",
+    "--timeout",
+    shellQuote(String(timeoutSeconds)),
+  ].join(" ");
+}
+
+function joinRuntimePath(basePath, ...segments) {
+  const base = String(basePath || "").replace(/\/+$/g, "");
+  return [base, ...segments.map((segment) => String(segment).replace(/^\/+|\/+$/g, ""))]
+    .filter(Boolean)
+    .join("/");
 }
 
 async function readServiceContract(serviceName) {

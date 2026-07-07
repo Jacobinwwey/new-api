@@ -6,6 +6,7 @@ import {
   NODE_ROLLOUT_CHECK_COMMANDS,
   RUNTIME_SCRIPTS,
   WEB_DEFAULT_CHECK_COMMANDS,
+  buildAuthRuntimeSmokeCommand,
   buildRolloutConfig,
   parseExecStartPath,
   redactText,
@@ -66,6 +67,7 @@ test("buildRolloutConfig defaults to verification-only rollout", () => {
   assert.equal(config.runGoTests, true);
   assert.equal(config.runWebBuilds, true);
   assert.equal(config.runGoBuild, true);
+  assert.equal(config.runAuthRuntimeSmoke, true);
 });
 
 test("buildRolloutConfig accepts explicit apply and gate overrides", () => {
@@ -85,6 +87,8 @@ test("buildRolloutConfig accepts explicit apply and gate overrides", () => {
       "false",
       "--go-build",
       "false",
+      "--auth-runtime-smoke",
+      "false",
       "--ready-timeout",
       "30",
       "--timeout",
@@ -98,6 +102,7 @@ test("buildRolloutConfig accepts explicit apply and gate overrides", () => {
   assert.equal(config.runGoTests, false);
   assert.equal(config.runWebBuilds, false);
   assert.equal(config.runGoBuild, false);
+  assert.equal(config.runAuthRuntimeSmoke, false);
   assert.equal(config.readyTimeoutSeconds, 30);
   assert.equal(config.timeoutSeconds, 120);
 });
@@ -161,6 +166,21 @@ test("node rollout checks cover the auth sidecar runtime smoke runner", () => {
     "node --check scripts/tailscale-link-preflight.mjs",
     "node --check scripts/opencode-live-e2e.mjs",
   ]);
+});
+
+test("buildAuthRuntimeSmokeCommand runs the installed sidecar smoke without credential-bearing inputs", () => {
+  const command = buildAuthRuntimeSmokeCommand(
+    {
+      workingDirectory: "/srv/new-api/current",
+    },
+    60,
+  );
+
+  assert.equal(
+    command,
+    "node '/srv/new-api/current/scripts/opencode-auth-session-smoke.mjs' --sidecar-path '/srv/new-api/current/scripts/opencode-auth-session.mjs' --url about:blank --timeout '60'",
+  );
+  assert.doesNotMatch(command, /api[_-]?key|cookie|workspace[_-]?id|token|Bearer|code=|state=/i);
 });
 
 test("web default checks cover OpenCode account UI behavior before rollout build", () => {

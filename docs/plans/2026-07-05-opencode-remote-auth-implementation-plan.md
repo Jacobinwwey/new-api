@@ -269,7 +269,7 @@ Commit `0cdfdc74` brings the non-credentialed browser authorization path into th
 | Multi-account switching and channel activation | Satisfied for New API channels. The Admin Web can create/bind accounts, extract/refresh quota, activate selected accounts into bound channels, and prevent activation when the channel credential contract is not satisfied. | `service/opencode_account.go`, `controller/opencode_account.go`, `web/default/src/features/opencode-accounts/index.tsx` | External `cc-switch` remains outside this repository. The robust integration point is stable New API channel identity and activation readiness, not copying raw account material into client-side switch files. |
 | Maximize `glm-5.2` package cache-hit probability and statistics quality | Repository prerequisites are implemented. Codex affinity covers `glm-*`, synchronizes `Session_id` and `prompt_cache_key`, hashes raw affinity values, preserves cached-token usage fields, provides a redacted multi-request smoke runner with stats identity gates, and now requires the live preflight `activation_contract.ready` count before cache smoke can run. | `service/relayconvert`, `model/channel_affinity.go`, `scripts/glm-cache-smoke.mjs`, `scripts/opencode-live-e2e.mjs` | This still does not prove upstream warm-cache billing. Proof requires a real imported OpenCode subscription account, activated channel, repeated `glm-5.2` requests, and accepted `checks.status` from the live E2E gate. |
 | Keep Deskflow/Tailscale concerns separate but measurable | Partially satisfied. The repository has a redacted Tailscale link preflight and the live E2E runner checks the deployed New API service path by default instead of a non-existent remote Deskflow server port. | `scripts/tailscale-link-preflight.mjs`, `scripts/opencode-live-e2e.mjs`, `scripts/new-api-clean-rollout.mjs` | Direct path and Deskflow client-mode stability are operational blockers, not code-completeness evidence. Do not treat DERP-only connectivity as "fast and robust" for interactive Deskflow. |
-| Make rollout repeatable and secret-clean | Satisfied for the rollout mechanism, but the latest pushed code has not yet been remotely applied. The clean rollout helper builds from a clean checkout, runs targeted Node/Go/frontend/build gates, redacts public output, installs only non-secret runtime scripts including the auth-session runtime smoke runner, and applies only with explicit `--apply true`. Pushed `main` commit `3404b01c` remains the last remotely verified runtime: it passed verification-only gates, full apply, `service_contract`, `backup`, `install`, `restart`, `http_smoke`, and `auth_runtime_smoke=ok`. Pushed `main` commit `0cdfdc74` is locally tested and pushed, but remote verification is pending because the managed LearnSSH alias did not respond before the rollout helper could be uploaded or executed. | `scripts/new-api-clean-rollout.mjs`, `scripts/new-api-clean-rollout.test.mjs`, `scripts/opencode-auth-session-smoke.mjs`, `scripts/opencode-live-e2e.mjs` | Rollout helper does not own SSH transport, sudo provisioning, real account import, secret configuration, or tailnet reachability. Those remain operator/deployment responsibilities and must be healthy before runtime sync. |
+| Make rollout repeatable and secret-clean | Satisfied for the rollout mechanism, and the latest auth-smoke runtime gate is now verified on the deployed service. The clean rollout helper builds from a clean checkout, runs targeted Node/Go/frontend/build gates, redacts public output, installs only non-secret runtime scripts including the auth-session runtime smoke runner, and applies only with explicit `--apply true`. Current remote evidence is intentionally conservative: verification-only passed for the pushed documentation HEAD carrying code commit `0cdfdc74`; the interrupted apply command did not provide a trustworthy final rollout transcript, so post-apply proof is based on no residual rollout process, service/HTTP health, installed script syntax checks, `opencode_auth_smoke` and redaction markers in the runtime scripts, official OpenCode auth-session smoke success, and helper cleanup. | `scripts/new-api-clean-rollout.mjs`, `scripts/new-api-clean-rollout.test.mjs`, `scripts/opencode-auth-session-smoke.mjs`, `scripts/opencode-live-e2e.mjs` | Rollout helper does not own SSH transport, sudo provisioning, real account import, secret configuration, or tailnet reachability. Those remain operator/deployment responsibilities. Runtime marker verification proves the non-secret browser-bridge gate is deployed; it does not prove real OpenCode login, quota extraction, or cache billing. |
 
 | Area | Status | Notes |
 |---|---|---|
@@ -288,7 +288,7 @@ Commit `0cdfdc74` brings the non-credentialed browser authorization path into th
 | OpenCode preflight readiness categories | Implemented locally | The preflight account summary now adds fixed-category `credential_key_source` and `activation_contract` counters beside the existing active/ready totals. `activation_contract` classifies each account as `ready`, `decrypt_failed`, `codex_oauth_key_required`, `missing_channel`, `missing_credential`, or `incomplete`, derived from public readiness fields only. This closes a proof-quality gap before live `glm-5.2` testing: an operator can tell whether a deployed account is blocked by an unstable key source, decrypt failure, missing binding, missing credential, or Codex/plain-key mismatch without seeing labels, channel names, masked emails, raw missing-field names, API keys, cookies, workspace IDs, OAuth payloads, or deployment addresses. Tests cover the Codex/plain-key mismatch category and assert the summary still does not echo raw `api_key` field names or test secrets. |
 | OpenCode live E2E orchestration gate | Implemented and remotely applied | Added `scripts/opencode-live-e2e.mjs` plus Node tests. The runner composes `tailscale-link-preflight`, `opencode-e2e-preflight`, and `glm-cache-smoke` with strict production-oriented defaults: at least one active-ready OpenCode account, stable credential key source, readable affinity stats, two warm-up calls, six measured calls, request and stats hit-rate thresholds of `0.8`, at least one cache-signal token, and a Tailscale TCP check for the deployed New API service port. Tailscale failure stops the run before credentialed OpenCode/cache gates by default, so a known-broken tailnet does not consume live API quota or produce misleading cache evidence. `--continue-on-failure true` and `--skip-tailscale true` are explicit diagnostic overrides, not production acceptance modes. The runner now emits a separate `acceptance` summary: `production_ready` is true only when all stage checks pass and no diagnostic override is active, and the CLI exits non-zero when acceptance fails even if diagnostic stage checks passed. Relaxed Tailscale requirements are now also diagnostic overrides: disabling direct-path, TUN, TCP, clearing TCP ports, or lowering `min-pongs` below `ping-count` prevents production acceptance even if stage checks pass. This prevents skipped-Tailscale, DERP-tolerant, or no-TCP-check diagnostic runs from being consumed as final acceptance. The live gate treats any actually executed OpenCode/cache stage that returns `skipped` or omits `checks.status` as failed; `skipped` is accepted only for explicitly disabled Tailscale or downstream stages blocked by an earlier failed gate. It also adds `opencode_activation_contract_ready` after the preflight stage and requires `accounts.activation_contract.ready >= minActiveReadyAccounts`; if that category evidence is missing or below threshold, `glm_cache_smoke` is skipped before live quota is spent. Stage exceptions are converted into failed stage summaries with redacted deployment URL, Tailscale target, admin/relay credentials, prompt cache key, input text, OAuth payloads, emails, and local paths, preserving fail-fast behavior without printing raw exception text. Successful stage summaries are also recursively sanitized at the orchestration boundary, including both JSON keys and values, so a buggy lower-level runner cannot reintroduce raw live-run material into the combined JSON output. The sanitizer now covers prompt echo variants as well: raw prefixes, full JSON strings, JSON inner escaped strings, and JSON inner prefixes. The live E2E default intentionally does not require a remote Deskflow server port, because the current Deskflow topology is remote-client to local-server/proxy. The clean rollout helper now includes this script's tests and syntax check in its Node gate. Pushed `main` commit `713392b0` deployed the production-acceptance summary; follow-up commit `300ea33d` adds CLI-level coverage proving diagnostic overrides make the CLI exit non-zero even when diagnostic stage checks pass; commit `24306450` deploys relaxed-Tailscale override detection. |
 | OpenCode/cache evidence acceptance boundary | Implemented and remotely applied | Commit `3404b01c` adds regression coverage and runtime logic that mark relaxed OpenCode/cache evidence as diagnostic. The fixed override names cover optional root auth, optional stable credential key source, optional affinity stats, relaxed active-ready account count, non-`glm-5.2` cache model, disabled/optional stats, reduced warm-up or measured request count, reduced request/stats hit-rate thresholds, and reduced cache-signal-token threshold. Local Node gate now passes with 97 tests across cache smoke, preflight, auth sidecar, rollout, Tailscale preflight, and live E2E orchestration. Remote verification-only and full apply both passed from a clean checkout, and post-apply smoke confirmed the installed live E2E script carries the relaxed evidence marker. | `scripts/opencode-live-e2e.mjs`, `scripts/opencode-live-e2e.test.mjs`, `scripts/new-api-clean-rollout.mjs` | This proves weak evidence cannot be mislabeled as production acceptance. It does not prove real OpenCode login, real quota extraction, upstream cache billing, or Tailscale direct-path quality. |
-| Official auth-session live E2E gate | Implemented locally and pushed | Commit `0cdfdc74` adds `opencode_auth_smoke` as a first-class live E2E stage. The stage runs after Tailscale and before root-only OpenCode/cache gates, converts auth-session smoke booleans into normal `checks.status` items, fails fast before credentialed gates when the browser bridge is broken, and treats skipped auth smoke, non-official auth URLs, or disabled screenshots as diagnostic overrides. The same commit expands redaction so exact secret object keys such as `token` and `prompt_cache_key` have their values replaced, while token accounting fields such as `cached_tokens` remain usable evidence. Local Node rollout gate now passes with 99 tests. | `scripts/opencode-live-e2e.mjs`, `scripts/opencode-live-e2e.test.mjs`, `scripts/opencode-auth-session-smoke.mjs`, `scripts/opencode-auth-session-smoke.test.mjs` | This proves the production acceptance contract now covers the browser bridge. It still needs remote clean rollout once LearnSSH/tailnet connectivity recovers, and it does not replace a real operator login. |
+| Official auth-session live E2E gate | Implemented, pushed, and remotely verified | Commit `0cdfdc74` adds `opencode_auth_smoke` as a first-class live E2E stage. The stage runs after Tailscale and before root-only OpenCode/cache gates, converts auth-session smoke booleans into normal `checks.status` items, fails fast before credentialed gates when the browser bridge is broken, and treats skipped auth smoke, non-official auth URLs, or disabled screenshots as diagnostic overrides. The same commit expands redaction so exact secret object keys such as `token` and `prompt_cache_key` have their values replaced, while token accounting fields such as `cached_tokens` remain usable evidence. Local Node rollout gate passes with 99 tests. Remote post-apply smoke confirms the deployed runtime carries the auth gate marker, the auth-session smoke script passes syntax checks, the redaction marker is present, and an official OpenCode authorization-page smoke succeeds without credentials. | `scripts/opencode-live-e2e.mjs`, `scripts/opencode-live-e2e.test.mjs`, `scripts/opencode-auth-session-smoke.mjs`, `scripts/opencode-auth-session-smoke.test.mjs` | This proves the production acceptance contract now covers the deployed browser bridge. It still does not replace a real operator login, account extraction, channel activation, or `glm-5.2` cache-hit E2E. |
 | Private network address redaction | Implemented locally | The cache smoke runner, OpenCode preflight runner, auth-session smoke runner, live E2E orchestrator, and clean rollout helper now redact Tailscale/CGNAT, loopback, link-local, and RFC1918 IPv4 addresses from failure text and recursively sanitized stage summaries, not just from configured base URLs. Regression tests cover `100.64/10` tailnet and LAN address leaks in relay failures, preflight endpoint failures, auth sidecar smoke errors, live E2E thrown-stage errors, successful nested stage summaries, and rollout helper output. This does not prove network health, but it makes failed real E2E and rollout diagnostics safer to paste, archive, or commit. |
 | Channel-affinity raw key privacy | Implemented locally | Channel-affinity cache suffixes now use a stable SHA1-derived key part for the affinity value rather than embedding raw `prompt_cache_key` or request-header values. Regression coverage proves the cache suffix keeps rule/model/group context while omitting the original affinity value. This intentionally invalidates old in-memory/Redis affinity entries, which is acceptable because the cache is opportunistic and will re-warm. |
 | Channel-affinity cache-stats UI quality gate | Implemented locally | The cache-stats dialog row-building logic is now a pure helper with regression tests for hit-rate, cached-token, target fallback, and empty-state rows. The dialog no longer depends on a promise chain or nested ternary rendering, and the full `src/features/system-settings/general/channel-affinity` frontend directory now passes targeted oxlint. This improves cache observability quality before real `glm-5.2` E2E, but it does not replace live upstream cache-hit verification. |
@@ -490,13 +490,34 @@ git diff --check
 diff secret-pattern scan=clean
 ```
 
-Latest pushed commit `0cdfdc74` remote rollout status:
+Latest remote runtime verification for pushed documentation HEAD `12852976` carrying code commit `0cdfdc74`:
 
 ```text
-remote_verification=pending
-reason=learnssh_alias_unreachable_before_rollout_helper_execution
-last_verified_remote_runtime=3404b01c
+clean rollout verification-only:
+  git_clone=ok
+  revision=ok
+  node_scripts=ok
+  go_targeted=ok
+  web_default_checks=ok
+  web_default_build=ok
+  web_classic_build=ok
+  go_build=ok
+  artifact=ok
+  apply=skipped
+
+post-apply runtime probe:
+  rollout_process=absent
+  service_active=ok
+  http_smoke=ok
+  live_e2e_node_check=ok
+  auth_smoke_node_check=ok
+  live_e2e_auth_gate=ok
+  auth_smoke_redaction=ok
+  auth_runtime_smoke=ok
+  cleanup_ok
 ```
+
+The apply command was interrupted before returning a complete helper transcript, so this document does not claim a full `deployed_prefix` line for this revision. The acceptance evidence is the deployed runtime state: service health, installed script syntax, auth gate marker, redaction marker, official OpenCode auth-session smoke success, and cleanup.
 
 Latest remote rollout verification for pushed commit `24306450`:
 
@@ -822,7 +843,7 @@ Known verification limits:
 - The CLI diagnostic-exit regression for commit `300ea33d` uses a fake local New API server. It proves process exit semantics, summary shape, cache-stage composition, and redaction at the CLI boundary; it is not live-account, live-quota, or upstream cache-billing evidence.
 - The relaxed-Tailscale acceptance regression for commit `24306450` proves that weakened Tailscale gates cannot be mistaken for production acceptance. It does not prove that the current tailnet has direct path; it only prevents diagnostic relaxations from being promoted to final evidence.
 - The relaxed OpenCode/cache evidence regression for commit `3404b01c` proves that weakened account-readiness, credential-key, affinity-stats, model, stats, request-count, hit-rate, or cache-signal gates cannot be mistaken for production acceptance. It does not prove a real OpenCode subscription account is imported, activated, or getting upstream warm-cache billing.
-- The official auth-session live E2E regression for commit `0cdfdc74` proves that production acceptance now requires the non-credentialed official OpenCode browser bridge stage before root-only OpenCode/cache gates. It does not prove the remote runtime has been updated yet; LearnSSH/tailnet connectivity must recover before clean rollout can verify and apply this runtime script change.
+- The official auth-session live E2E regression for commit `0cdfdc74` proves that production acceptance now requires the non-credentialed official OpenCode browser bridge stage before root-only OpenCode/cache gates. The deployed runtime now carries that gate and has passed a non-credentialed official OpenCode auth-session smoke. This still does not prove real login, account extraction, channel activation, or upstream cache billing.
 - Tailscale still is not production-robust for interactive Deskflow. The configured target now resolves to an online, non-expired peer and New API's tailnet TCP port is reachable, but both directions still fail to establish a direct path and continue through DERP. This is acceptable for administrative HTTPS/API verification, but it is not the "fast and robust" state needed for low-latency Deskflow on 2.4GHz.
 - Real OpenCode Google login, account extraction, channel activation against a live subscription account, and repeated `glm-5.2` cache-hit measurement still require operator-controlled credentials and must not be committed to the repository.
 
@@ -838,11 +859,11 @@ node scripts/tailscale-link-preflight.mjs \
 
 Use `--expected-id-hash` or `--expected-public-key-hash` when comparing the stable target name against a known current remote identity hash. Keep `--require-direct true --require-tun true --require-tcp true` for production acceptance; loosening those flags is diagnostic only. Deskflow should be validated separately in client mode by confirming the local tailnet listener, an established remote client connection, and stable healthcheck state. A remote Deskflow server-port listener is not expected in the current topology.
 
-2. After LearnSSH/tailnet connectivity is healthy again, run the clean rollout helper in verification-only mode against pushed commit `0cdfdc74` before any account import or live cache test. Only use `--apply true` when intentionally replacing the running artifact:
+2. Before any account import or live cache test, run the deployed-service preflight against the current runtime and keep the clean rollout helper as the repeatable resync path for future pushed revisions. Use verification-only first; only use `--apply true` when intentionally replacing the running artifact:
 
 ```bash
 node scripts/new-api-clean-rollout.mjs \
-  --revision 0cdfdc747e06384bf18ca4ba76fe88f3f39d91d2 \
+  --revision <pushed-main-revision> \
   --apply false
 ```
 
@@ -1163,7 +1184,7 @@ web/default/src/routes/_authenticated/opencode-accounts/index.tsx
 | 多账号切换与 channel 激活 | New API channel 层面已满足。Admin Web 可创建/绑定账号、提取/刷新 quota、把选中账号激活到绑定 channel，并在 channel credential contract 不满足时阻止激活。 | `service/opencode_account.go`, `controller/opencode_account.go`, `web/default/src/features/opencode-accounts/index.tsx` | 外部 `cc-switch` 不属于本仓库。稳健集成点应是稳定 New API channel identity 与 activation readiness，而不是把原始账号材料复制到客户端切换文件。 |
 | 最大化 `glm-5.2` 套餐缓存命中概率与统计质量 | 仓库前置条件已实现。Codex affinity 覆盖 `glm-*`，同步 `Session_id` 与 `prompt_cache_key`，对原始 affinity 值做 hash，保留 cached-token usage 字段，提供带 stats identity gate 的脱敏多轮 smoke runner，并且现在会在 cache smoke 前要求 live preflight 的 `activation_contract.ready` 计数达标。 | `service/relayconvert`, `model/channel_affinity.go`, `scripts/glm-cache-smoke.mjs`, `scripts/opencode-live-e2e.mjs` | 这仍不等于证明上游 warm-cache 计费。证明必须使用真实导入的 OpenCode 订阅账号、已激活 channel、多轮 `glm-5.2` 请求，以及 live E2E gate 返回的 `checks.status`。 |
 | Deskflow/Tailscale 与账号/cache 链路分离但可测 | 部分满足。仓库已有脱敏 Tailscale link preflight，live E2E runner 默认检查部署态 New API 服务路径，而不是要求不存在的远端 Deskflow server 端口。 | `scripts/tailscale-link-preflight.mjs`, `scripts/opencode-live-e2e.mjs`, `scripts/new-api-clean-rollout.mjs` | direct path 与 Deskflow client-mode 稳定性是运维阻塞，不是代码完整性证据。DERP-only 连接不能视为交互式 Deskflow 的“fast and robust”。 |
-| rollout 可重复且不携带 secret | rollout 机制层面已满足，但最新已推送代码尚未完成远端 apply。clean rollout helper 从干净 checkout 构建，执行定向 Node/Go/前端/build gate，脱敏公开输出，只安装非 secret runtime scripts，包括 auth-session runtime smoke runner，且只有显式 `--apply true` 才切换运行 artifact。已推送的 `main` 提交 `3404b01c` 仍是最后一个完成远端验证的 runtime 版本：它通过 verification-only gate、完整 apply、`service_contract`、`backup`、`install`、`restart`、`http_smoke` 与 `auth_runtime_smoke=ok`。已推送的 `main` 提交 `0cdfdc74` 已完成本地测试并进入主线，但远端 verification 仍待执行，因为当前托管 LearnSSH alias 在上传或执行 rollout helper 前没有响应。 | `scripts/new-api-clean-rollout.mjs`, `scripts/new-api-clean-rollout.test.mjs`, `scripts/opencode-auth-session-smoke.mjs`, `scripts/opencode-live-e2e.mjs` | rollout helper 不负责 SSH 传输、sudo provisioning、真实账号导入、secret 配置或 tailnet 可达性；这些仍是操作者/部署责任，必须先恢复健康后才能同步 runtime。 |
+| rollout 可重复且不携带 secret | rollout 机制层面已满足，且最新 auth-smoke runtime gate 已在部署态服务上验证。clean rollout helper 从干净 checkout 构建，执行定向 Node/Go/前端/build gate，脱敏公开输出，只安装非 secret runtime scripts，包括 auth-session runtime smoke runner，且只有显式 `--apply true` 才切换运行 artifact。当前远端证据刻意保持保守：承载代码提交 `0cdfdc74` 的已推送文档 HEAD 已通过 verification-only；被中断的 apply 命令没有返回可信的完整 rollout transcript，因此 post-apply 证据来自无残留 rollout 进程、服务/HTTP 健康、已安装脚本语法检查、runtime 脚本中的 `opencode_auth_smoke` 与脱敏 marker、官方 OpenCode auth-session smoke 成功，以及临时 helper 清理完成。 | `scripts/new-api-clean-rollout.mjs`, `scripts/new-api-clean-rollout.test.mjs`, `scripts/opencode-auth-session-smoke.mjs`, `scripts/opencode-live-e2e.mjs` | rollout helper 不负责 SSH 传输、sudo provisioning、真实账号导入、secret 配置或 tailnet 可达性；这些仍是操作者/部署责任。runtime marker 验证证明无 secret 的浏览器桥 gate 已部署，不证明真实 OpenCode 登录、quota 提取或 cache 计费。 |
 
 | 模块 | 状态 | 说明 |
 |---|---|---|
@@ -1182,7 +1203,7 @@ web/default/src/routes/_authenticated/opencode-accounts/index.tsx
 | OpenCode preflight readiness 固定类别 | 本地已实现 | preflight 账号摘要现在会在既有 active/ready 总数旁增加固定类别 `credential_key_source` 与 `activation_contract` 计数。`activation_contract` 会把每个账号分类为 `ready`、`decrypt_failed`、`codex_oauth_key_required`、`missing_channel`、`missing_credential` 或 `incomplete`，且只从公开 readiness 字段推导。这补上了真实 `glm-5.2` 测试前的证据质量缺口：操作者可以判断部署态账号是被不稳定 key source、解密失败、缺少绑定、缺少凭据还是 Codex/plain-key 契约不匹配阻塞，而不需要看到 label、channel 名、masked email、原始 missing-field 名、API key、cookie、workspace ID、OAuth payload 或部署地址。测试覆盖 Codex/plain-key mismatch 类别，并断言摘要仍不会回显原始 `api_key` 字段名或测试 secret。 |
 | OpenCode live E2E 编排 gate | 已实现并完成远端 apply | 已新增 `scripts/opencode-live-e2e.mjs` 及 Node 测试。runner 会用面向生产的严格默认值串联 `tailscale-link-preflight`、`opencode-e2e-preflight` 与 `glm-cache-smoke`：至少一个 active-ready OpenCode 账号、稳定 credential key source、可读 affinity stats、2 次 warm-up、6 次测量请求、request 与 stats 命中率阈值 `0.8`、至少一个 cache-signal token，以及部署态 New API 服务端口的 Tailscale TCP 检查。默认情况下 Tailscale 失败会在进入带真实凭据的 OpenCode/cache gate 前停止，因此已知坏的 tailnet 不会继续消耗真实 API quota，也不会生成误导性的 cache 证据。`--continue-on-failure true` 与 `--skip-tailscale true` 是显式诊断开关，不是生产验收模式。runner 现在会额外输出独立的 `acceptance` 摘要：只有所有 stage checks 通过且没有诊断 override 时，`production_ready` 才为 true；只要 acceptance 失败，CLI 就会非零退出，即使诊断 stage checks 本身通过。被放宽的 Tailscale 要求现在同样属于诊断 override：关闭 direct-path、TUN、TCP，清空 TCP ports，或把 `min-pongs` 降到 `ping-count` 以下，即使 stage checks 通过，也不能形成 production acceptance。这样 skipped-Tailscale、容忍 DERP 或无 TCP 检查的诊断运行不会被消费成最终验收。live gate 会把实际执行的 OpenCode/cache stage 返回 `skipped` 或缺失 `checks.status` 视为失败；只有显式禁用 Tailscale 或被前置失败阻断的 downstream stage 才允许保留 `skipped`。它还会在 preflight stage 后增加 `opencode_activation_contract_ready`，要求 `accounts.activation_contract.ready >= minActiveReadyAccounts`；如果该类别证据缺失或低于阈值，`glm_cache_smoke` 会在消耗 live quota 前被跳过。stage 异常现在会被转换成 failed stage summary，并在进入摘要前脱敏部署 URL、Tailscale target、admin/relay 凭据、prompt cache key、input 文本、OAuth payload、邮箱和本地路径；这样保留 fail-fast 行为，但不打印原始异常文本。成功 stage summary 也会在编排层递归脱敏，包括 JSON key 和 value，因此即使底层 runner 有 bug，也不能把 live-run 原始材料重新带回组合 JSON 输出。sanitizer 现在还覆盖 prompt 回显变体：raw 前缀、完整 JSON 字符串、JSON 内层转义字符串和 JSON 内层前缀。live E2E 默认不再要求远端 Deskflow server 端口，因为当前 Deskflow 拓扑是 remote-client 到 local-server/proxy。clean rollout helper 现在会在 Node gate 中覆盖该脚本的测试与语法检查。已推送的 `main` 提交 `713392b0` 已部署 production-acceptance summary；后续提交 `300ea33d` 增加 CLI 级覆盖，证明诊断 override 即使让 stage checks 通过，也会让 CLI 非零退出；提交 `24306450` 已部署 relaxed-Tailscale override 检测。 |
 | OpenCode/cache 证据 acceptance 边界 | 已实现并完成远端 apply | 提交 `3404b01c` 增加回归覆盖与运行时逻辑，把被放宽的 OpenCode/cache 证据标记为 diagnostic。固定 override 类别覆盖 optional root auth、optional stable credential key source、optional affinity stats、放宽 active-ready 账号数、非 `glm-5.2` cache model、stats disabled/optional、降低 warm-up 或测量请求数、降低 request/stats hit-rate 阈值，以及降低 cache-signal-token 阈值。本地 Node gate 现在在 cache smoke、preflight、auth sidecar、rollout、Tailscale preflight 与 live E2E orchestration 上共 97 个测试通过。远端 clean checkout 的 verification-only 与完整 apply 均通过，apply 后独立 smoke 确认已安装 live E2E 脚本包含 relaxed evidence marker。 | `scripts/opencode-live-e2e.mjs`, `scripts/opencode-live-e2e.test.mjs`, `scripts/new-api-clean-rollout.mjs` | 这证明弱证据不会被误标为生产验收；它不证明真实 OpenCode 登录、真实 quota 提取、上游 cache 计费或 Tailscale direct path 质量。 |
-| 官方 auth-session live E2E gate | 已本地实现并推送 | 提交 `0cdfdc74` 把 `opencode_auth_smoke` 增加为一等 live E2E stage。该 stage 在 Tailscale 之后、root-only OpenCode/cache gate 之前运行，把 auth-session smoke 的布尔检查转换成标准 `checks.status` item；如果浏览器桥失败，会在进入带真实凭据的 gate 前 fail-fast；跳过 auth smoke、使用非官方 auth URL 或关闭截图检查都会进入 diagnostic override。同一提交扩展了脱敏边界：`token`、`prompt_cache_key` 等精确 secret 对象键的值会被替换，同时 `cached_tokens` 这类计量字段仍可作为证据保留。本地 Node rollout gate 现在共 99 个测试通过。 | `scripts/opencode-live-e2e.mjs`, `scripts/opencode-live-e2e.test.mjs`, `scripts/opencode-auth-session-smoke.mjs`, `scripts/opencode-auth-session-smoke.test.mjs` | 这证明生产 acceptance 契约已经覆盖浏览器桥；仍需在 LearnSSH/tailnet 恢复后完成远端 clean rollout，且不能替代真实操作者登录。 |
+| 官方 auth-session live E2E gate | 已实现、已推送并完成远端验证 | 提交 `0cdfdc74` 把 `opencode_auth_smoke` 增加为一等 live E2E stage。该 stage 在 Tailscale 之后、root-only OpenCode/cache gate 之前运行，把 auth-session smoke 的布尔检查转换成标准 `checks.status` item；如果浏览器桥失败，会在进入带真实凭据的 gate 前 fail-fast；跳过 auth smoke、使用非官方 auth URL 或关闭截图检查都会进入 diagnostic override。同一提交扩展了脱敏边界：`token`、`prompt_cache_key` 等精确 secret 对象键的值会被替换，同时 `cached_tokens` 这类计量字段仍可作为证据保留。本地 Node rollout gate 共 99 个测试通过。远端 post-apply smoke 确认部署态 runtime 携带 auth gate marker，auth-session smoke 脚本通过语法检查，脱敏 marker 存在，并且官方 OpenCode 授权页无凭据 smoke 成功。 | `scripts/opencode-live-e2e.mjs`, `scripts/opencode-live-e2e.test.mjs`, `scripts/opencode-auth-session-smoke.mjs`, `scripts/opencode-auth-session-smoke.test.mjs` | 这证明部署态浏览器桥已纳入生产 acceptance 契约；仍不能替代真实操作者登录、账号提取、channel 激活或 `glm-5.2` cache-hit E2E。 |
 | 私网地址输出脱敏 | 本地已实现 | cache smoke runner、OpenCode preflight runner、auth-session smoke runner、live E2E orchestrator 与 clean rollout helper 现在会从失败文本和递归脱敏的 stage summary 中移除 Tailscale/CGNAT、loopback、link-local 与 RFC1918 IPv4 地址，而不只依赖已配置 base URL 的片段替换。回归测试覆盖 relay 失败、preflight endpoint 失败、auth sidecar smoke 错误、live E2E stage 抛错、成功嵌套 stage summary 与 rollout helper 输出里的 `100.64/10` tailnet 和 LAN 地址泄漏。该改动不证明网络健康，但能让真实 E2E 或 rollout 失败诊断更适合复制、归档或提交。 |
 | Channel-affinity 原始 key 隐私 | 本地已实现 | channel-affinity cache suffix 现在对 affinity value 使用稳定 SHA1 派生 key part，而不是嵌入原始 `prompt_cache_key` 或请求头值。回归测试证明 cache suffix 会保留 rule/model/group 上下文，同时不包含原始 affinity value。该变更会让旧的内存/Redis affinity entry 失效；这是可接受的，因为 affinity cache 是机会性缓存，会自动重新预热。 |
 | Channel-affinity cache-stats UI 质量门 | 本地已实现 | cache-stats dialog 的行构造逻辑现在抽成纯 helper，并用回归测试覆盖命中率、cached-token、目标字段兜底与空状态行。dialog 不再依赖 promise chain 或嵌套三元渲染，完整 `src/features/system-settings/general/channel-affinity` 前端目录现在已通过 targeted oxlint。这提升了真实 `glm-5.2` E2E 前的 cache 可观察性质量，但不能替代真实上游 cache-hit 验证。 |
@@ -1235,7 +1256,7 @@ web/default/src/routes/_authenticated/opencode-accounts/index.tsx
 | Tailscale link preflight | 本地已实现 | 已新增 `scripts/tailscale-link-preflight.mjs` 及 Node 测试。preflight 会输出脱敏 JSON 摘要，覆盖目标 peer 是否存在、是否 expired/online、匿名 node identity hash、Tailscale-layer pong、direct-vs-DERP 路由、ICMP/TUN pong，以及配置的 TCP 端口检查。最新本地运行已经能识别到目标 peer 在线且未过期，部署态 New API TCP 端口也可通过 tailnet 打开。剩余失败点是 direct path 未建立、TUN ping 证据不足，以及远端 Deskflow server 端口关闭；最后一项符合当前 remote-client/local-server Deskflow 拓扑，后续应使用 client-mode 证据验证，而不是要求远端监听 24800。clean rollout helper 现在也会在 Node gate 中覆盖该脚本。 |
 | Go 测试隔离 | 本地已实现并纳入 rollout gate | OpenCode model/service 测试与 controller DB helper 现在会在临时内存库切换后恢复 `model.DB` / `model.LOG_DB`。此前跨包 SQLite 失败的根因是测试全局状态泄漏，不是生产迁移缺口。`go test ./common ./model ./service ./controller ./router ./service/relayconvert -count=1` 现在本地通过，并已纳入 clean rollout 的 Go gate。 |
 | 私网地址脱敏远端上线 | 已实现并完成远端 apply | 已推送的 `main` 提交 `8c5d4e25` 已把诊断脱敏加固带过 verification-only gate、完整 apply 与 apply 后 runtime scripts 语法检查。这证明部署态 helper/script set 已包含加固后的脱敏边界；它仍不证明网络路径质量。 |
-| 上一次已验证远端上线 | 已完成 | 已推送的 `main` 提交 `3404b01c` 是当前在远端服务完成验证的上线版本。本次上线使用 clean rollout helper，先通过 verification-only `git_clone`、`revision`、Node script、定向 Go、default-web check/build、classic-web build、Go build 与 artifact gate，再通过完整 apply 路径中的 service contract 校验、backup、install、restart、HTTP smoke 与默认 auth runtime smoke gate。apply 后独立检查确认服务 active、HTTP smoke OK，已安装 live E2E 脚本通过 `node --check`，且部署态 OpenCode live E2E 脚本包含 relaxed-evidence acceptance marker。已推送提交 `0cdfdc74` 尚未完成远端 verification 或 apply，因为本次尝试中 LearnSSH alias 没有响应。 |
+| 上一次已验证远端上线 | 已完成 | 已推送的 `main` 提交 `3404b01c` 仍是最后一个带完整 clean rollout apply transcript 的版本；承载代码提交 `0cdfdc74` 的当前文档 HEAD 已完成 verification-only，并通过部署态 runtime probe 证明 auth-session live E2E gate 已进入运行服务。本次 post-apply 证据包括：无残留 rollout 进程、服务 active、本机 HTTP smoke OK、已安装 live E2E 与 auth-session smoke 脚本语法 OK、`opencode_auth_smoke` marker 存在、auth smoke redaction marker 存在、官方 OpenCode 授权页无凭据 runtime smoke 成功，以及临时 rollout helper 清理完成。由于 apply 命令曾被中断，本节不伪造该 revision 的 `deployed_prefix` 证据。 |
 | 真实 OpenCode 登录 E2E | 待执行 | 需要操作者控制的 OpenCode 订阅账号；仓库不包含真实账号材料。 |
 | 真实 `glm-5.2` cache-hit E2E | 待执行 | 只能在真实 OpenCode 账号经 New API 导入并激活后执行。 |
 
@@ -1384,13 +1405,34 @@ git diff --check
 diff secret-pattern scan=clean
 ```
 
-已推送提交 `0cdfdc74` 的远端 rollout 状态：
+承载代码提交 `0cdfdc74` 的已推送文档 HEAD `12852976` 的最新远端 runtime 验证：
 
 ```text
-remote_verification=pending
-reason=learnssh_alias_unreachable_before_rollout_helper_execution
-last_verified_remote_runtime=3404b01c
+clean rollout verification-only:
+  git_clone=ok
+  revision=ok
+  node_scripts=ok
+  go_targeted=ok
+  web_default_checks=ok
+  web_default_build=ok
+  web_classic_build=ok
+  go_build=ok
+  artifact=ok
+  apply=skipped
+
+post-apply runtime probe:
+  rollout_process=absent
+  service_active=ok
+  http_smoke=ok
+  live_e2e_node_check=ok
+  auth_smoke_node_check=ok
+  live_e2e_auth_gate=ok
+  auth_smoke_redaction=ok
+  auth_runtime_smoke=ok
+  cleanup_ok
 ```
+
+apply 命令在返回完整 helper transcript 前被中断，因此本文档不声明该 revision 的 `deployed_prefix` 行。当前验收证据来自部署态 runtime：服务健康、已安装脚本语法、auth gate marker、脱敏 marker、官方 OpenCode auth-session smoke 成功和临时 helper 清理。
 
 已推送提交 `24306450` 的最新远端 rollout 验证：
 
@@ -1716,7 +1758,7 @@ Sidecar smoke：
 - 提交 `300ea33d` 的 CLI 诊断退出回归测试使用 fake local New API server。它证明的是进程退出语义、summary 形态、cache stage 组合与 CLI 边界脱敏；它不是真实账号、真实 quota 或上游 cache 计费证据。
 - 提交 `24306450` 的 relaxed-Tailscale acceptance 回归测试证明被放宽的 Tailscale gate 不会被误当成生产验收。它不证明当前 tailnet 已经 direct path；它只是防止诊断放宽项被升级成最终证据。
 - 提交 `3404b01c` 的 relaxed OpenCode/cache evidence 回归测试证明被放宽的账号 readiness、credential key、affinity stats、模型、stats、请求次数、命中率或 cache-signal gate 不会被误当成生产验收。它不证明真实 OpenCode 订阅账号已经导入、激活，或已经拿到上游 warm-cache 计费收益。
-- 提交 `0cdfdc74` 的官方 auth-session live E2E 回归测试证明生产验收现在会在 root-only OpenCode/cache gate 前要求无凭据官方 OpenCode 浏览器桥 stage。它不证明远端 runtime 已更新；必须先恢复 LearnSSH/tailnet 连通性，才能通过 clean rollout 验证并应用这次 runtime script 变更。
+- 提交 `0cdfdc74` 的官方 auth-session live E2E 回归测试证明生产验收现在会在 root-only OpenCode/cache gate 前要求无凭据官方 OpenCode 浏览器桥 stage。部署态 runtime 现在已经携带该 gate，并通过无凭据官方 OpenCode auth-session smoke。这仍不证明真实登录、账号提取、channel 激活或上游 cache 计费。
 - Tailscale 对交互式 Deskflow 仍不具备生产级稳健性。当前配置目标已经解析到在线且未过期的 peer，New API 的 tailnet TCP 端口也可达；但双向仍无法建立 direct path，继续走 DERP。该状态可以用于管理类 HTTPS/API 验证，但不是 2.4GHz 下低延迟 Deskflow 所需的“fast and robust”状态。
 - 真实 OpenCode Google 登录、账号提取、订阅账号 channel 激活，以及多轮 `glm-5.2` cache-hit 统计验证仍需要操作者控制的真实凭证，不能写入仓库。
 
@@ -1732,11 +1774,11 @@ node scripts/tailscale-link-preflight.mjs \
 
 当需要确认稳定目标名是否指向当前远端 identity 时，使用 `--expected-id-hash` 或 `--expected-public-key-hash`。生产验收应保持 `--require-direct true --require-tun true --require-tcp true`；放宽这些 gate 只适合作为诊断。Deskflow 需要按 client-mode 单独验证：本机 tailnet listener、远端 client established connection、以及 healthcheck 状态稳定。当前拓扑不要求远端存在 Deskflow server-port listener。
 
-2. LearnSSH/tailnet 连通性恢复后，先针对已推送提交 `0cdfdc74` 运行 clean rollout helper 的 verification-only 模式，再导入账号或执行真实 cache 测试。只有在明确要替换当前运行 artifact 时才使用 `--apply true`：
+2. 在导入账号或执行真实 cache 测试前，先对当前部署态服务运行 preflight；clean rollout helper 继续作为后续已推送 revision 的可重复重同步路径。先用 verification-only，只有明确要替换运行 artifact 时才使用 `--apply true`：
 
 ```bash
 node scripts/new-api-clean-rollout.mjs \
-  --revision 0cdfdc747e06384bf18ca4ba76fe88f3f39d91d2 \
+  --revision <pushed-main-revision> \
   --apply false
 ```
 

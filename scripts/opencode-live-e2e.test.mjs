@@ -1,10 +1,18 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+import { createServer } from "node:http";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   buildOpenCodeLiveE2EConfig,
   runOpenCodeLiveE2E,
 } from "./opencode-live-e2e.mjs";
+
+const LIVE_E2E_SCRIPT_PATH = fileURLToPath(
+  new URL("./opencode-live-e2e.mjs", import.meta.url),
+);
 
 test("buildOpenCodeLiveE2EConfig applies strict live defaults", () => {
   const config = buildOpenCodeLiveE2EConfig(
@@ -531,6 +539,138 @@ test("runOpenCodeLiveE2E supports explicitly skipped Tailscale for local diagnos
   });
 });
 
+test("CLI exits non-zero when diagnostic overrides make acceptance non-production", async () => {
+  let measuredRequests = 0;
+  const server = createServer(async (request, response) => {
+    const url = new URL(request.url || "/", "http://127.0.0.1");
+    if (request.method === "GET" && url.pathname === "/api/status") {
+      jsonResponse(response, { version: "test" });
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/api/opencode/accounts/diagnostics") {
+      jsonResponse(response, {
+        success: true,
+        data: {
+          credential_key_source: "crypto_secret",
+          uses_fallback_credential_key: false,
+        },
+      });
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/api/opencode/accounts") {
+      jsonResponse(response, {
+        success: true,
+        data: [
+          {
+            active: true,
+            activation_ready: true,
+            credential_integrity: "ok",
+            credential_key_source: "crypto_secret",
+            missing_activation_fields: [],
+          },
+        ],
+      });
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/api/log/channel_affinity_usage_cache") {
+      const keyFingerprint = url.searchParams.get("key_fp") || "";
+      const isPreflightProbe = keyFingerprint === "00000000";
+      jsonResponse(response, {
+        success: true,
+        data: {
+          rule_name: url.searchParams.get("rule_name") || "",
+          using_group: url.searchParams.get("using_group") || "",
+          key_fp: keyFingerprint,
+          hit: isPreflightProbe ? 0 : measuredRequests,
+          total: isPreflightProbe ? 0 : measuredRequests,
+          cached_tokens: isPreflightProbe ? 0 : measuredRequests,
+          prompt_cache_hit_tokens: 0,
+        },
+      });
+      return;
+    }
+    if (request.method === "POST" && url.pathname === "/v1/responses") {
+      await consumeRequestBody(request);
+      measuredRequests += 1;
+      jsonResponse(response, {
+        id: `response-${measuredRequests}`,
+        usage: {
+          input_tokens_details: {
+            cached_tokens: 1,
+          },
+          input_tokens: 16,
+          output_tokens: 1,
+          total_tokens: 17,
+        },
+      });
+      return;
+    }
+    jsonResponse(response, { success: false, message: "not found" }, 404);
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  try {
+    const address = server.address();
+    const child = spawn(
+      process.execPath,
+      [
+        LIVE_E2E_SCRIPT_PATH,
+        "--skip-tailscale",
+        "true",
+        "--base-url",
+        `http://127.0.0.1:${address.port}`,
+        "--warmup-requests",
+        "0",
+        "--requests",
+        "2",
+        "--delay-ms",
+        "0",
+        "--min-request-hit-rate",
+        "1",
+        "--min-stats-hit-rate",
+        "1",
+        "--min-cache-signal-tokens",
+        "1",
+      ],
+      {
+        env: {
+          ...process.env,
+          NEW_API_KEY: "relay-key-secret",
+          NEW_API_ADMIN_TOKEN: "root-token-secret",
+          NEW_API_ADMIN_USER_ID: "1",
+          GLM_CACHE_SMOKE_KEY: "stable-cache-key",
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+
+    const [code] = await once(child, "exit");
+    assert.equal(code, 1);
+    assert.equal(stderr, "");
+    const summary = JSON.parse(stdout);
+    assert.equal(summary.checks.status, "passed");
+    assert.deepEqual(summary.acceptance, {
+      status: "failed",
+      mode: "diagnostic",
+      production_ready: false,
+      diagnostic_overrides: ["skip_tailscale"],
+      failed_checks: [],
+    });
+    assert.equal(summary.cache_smoke.requests.hit, 2);
+    assert.doesNotMatch(stdout, /relay-key-secret|root-token-secret|stable-cache-key|127\.0\.0\.1/);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
 function passedStage(extra = {}) {
   return {
     ...extra,
@@ -562,4 +702,14 @@ function skippedStage(extra = {}) {
       ...(extra.checks || {}),
     },
   };
+}
+
+function jsonResponse(response, body, status = 200) {
+  response.writeHead(status, { "Content-Type": "application/json" });
+  response.end(JSON.stringify(body));
+}
+
+async function consumeRequestBody(request) {
+  for await (const _chunk of request) {
+  }
 }

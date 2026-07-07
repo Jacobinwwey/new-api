@@ -40,6 +40,19 @@ const LIVE_E2E_DEFAULT_ARGS = {
   "min-cache-signal-tokens": "1",
   ports: "3000",
 };
+const PRODUCTION_CACHE_MODEL = "glm-5.2";
+const PRODUCTION_MIN_ACTIVE_READY_ACCOUNTS = Number(
+  LIVE_E2E_DEFAULT_ARGS["min-active-ready-accounts"],
+);
+const PRODUCTION_WARMUP_REQUESTS = Number(LIVE_E2E_DEFAULT_ARGS["warmup-requests"]);
+const PRODUCTION_MEASURED_REQUESTS = Number(LIVE_E2E_DEFAULT_ARGS.requests);
+const PRODUCTION_MIN_REQUEST_HIT_RATE = Number(
+  LIVE_E2E_DEFAULT_ARGS["min-request-hit-rate"],
+);
+const PRODUCTION_MIN_STATS_HIT_RATE = Number(LIVE_E2E_DEFAULT_ARGS["min-stats-hit-rate"]);
+const PRODUCTION_MIN_CACHE_SIGNAL_TOKENS = Number(
+  LIVE_E2E_DEFAULT_ARGS["min-cache-signal-tokens"],
+);
 
 export function buildOpenCodeLiveE2EConfig(argv = process.argv, env = process.env) {
   const args = parseArgs(argv);
@@ -268,6 +281,8 @@ function diagnosticOverrideNames(config) {
   } else {
     names.push(...tailscaleDiagnosticOverrideNames(config.tailscale));
   }
+  names.push(...opencodeDiagnosticOverrideNames(config.opencode));
+  names.push(...cacheSmokeDiagnosticOverrideNames(config.cacheSmoke));
   return names;
 }
 
@@ -291,6 +306,77 @@ function tailscaleDiagnosticOverrideNames(tailscale) {
     names.push("tailscale_min_pongs_relaxed");
   }
   return names;
+}
+
+function opencodeDiagnosticOverrideNames(opencode = {}) {
+  const names = [];
+  if (opencode.requireRoot === false) {
+    names.push("opencode_root_auth_optional");
+  }
+  if (opencode.requireStableCredentialKey === false) {
+    names.push("opencode_stable_credential_key_optional");
+  }
+  if (opencode.requireAffinityStats === false) {
+    names.push("opencode_affinity_stats_optional");
+  }
+  if (
+    finiteNumber(opencode.minActiveReadyAccounts) &&
+    Number(opencode.minActiveReadyAccounts) < PRODUCTION_MIN_ACTIVE_READY_ACCOUNTS
+  ) {
+    names.push("opencode_active_ready_accounts_relaxed");
+  }
+  return names;
+}
+
+function cacheSmokeDiagnosticOverrideNames(cacheSmoke = {}) {
+  const names = [];
+  if (
+    typeof cacheSmoke.model === "string" &&
+    cacheSmoke.model.trim().toLowerCase() !== PRODUCTION_CACHE_MODEL
+  ) {
+    names.push("cache_model_not_glm_5_2");
+  }
+  if (cacheSmoke.skipStats === true) {
+    names.push("cache_stats_disabled");
+  }
+  if (cacheSmoke.requireStats === false) {
+    names.push("cache_stats_optional");
+  }
+  if (
+    finiteNumber(cacheSmoke.warmupRequestCount) &&
+    Number(cacheSmoke.warmupRequestCount) < PRODUCTION_WARMUP_REQUESTS
+  ) {
+    names.push("cache_warmup_requests_relaxed");
+  }
+  if (
+    finiteNumber(cacheSmoke.requestCount) &&
+    Number(cacheSmoke.requestCount) < PRODUCTION_MEASURED_REQUESTS
+  ) {
+    names.push("cache_measured_requests_relaxed");
+  }
+  if (
+    finiteNumber(cacheSmoke.minRequestHitRate) &&
+    Number(cacheSmoke.minRequestHitRate) < PRODUCTION_MIN_REQUEST_HIT_RATE
+  ) {
+    names.push("cache_request_hit_rate_relaxed");
+  }
+  if (
+    finiteNumber(cacheSmoke.minStatsHitRate) &&
+    Number(cacheSmoke.minStatsHitRate) < PRODUCTION_MIN_STATS_HIT_RATE
+  ) {
+    names.push("cache_stats_hit_rate_relaxed");
+  }
+  if (
+    finiteNumber(cacheSmoke.minCacheSignalTokens) &&
+    Number(cacheSmoke.minCacheSignalTokens) < PRODUCTION_MIN_CACHE_SIGNAL_TOKENS
+  ) {
+    names.push("cache_signal_tokens_relaxed");
+  }
+  return names;
+}
+
+function finiteNumber(value) {
+  return value !== undefined && value !== null && value !== "" && Number.isFinite(Number(value));
 }
 
 function sanitizeLiveText(text, config) {

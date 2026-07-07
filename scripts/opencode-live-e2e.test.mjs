@@ -188,6 +188,114 @@ test("runOpenCodeLiveE2E treats relaxed Tailscale gates as diagnostic acceptance
   });
 });
 
+test("runOpenCodeLiveE2E treats relaxed OpenCode gates as diagnostic acceptance", async () => {
+  const calls = [];
+  const summary = await runOpenCodeLiveE2E({
+    continueOnFailure: false,
+    tailscale: { target: "remote-box" },
+    opencode: {
+      minActiveReadyAccounts: 0,
+      requireRoot: false,
+      requireStableCredentialKey: false,
+      requireAffinityStats: false,
+    },
+    cacheSmoke: { model: "glm-5.2" },
+    runners: {
+      runTailscaleLinkPreflight: async () => {
+        calls.push("tailscale");
+        return passedStage();
+      },
+      runOpenCodePreflight: async () => {
+        calls.push("opencode");
+        return passedStage({
+          accounts: {
+            active_ready: 0,
+            activation_contract: {},
+          },
+        });
+      },
+      runCacheSmoke: async () => {
+        calls.push("cache");
+        return passedStage();
+      },
+    },
+  });
+
+  assert.deepEqual(calls, ["tailscale", "opencode", "cache"]);
+  assert.equal(summary.checks.status, "passed");
+  assert.deepEqual(summary.acceptance, {
+    status: "failed",
+    mode: "diagnostic",
+    production_ready: false,
+    diagnostic_overrides: [
+      "opencode_root_auth_optional",
+      "opencode_stable_credential_key_optional",
+      "opencode_affinity_stats_optional",
+      "opencode_active_ready_accounts_relaxed",
+    ],
+    failed_checks: [],
+  });
+});
+
+test("runOpenCodeLiveE2E treats relaxed cache-smoke gates as diagnostic acceptance", async () => {
+  const calls = [];
+  const summary = await runOpenCodeLiveE2E({
+    continueOnFailure: false,
+    tailscale: { target: "remote-box" },
+    opencode: { minActiveReadyAccounts: 1 },
+    cacheSmoke: {
+      model: "gpt-4.1",
+      warmupRequestCount: 0,
+      requestCount: 2,
+      requireStats: false,
+      skipStats: true,
+      minRequestHitRate: 0.2,
+      minStatsHitRate: 0.2,
+      minCacheSignalTokens: 0,
+    },
+    runners: {
+      runTailscaleLinkPreflight: async () => {
+        calls.push("tailscale");
+        return passedStage();
+      },
+      runOpenCodePreflight: async () => {
+        calls.push("opencode");
+        return passedStage({
+          accounts: {
+            active_ready: 1,
+            activation_contract: {
+              ready: 1,
+            },
+          },
+        });
+      },
+      runCacheSmoke: async () => {
+        calls.push("cache");
+        return passedStage();
+      },
+    },
+  });
+
+  assert.deepEqual(calls, ["tailscale", "opencode", "cache"]);
+  assert.equal(summary.checks.status, "passed");
+  assert.deepEqual(summary.acceptance, {
+    status: "failed",
+    mode: "diagnostic",
+    production_ready: false,
+    diagnostic_overrides: [
+      "cache_model_not_glm_5_2",
+      "cache_stats_disabled",
+      "cache_stats_optional",
+      "cache_warmup_requests_relaxed",
+      "cache_measured_requests_relaxed",
+      "cache_request_hit_rate_relaxed",
+      "cache_stats_hit_rate_relaxed",
+      "cache_signal_tokens_relaxed",
+    ],
+    failed_checks: [],
+  });
+});
+
 test("runOpenCodeLiveE2E fails when OpenCode activation-contract categories contradict readiness", async () => {
   const calls = [];
   const summary = await runOpenCodeLiveE2E({
@@ -728,7 +836,11 @@ test("CLI exits non-zero when diagnostic overrides make acceptance non-productio
       status: "failed",
       mode: "diagnostic",
       production_ready: false,
-      diagnostic_overrides: ["skip_tailscale"],
+      diagnostic_overrides: [
+        "skip_tailscale",
+        "cache_warmup_requests_relaxed",
+        "cache_measured_requests_relaxed",
+      ],
       failed_checks: [],
     });
     assert.equal(summary.cache_smoke.requests.hit, 2);

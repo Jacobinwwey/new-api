@@ -97,6 +97,34 @@ func TestSanitizeOpenCodeLoginSessionStatusDropsAuthorizationPayload(t *testing.
 	assert.NotContains(t, status.URL, "fragment")
 }
 
+func TestSanitizeOpenCodeLoginSessionStatusSanitizesTitle(t *testing.T) {
+	status := sanitizeOpenCodeLoginSessionStatus(OpenCodeLoginSessionStatus{
+		AccountID: 9,
+		Running:   true,
+		Status:    "running",
+		Title: strings.Join([]string{
+			"Sign in as operator@example.test",
+			"https://operator:secret@auth.opencode.ai/callback?code=oauth-code&state=oauth-state#fragment-secret",
+			"Bearer bearer-token-secret",
+			`workspace_` + `id=workspace-secret`,
+			"D:\\srv\\new-api\\private\\session.txt",
+			"/home/operator/profile",
+		}, " "),
+	})
+
+	assert.Contains(t, status.Title, "Sign in as")
+	assert.Contains(t, status.Title, "https://auth.opencode.ai/callback")
+	assert.NotContains(t, status.Title, "operator@example.test")
+	assert.NotContains(t, status.Title, "operator:secret")
+	assert.NotContains(t, status.Title, "oauth-code")
+	assert.NotContains(t, status.Title, "oauth-state")
+	assert.NotContains(t, status.Title, "fragment-secret")
+	assert.NotContains(t, status.Title, "bearer-token-secret")
+	assert.NotContains(t, status.Title, "workspace-secret")
+	assert.NotContains(t, status.Title, "D:\\srv")
+	assert.NotContains(t, status.Title, "/home/operator")
+}
+
 func TestSanitizeOpenCodeLoginSessionStatusKeepsAboutBlank(t *testing.T) {
 	status := sanitizeOpenCodeLoginSessionStatus(OpenCodeLoginSessionStatus{
 		URL: "about:blank#fragment",

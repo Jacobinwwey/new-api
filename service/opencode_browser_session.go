@@ -33,11 +33,14 @@ var (
 	openCodePublicRedactedPathToken   = "<redacted-path>"
 )
 
+const openCodeBrowserTitleMaxRunes = 160
+
 type OpenCodeLoginSessionStatus struct {
 	AccountID int    `json:"account_id"`
 	Running   bool   `json:"running"`
 	Status    string `json:"status"`
 	URL       string `json:"url,omitempty"`
+	Title     string `json:"title,omitempty"`
 	StartedAt int64  `json:"started_at,omitempty"`
 	Message   string `json:"message,omitempty"`
 }
@@ -215,6 +218,7 @@ func normalizeOpenCodeLoginPressKey(rawKey string) (string, error) {
 
 func sanitizeOpenCodeLoginSessionStatus(status OpenCodeLoginSessionStatus) OpenCodeLoginSessionStatus {
 	status.URL = sanitizeOpenCodeBrowserURL(status.URL)
+	status.Title = sanitizeOpenCodeBrowserTitle(status.Title)
 	return status
 }
 
@@ -258,6 +262,15 @@ func sanitizeOpenCodeSidecarPublicMessage(message string) string {
 	message = openCodePublicWindowsPathPattern.ReplaceAllString(message, openCodePublicRedactedPathToken)
 	message = openCodePublicUnixPathPattern.ReplaceAllString(message, openCodePublicRedactedPathToken)
 	return message
+}
+
+func sanitizeOpenCodeBrowserTitle(title string) string {
+	title = strings.Join(strings.Fields(sanitizeOpenCodeSidecarPublicMessage(title)), " ")
+	runes := []rune(title)
+	if len(runes) <= openCodeBrowserTitleMaxRunes {
+		return title
+	}
+	return string(runes[:openCodeBrowserTitleMaxRunes-3]) + "..."
 }
 
 func commonDecodeOpenCodeSidecar(output []byte, target *openCodeAuthSidecarResponse) error {

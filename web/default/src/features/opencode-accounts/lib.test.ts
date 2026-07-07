@@ -8,6 +8,7 @@ import {
   isOpenCodeAccountDeleteDialogOpen,
   isOpenCodeAccountPageRefreshing,
   mapContainedScreenshotClickToRemotePoint,
+  openCodeLoginStatusLabel,
   openCodeAccountWorkspaceGridRows,
   refreshOpenCodeAccountPageData,
   requireSuccessfulOpenCodeResponse,
@@ -159,6 +160,45 @@ describe('OpenCode account page helpers', () => {
     assert.equal(
       shouldClearOpenCodeLoginScreenshotOnAccountSelect(null, 7),
       true
+    )
+  })
+
+  test('prefers browser title in the login status label', () => {
+    assert.equal(
+      openCodeLoginStatusLabel({
+        title: 'Sign in - Google Accounts',
+        url: 'https://accounts.google.com',
+        accountLabel: 'prod account',
+        fallback: 'No account selected',
+      }),
+      'Sign in - Google Accounts'
+    )
+    assert.equal(
+      openCodeLoginStatusLabel({
+        title: '',
+        url: 'https://opencode.ai/auth',
+        accountLabel: 'prod account',
+        fallback: 'No account selected',
+      }),
+      'https://opencode.ai/auth'
+    )
+    assert.equal(
+      openCodeLoginStatusLabel({
+        title: '',
+        url: '',
+        accountLabel: 'prod account',
+        fallback: 'No account selected',
+      }),
+      'prod account'
+    )
+    assert.equal(
+      openCodeLoginStatusLabel({
+        title: '',
+        url: '',
+        accountLabel: '',
+        fallback: 'No account selected',
+      }),
+      'No account selected'
     )
   })
 

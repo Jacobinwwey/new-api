@@ -36,6 +36,13 @@ type OpenCodeRemoteViewport = {
   height: number
 }
 
+type OpenCodeLoginStatusLabelSource = {
+  title?: string
+  url?: string
+  accountLabel?: string
+  fallback: string
+}
+
 export const OPEN_CODE_INTERACTION_SCREENSHOT_REFRESH_DELAY_MS = 350
 
 export function requireSuccessfulOpenCodeResponse<
@@ -107,6 +114,17 @@ export function shouldClearOpenCodeLoginScreenshotOnAccountSelect(
   nextAccountID: number
 ) {
   return currentAccountID !== nextAccountID
+}
+
+export function openCodeLoginStatusLabel(
+  source: OpenCodeLoginStatusLabelSource
+) {
+  return (
+    source.title?.trim() ||
+    source.url?.trim() ||
+    source.accountLabel?.trim() ||
+    source.fallback
+  )
 }
 
 export function mapContainedScreenshotClickToRemotePoint(

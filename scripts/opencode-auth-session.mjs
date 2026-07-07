@@ -11,6 +11,15 @@ import { pathToFileURL } from "node:url";
 const DEFAULT_VIEWPORT = { width: 1280, height: 900 };
 const MAX_JSON_RESPONSE_COUNT = 20;
 const MAX_JSON_RESPONSE_CHARS = 262144;
+const BROWSER_STATUS_TITLE_MAX_CHARS = 160;
+const BROWSER_STATUS_TITLE_HTTP_URL_PATTERN = /https?:\/\/[^\s"'<>]+/gi;
+const BROWSER_STATUS_TITLE_UNSAFE_URL_PATTERN = /\b(?:data|file|javascript):[^\s"'<>]+/gi;
+const BROWSER_STATUS_TITLE_BEARER_PATTERN = /\bbearer\s+[a-z0-9._-]+/gi;
+const BROWSER_STATUS_TITLE_SECRET_KV_PATTERN =
+  /\b(api[-_]?key|cookie|workspace[-_]?id|authorization|access_token|refresh_token|id_token|code|state)=([^&\s"'<>]+)/gi;
+const BROWSER_STATUS_TITLE_EMAIL_PATTERN = /[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/g;
+const BROWSER_STATUS_TITLE_WINDOWS_PATH_PATTERN = /\b[a-z]:\\[^\s"'<>]+/gi;
+const BROWSER_STATUS_TITLE_UNIX_PATH_PATTERN = /\B\/(?:home|root|opt|var|srv|etc|mnt|tmp|data)\/[^\s"'<>]+/g;
 const SAFE_PRESS_KEYS = Object.freeze({
   Enter: { key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 },
   Tab: { key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 },
@@ -168,6 +177,27 @@ export function sanitizeBrowserStatusURL(rawURL) {
   } catch {
     return "";
   }
+}
+
+export function sanitizeBrowserStatusTitle(rawTitle) {
+  let title = String(rawTitle || "")
+    .replace(/[\u0000-\u001f\u007f]+/g, " ")
+    .trim();
+  if (!title) return "";
+  title = title.replace(
+    BROWSER_STATUS_TITLE_HTTP_URL_PATTERN,
+    (rawURL) => sanitizeBrowserStatusURL(rawURL) || "<redacted-url>",
+  );
+  title = title.replace(BROWSER_STATUS_TITLE_UNSAFE_URL_PATTERN, "<redacted-url>");
+  title = title.replace(BROWSER_STATUS_TITLE_BEARER_PATTERN, "Bearer <redacted>");
+  title = title.replace(BROWSER_STATUS_TITLE_SECRET_KV_PATTERN, "$1=<redacted>");
+  title = title.replace(BROWSER_STATUS_TITLE_EMAIL_PATTERN, "<redacted-email>");
+  title = title.replace(BROWSER_STATUS_TITLE_WINDOWS_PATH_PATTERN, "<redacted-path>");
+  title = title.replace(BROWSER_STATUS_TITLE_UNIX_PATH_PATTERN, "<redacted-path>");
+  title = title.replace(/\s+/g, " ").trim();
+  const chars = Array.from(title);
+  if (chars.length <= BROWSER_STATUS_TITLE_MAX_CHARS) return title;
+  return `${chars.slice(0, BROWSER_STATUS_TITLE_MAX_CHARS - 3).join("")}...`;
 }
 
 export function buildOpenCodeBrowserStateExpression() {
@@ -419,7 +449,7 @@ async function pageWebSocketURL(port) {
   const pages = await requestJSON(`http://127.0.0.1:${port}/json/list`);
   const page = pages.find((item) => item.type === "page" && item.webSocketDebuggerUrl);
   if (!page) throw new Error("no CDP page target found");
-  return { url: page.url || "", ws: page.webSocketDebuggerUrl };
+  return { url: page.url || "", title: page.title || "", ws: page.webSocketDebuggerUrl };
 }
 
 class CDP {
@@ -562,11 +592,13 @@ async function startSession(args) {
 
 async function statusFromState(state) {
   let url = "";
+  let title = "";
   let running = pidRunning(state.browserPid);
   if (running) {
     try {
       const target = await pageWebSocketURL(state.port);
       url = sanitizeBrowserStatusURL(target.url);
+      title = sanitizeBrowserStatusTitle(target.title);
     } catch {
       running = false;
     }
@@ -576,6 +608,7 @@ async function statusFromState(state) {
     running,
     status: running ? "running" : "stopped",
     url,
+    title,
     started_at: state.startedAt || 0,
   };
 }

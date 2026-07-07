@@ -43,6 +43,7 @@ export type OpenCodeLoginStatus = {
   running: boolean
   status: string
   url?: string
+  title?: string
   started_at?: number
   message?: string
 }

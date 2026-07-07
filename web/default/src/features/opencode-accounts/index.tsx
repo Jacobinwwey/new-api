@@ -77,6 +77,7 @@ import {
   canUseOpenCodeLoginScreenshotResponse,
   isOpenCodeAccountDeleteDialogOpen,
   isOpenCodeAccountPageRefreshing,
+  openCodeLoginStatusLabel,
   mapContainedScreenshotClickToRemotePoint,
   openCodeAccountWorkspaceGridRows,
   refreshOpenCodeAccountPageData,
@@ -487,9 +488,12 @@ export function OpenCodeAccounts() {
                     {loginStatus?.running ? t('Running') : t('Stopped')}
                   </Badge>
                   <span className='text-muted-foreground min-w-0 truncate text-sm'>
-                    {loginStatus?.url ||
-                      selectedAccount?.label ||
-                      t('No account selected')}
+                    {openCodeLoginStatusLabel({
+                      title: loginStatus?.title,
+                      url: loginStatus?.url,
+                      accountLabel: selectedAccount?.label,
+                      fallback: t('No account selected'),
+                    })}
                   </span>
                 </div>
               </div>

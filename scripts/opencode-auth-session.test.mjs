@@ -15,6 +15,7 @@ import {
   isDirectScriptExecution,
   openCodePressKeySpec,
   retryTransientBrowserAction,
+  sanitizeBrowserStatusTitle,
   sanitizeBrowserStatusURL,
   shouldProbeOpenCodeResourceURL,
   xvfbProcessArgsMatchState,
@@ -109,6 +110,26 @@ test("sanitizeBrowserStatusURL strips authorization payload from browser URLs", 
   for (const sanitized of [callbackURL, credentialURL]) {
     assert.doesNotMatch(sanitized, /oauth-code-secret|oauth-state-secret|fragment-secret|operator|browser-pass|secret/);
   }
+});
+
+test("sanitizeBrowserStatusTitle redacts account and authorization fragments", () => {
+  const sanitized = sanitizeBrowserStatusTitle(
+    [
+      "Sign in as operator@example.test",
+      "https://operator:browser-pass@opencode.ai/auth/callback?code=oauth-code-secret&state=oauth-state-secret#fragment",
+      "Bearer title-token",
+      `workspace_` + `id=workspace-secret`,
+      "D:\\Profiles\\operator\\profile",
+      "/home/operator/profile",
+    ].join(" "),
+  );
+
+  assert.match(sanitized, /Sign in as/);
+  assert.match(sanitized, /https:\/\/opencode\.ai\/auth\/callback/);
+  assert.doesNotMatch(
+    sanitized,
+    /operator@example\.test|operator:browser-pass|oauth-code-secret|oauth-state-secret|fragment|title-token|workspace-secret|\/home\/operator/,
+  );
 });
 
 test("buildOpenCodeBrowserStateExpression collects same-site JSON responses", async () => {

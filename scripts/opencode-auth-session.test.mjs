@@ -14,6 +14,7 @@ import {
   buildOpenCodeBrowserStateExpression,
   isDirectScriptExecution,
   openCodePressKeySpec,
+  openCodeXvfbDisplayCandidates,
   retryTransientBrowserAction,
   sanitizeBrowserStatusTitle,
   sanitizeBrowserStatusURL,
@@ -274,6 +275,12 @@ test("openCodePressKeySpec accepts only fixed browser-control keys", () => {
   assert.equal(openCodePressKeySpec(" enter "), null);
   assert.equal(openCodePressKeySpec("Control+L"), null);
   assert.equal(openCodePressKeySpec("secret pasted into key field"), null);
+});
+
+test("openCodeXvfbDisplayCandidates starts from account-derived display and then probes alternatives", () => {
+  assert.deepEqual(openCodeXvfbDisplayCandidates(900001, 4), [":201", ":202", ":203", ":204"]);
+  assert.deepEqual(openCodeXvfbDisplayCandidates(900299, 3), [":499", ":200", ":201"]);
+  assert.deepEqual(openCodeXvfbDisplayCandidates(-1, 3), [":499", ":200", ":201"]);
 });
 
 test("press action rejects unsupported keys without echoing the raw key", async () => {

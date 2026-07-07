@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   GO_ROLLOUT_CHECK_COMMANDS,
+  NODE_ROLLOUT_CHECK_COMMANDS,
   RUNTIME_SCRIPTS,
   WEB_DEFAULT_CHECK_COMMANDS,
   buildRolloutConfig,
@@ -140,12 +141,26 @@ test("runtime script install set includes live E2E orchestration dependencies", 
     new Set(RUNTIME_SCRIPTS),
     new Set([
       "opencode-auth-session.mjs",
+      "opencode-auth-session-smoke.mjs",
       "opencode-e2e-preflight.mjs",
       "glm-cache-smoke.mjs",
       "tailscale-link-preflight.mjs",
       "opencode-live-e2e.mjs",
     ]),
   );
+});
+
+test("node rollout checks cover the auth sidecar runtime smoke runner", () => {
+  assert.deepEqual(NODE_ROLLOUT_CHECK_COMMANDS, [
+    "node --test scripts/glm-cache-smoke.test.mjs scripts/opencode-e2e-preflight.test.mjs scripts/opencode-auth-session.test.mjs scripts/opencode-auth-session-smoke.test.mjs scripts/new-api-clean-rollout.test.mjs scripts/tailscale-link-preflight.test.mjs scripts/opencode-live-e2e.test.mjs",
+    "node --check scripts/glm-cache-smoke.mjs",
+    "node --check scripts/opencode-e2e-preflight.mjs",
+    "node --check scripts/opencode-auth-session.mjs",
+    "node --check scripts/opencode-auth-session-smoke.mjs",
+    "node --check scripts/new-api-clean-rollout.mjs",
+    "node --check scripts/tailscale-link-preflight.mjs",
+    "node --check scripts/opencode-live-e2e.mjs",
+  ]);
 });
 
 test("web default checks cover OpenCode account UI behavior before rollout build", () => {

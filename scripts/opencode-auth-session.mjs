@@ -9,6 +9,9 @@ import { spawn } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
 const DEFAULT_VIEWPORT = { width: 1280, height: 900 };
+const XVFB_DISPLAY_MIN = 200;
+const XVFB_DISPLAY_COUNT = 300;
+const XVFB_START_ATTEMPTS = 24;
 const MAX_JSON_RESPONSE_COUNT = 20;
 const MAX_JSON_RESPONSE_CHARS = 262144;
 const BROWSER_STATUS_TITLE_MAX_CHARS = 160;
@@ -54,6 +57,18 @@ function fail(message) {
 export function openCodePressKeySpec(rawKey) {
   const key = String(rawKey || "").trim();
   return SAFE_PRESS_KEYS[key] || null;
+}
+
+export function openCodeXvfbDisplayCandidates(accountID, attempts = XVFB_START_ATTEMPTS) {
+  const numericAccountID = Number(accountID);
+  const normalizedAccountID = Number.isInteger(numericAccountID) ? numericAccountID : 0;
+  const displayCount = Math.max(1, Math.min(XVFB_DISPLAY_COUNT, Number(attempts) || XVFB_START_ATTEMPTS));
+  const baseOffset = ((normalizedAccountID % XVFB_DISPLAY_COUNT) + XVFB_DISPLAY_COUNT) % XVFB_DISPLAY_COUNT;
+  const displays = [];
+  for (let offset = 0; offset < displayCount; offset += 1) {
+    displays.push(`:${XVFB_DISPLAY_MIN + ((baseOffset + offset) % XVFB_DISPLAY_COUNT)}`);
+  }
+  return displays;
 }
 
 async function readStdinText() {
@@ -529,12 +544,37 @@ async function startSession(args) {
     /* no prior session */
   }
 
+  const displays = shouldSpawnXvfb() ? openCodeXvfbDisplayCandidates(accountID) : [process.env.DISPLAY || ""];
+  let lastError;
+  for (const display of displays) {
+    try {
+      const state = await startSessionProcesses({ accountID, stateDir, url, display });
+      await writeState(stateDir, accountID, state);
+      json({ success: true, status: await statusFromState(state) });
+      return;
+    } catch (error) {
+      lastError = error;
+      if (!isRetryableXvfbStartupError(error)) break;
+    }
+  }
+
+  throw lastError || new Error("opencode auth browser did not start");
+}
+
+function shouldSpawnXvfb() {
+  return os.platform() !== "win32" && !process.env.DISPLAY;
+}
+
+function isRetryableXvfbStartupError(error) {
+  return /Xvfb exited before ready/.test(String(error?.message || ""));
+}
+
+async function startSessionProcesses({ accountID, stateDir, url, display }) {
   const port = await allocatePort();
-  const display = `:${200 + (accountID % 300)}`;
   let xvfb;
   let xvfbStartup;
   const env = { ...process.env };
-  if (os.platform() !== "win32" && !env.DISPLAY) {
+  if (shouldSpawnXvfb()) {
     xvfb = spawn("Xvfb", [display, "-screen", "0", `${DEFAULT_VIEWPORT.width}x${DEFAULT_VIEWPORT.height}x24`], {
       detached: true,
       stdio: "ignore",
@@ -580,14 +620,13 @@ async function startSession(args) {
   const state = {
     accountID,
     port,
-    display,
+    display: display || env.DISPLAY || "",
     profile,
     browserPid: browser.pid,
     xvfbPid: xvfb?.pid || 0,
     startedAt: Math.floor(Date.now() / 1000),
   };
-  await writeState(stateDir, accountID, state);
-  json({ success: true, status: await statusFromState(state) });
+  return state;
 }
 
 async function statusFromState(state) {

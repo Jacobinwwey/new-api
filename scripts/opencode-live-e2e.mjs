@@ -265,6 +265,30 @@ function diagnosticOverrideNames(config) {
   }
   if (!config.tailscale) {
     names.push("skip_tailscale");
+  } else {
+    names.push(...tailscaleDiagnosticOverrideNames(config.tailscale));
+  }
+  return names;
+}
+
+function tailscaleDiagnosticOverrideNames(tailscale) {
+  const names = [];
+  if (tailscale.requireDirect === false) {
+    names.push("tailscale_direct_check_disabled");
+  }
+  if (tailscale.requireTun === false) {
+    names.push("tailscale_tun_check_disabled");
+  }
+  if (tailscale.requireTCP === false) {
+    names.push("tailscale_tcp_check_disabled");
+  }
+  if (Array.isArray(tailscale.ports) && tailscale.ports.length === 0) {
+    names.push("tailscale_tcp_ports_empty");
+  }
+  const minPongs = Number(tailscale.minPongs);
+  const pingCount = Number(tailscale.pingCount);
+  if (Number.isFinite(minPongs) && Number.isFinite(pingCount) && minPongs < pingCount) {
+    names.push("tailscale_min_pongs_relaxed");
   }
   return names;
 }

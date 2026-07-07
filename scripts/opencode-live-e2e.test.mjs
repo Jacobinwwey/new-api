@@ -121,6 +121,73 @@ test("runOpenCodeLiveE2E passes when all gates pass", async () => {
   assert.doesNotMatch(JSON.stringify(summary), /new-api\.example\.test|relay-key-secret|root-token-secret/);
 });
 
+test("runOpenCodeLiveE2E treats relaxed Tailscale gates as diagnostic acceptance", async () => {
+  const calls = [];
+  const summary = await runOpenCodeLiveE2E({
+    continueOnFailure: false,
+    tailscale: {
+      target: "remote-box",
+      ports: [],
+      pingCount: 3,
+      minPongs: 1,
+      requireDirect: false,
+      requireTun: false,
+      requireTCP: false,
+    },
+    opencode: { minActiveReadyAccounts: 1 },
+    cacheSmoke: {},
+    runners: {
+      runTailscaleLinkPreflight: async () => {
+        calls.push("tailscale");
+        return passedStage({
+          checks: {
+            status: "passed",
+            items: [
+              {
+                name: "tailscale_direct_path",
+                status: "passed",
+                actual: "derp",
+                expected: "direct",
+              },
+            ],
+          },
+        });
+      },
+      runOpenCodePreflight: async () => {
+        calls.push("opencode");
+        return passedStage({
+          accounts: {
+            active_ready: 1,
+            activation_contract: {
+              ready: 1,
+            },
+          },
+        });
+      },
+      runCacheSmoke: async () => {
+        calls.push("cache");
+        return passedStage();
+      },
+    },
+  });
+
+  assert.deepEqual(calls, ["tailscale", "opencode", "cache"]);
+  assert.equal(summary.checks.status, "passed");
+  assert.deepEqual(summary.acceptance, {
+    status: "failed",
+    mode: "diagnostic",
+    production_ready: false,
+    diagnostic_overrides: [
+      "tailscale_direct_check_disabled",
+      "tailscale_tun_check_disabled",
+      "tailscale_tcp_check_disabled",
+      "tailscale_tcp_ports_empty",
+      "tailscale_min_pongs_relaxed",
+    ],
+    failed_checks: [],
+  });
+});
+
 test("runOpenCodeLiveE2E fails when OpenCode activation-contract categories contradict readiness", async () => {
   const calls = [];
   const summary = await runOpenCodeLiveE2E({

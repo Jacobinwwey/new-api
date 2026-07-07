@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { execFile } from "node:child_process";
+import { realpathSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -170,6 +171,15 @@ export function isPNGBase64(value) {
   );
 }
 
+export function isDirectAuthSessionSmokeExecution(moduleURL, argvScriptPath, resolvePath = realpathSync) {
+  if (!argvScriptPath) return false;
+  try {
+    return moduleURL === pathToFileURL(resolvePath(argvScriptPath)).href;
+  } catch {
+    return moduleURL === pathToFileURL(argvScriptPath).href;
+  }
+}
+
 export function buildAuthSessionSmokeReport(observations) {
   const start = summarizeAuthSessionStatus(observations?.start?.status);
   const status = summarizeAuthSessionStatus(observations?.status?.status);
@@ -318,6 +328,6 @@ async function main() {
   }
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] || "").href) {
+if (isDirectAuthSessionSmokeExecution(import.meta.url, process.argv[1])) {
   main();
 }

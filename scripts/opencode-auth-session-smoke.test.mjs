@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
 
 import {
   buildAuthSessionSmokeConfig,
   buildAuthSessionSmokeReport,
+  isDirectAuthSessionSmokeExecution,
   isPNGBase64,
   redactAuthSessionSmokeText,
   summarizeAuthSessionStatus,
@@ -99,6 +101,17 @@ test("isPNGBase64 accepts PNG screenshots and rejects other base64 payloads", ()
   assert.equal(isPNGBase64(pngHeader), true);
   assert.equal(isPNGBase64(textPayload), false);
   assert.equal(isPNGBase64("not-base64"), false);
+});
+
+test("isDirectAuthSessionSmokeExecution accepts symlinked argv script paths", () => {
+  const realScript = "/workspace/release-a/scripts/opencode-auth-session-smoke.mjs";
+  const symlinkScript = "/workspace/current/scripts/opencode-auth-session-smoke.mjs";
+  const resolvePath = (candidate) => (candidate === symlinkScript ? realScript : candidate);
+
+  assert.equal(
+    isDirectAuthSessionSmokeExecution(pathToFileURL(realScript).href, symlinkScript, resolvePath),
+    true,
+  );
 });
 
 test("buildAuthSessionSmokeReport summarizes steps without leaking browser details", () => {

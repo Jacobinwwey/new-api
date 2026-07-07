@@ -43,6 +43,11 @@ type OpenCodeLoginStatusLabelSource = {
   fallback: string
 }
 
+type OpenCodeLoginScreenshotStatusSource = {
+  running?: boolean
+  status?: string
+}
+
 export const OPEN_CODE_INTERACTION_SCREENSHOT_REFRESH_DELAYS_MS = [
   350, 1250, 2500, 5000,
 ] as const
@@ -109,6 +114,12 @@ export function canUseOpenCodeLoginScreenshotResponse(
   selectedAccountID: number | null
 ) {
   return selectedAccountID === accountID
+}
+
+export function shouldClearOpenCodeLoginScreenshotForStatus(
+  status: OpenCodeLoginScreenshotStatusSource | null | undefined
+) {
+  return status?.running === false || status?.status === 'stopped'
 }
 
 export function shouldClearOpenCodeLoginScreenshotOnAccountSelect(

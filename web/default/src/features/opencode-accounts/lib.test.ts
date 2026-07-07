@@ -4,6 +4,7 @@ import { describe, test } from 'node:test'
 import {
   canConfirmOpenCodeAccountDelete,
   canRefreshOpenCodeLoginScreenshot,
+  shouldClearOpenCodeLoginScreenshotForStatus,
   canUseOpenCodeLoginScreenshotResponse,
   isOpenCodeAccountDeleteDialogOpen,
   isOpenCodeAccountPageRefreshing,
@@ -154,6 +155,24 @@ describe('OpenCode account page helpers', () => {
     assert.equal(canUseOpenCodeLoginScreenshotResponse(7, 7), true)
     assert.equal(canUseOpenCodeLoginScreenshotResponse(7, 8), false)
     assert.equal(canUseOpenCodeLoginScreenshotResponse(7, null), false)
+  })
+
+  test('clears stale login screenshots when the remote browser is stopped', () => {
+    assert.equal(shouldClearOpenCodeLoginScreenshotForStatus(undefined), false)
+    assert.equal(
+      shouldClearOpenCodeLoginScreenshotForStatus({
+        running: true,
+        status: 'running',
+      }),
+      false
+    )
+    assert.equal(
+      shouldClearOpenCodeLoginScreenshotForStatus({
+        running: false,
+        status: 'stopped',
+      }),
+      true
+    )
   })
 
   test('clears stale login screenshots when selecting another account', () => {

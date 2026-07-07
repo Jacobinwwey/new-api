@@ -18,7 +18,13 @@ import {
   Trash2,
   XIcon,
 } from 'lucide-react'
-import { type PointerEvent, useEffect, useRef, useState } from 'react'
+import {
+  type PointerEvent,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -80,6 +86,7 @@ import {
   openCodeLoginStatusLabel,
   mapContainedScreenshotClickToRemotePoint,
   openCodeAccountWorkspaceGridRows,
+  shouldClearOpenCodeLoginScreenshotForStatus,
   refreshOpenCodeAccountPageData,
   shouldClearOpenCodeLoginScreenshotOnAccountSelect,
   type OpenCodeAccountDeleteTarget,
@@ -154,6 +161,8 @@ export function OpenCodeAccounts() {
     retry: false,
   })
   const loginStatus = statusQuery.data?.data
+  const loginStatusRunning = loginStatus?.running
+  const loginSessionStatus = loginStatus?.status
 
   const refreshAccounts = () =>
     queryClient.invalidateQueries({ queryKey: ['opencode-accounts'] })
@@ -212,12 +221,12 @@ export function OpenCodeAccounts() {
   })
   screenshotPendingRef.current = screenshotMutation.isPending
 
-  const clearScheduledScreenshotRefreshes = () => {
+  const clearScheduledScreenshotRefreshes = useCallback(() => {
     for (const timer of screenshotRefreshTimerRefs.current) {
       clearTimeout(timer)
     }
     screenshotRefreshTimerRefs.current = []
-  }
+  }, [])
 
   const scheduleScreenshotRefreshAfterInteraction = (accountID: number) => {
     clearScheduledScreenshotRefreshes()
@@ -247,8 +256,25 @@ export function OpenCodeAccounts() {
     () => () => {
       clearScheduledScreenshotRefreshes()
     },
-    []
+    [clearScheduledScreenshotRefreshes]
   )
+
+  useEffect(() => {
+    if (
+      !shouldClearOpenCodeLoginScreenshotForStatus({
+        running: loginStatusRunning,
+        status: loginSessionStatus,
+      })
+    ) {
+      return
+    }
+    clearScheduledScreenshotRefreshes()
+    setScreenshot('')
+  }, [
+    clearScheduledScreenshotRefreshes,
+    loginSessionStatus,
+    loginStatusRunning,
+  ])
 
   const startMutation = useMutation({
     mutationFn: startOpenCodeLogin,
@@ -314,6 +340,8 @@ export function OpenCodeAccounts() {
   const stopMutation = useMutation({
     mutationFn: stopOpenCodeLogin,
     onSuccess: async () => {
+      clearScheduledScreenshotRefreshes()
+      setScreenshot('')
       await statusQuery.refetch()
       toast.success(t('OpenCode login session stopped'))
     },

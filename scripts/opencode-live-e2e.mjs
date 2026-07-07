@@ -93,8 +93,7 @@ export async function runOpenCodeLiveE2E(config) {
           allowSkipped: true,
         }),
       );
-      summary.checks = buildChecksSummary(checks);
-      return summary;
+      return finalizeLiveE2E(summary, checks, config);
     }
   } else {
     checks.push(stageCheck("tailscale_link", "skipped", "disabled", { allowSkipped: true }));
@@ -119,8 +118,7 @@ export async function runOpenCodeLiveE2E(config) {
         allowSkipped: true,
       }),
     );
-    summary.checks = buildChecksSummary(checks);
-    return summary;
+    return finalizeLiveE2E(summary, checks, config);
   }
 
   summary.cache_smoke = await runStage(
@@ -130,8 +128,7 @@ export async function runOpenCodeLiveE2E(config) {
   );
   checks.push(stageCheck("glm_cache_smoke", summary.cache_smoke?.checks?.status));
 
-  summary.checks = buildChecksSummary(checks);
-  return summary;
+  return finalizeLiveE2E(summary, checks, config);
 }
 
 function parseArgs(argv) {
@@ -240,6 +237,38 @@ function buildChecksSummary(items) {
   };
 }
 
+function finalizeLiveE2E(summary, checks, config) {
+  summary.checks = buildChecksSummary(checks);
+  summary.acceptance = buildAcceptanceSummary(summary.checks, checks, config);
+  return summary;
+}
+
+function buildAcceptanceSummary(checksSummary, checks, config) {
+  const diagnosticOverrides = diagnosticOverrideNames(config);
+  const failedChecks = checks
+    .filter((item) => item.status === "failed")
+    .map((item) => item.name);
+  const productionReady = checksSummary.status === "passed" && diagnosticOverrides.length === 0;
+  return {
+    status: productionReady ? "passed" : "failed",
+    mode: diagnosticOverrides.length === 0 ? "production" : "diagnostic",
+    production_ready: productionReady,
+    diagnostic_overrides: diagnosticOverrides,
+    failed_checks: failedChecks,
+  };
+}
+
+function diagnosticOverrideNames(config) {
+  const names = [];
+  if (config.continueOnFailure) {
+    names.push("continue_on_failure");
+  }
+  if (!config.tailscale) {
+    names.push("skip_tailscale");
+  }
+  return names;
+}
+
 function sanitizeLiveText(text, config) {
   let result = String(text || "");
   for (const fragment of sensitiveFragments(config)) {
@@ -332,7 +361,7 @@ async function main() {
     const config = buildOpenCodeLiveE2EConfig(process.argv, process.env);
     const summary = await runOpenCodeLiveE2E(config);
     process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
-    if (summary.checks.status === "failed") {
+    if (summary.acceptance?.status === "failed") {
       process.exitCode = 1;
     }
   } catch (error) {

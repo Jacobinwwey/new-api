@@ -103,6 +103,13 @@ test("runOpenCodeLiveE2E passes when all gates pass", async () => {
       "glm_cache_smoke",
     ],
   );
+  assert.deepEqual(summary.acceptance, {
+    status: "passed",
+    mode: "production",
+    production_ready: true,
+    diagnostic_overrides: [],
+    failed_checks: [],
+  });
   assert.doesNotMatch(JSON.stringify(summary), /new-api\.example\.test|relay-key-secret|root-token-secret/);
 });
 
@@ -138,6 +145,13 @@ test("runOpenCodeLiveE2E fails when OpenCode activation-contract categories cont
 
   assert.deepEqual(calls, ["tailscale", "opencode"]);
   assert.equal(summary.checks.status, "failed");
+  assert.deepEqual(summary.acceptance, {
+    status: "failed",
+    mode: "production",
+    production_ready: false,
+    diagnostic_overrides: [],
+    failed_checks: ["opencode_activation_contract_ready"],
+  });
   assert.deepEqual(
     summary.checks.items.find((item) => item.name === "opencode_activation_contract_ready"),
     {
@@ -182,6 +196,13 @@ test("runOpenCodeLiveE2E stops before credentialed gates when Tailscale fails", 
 
   assert.deepEqual(calls, ["tailscale"]);
   assert.equal(summary.checks.status, "failed");
+  assert.deepEqual(summary.acceptance, {
+    status: "failed",
+    mode: "production",
+    production_ready: false,
+    diagnostic_overrides: [],
+    failed_checks: ["tailscale_link"],
+  });
   assert.equal(summary.opencode, null);
   assert.equal(summary.cache_smoke, null);
   assert.deepEqual(summary.checks.items, [
@@ -234,6 +255,13 @@ test("runOpenCodeLiveE2E can continue after failures for diagnostics", async () 
 
   assert.deepEqual(calls, ["tailscale", "opencode", "cache"]);
   assert.equal(summary.checks.status, "failed");
+  assert.deepEqual(summary.acceptance, {
+    status: "failed",
+    mode: "diagnostic",
+    production_ready: false,
+    diagnostic_overrides: ["continue_on_failure"],
+    failed_checks: ["tailscale_link", "opencode_preflight", "glm_cache_smoke"],
+  });
   assert.deepEqual(
     summary.checks.items.map((item) => [item.name, item.status]),
     [
@@ -487,6 +515,13 @@ test("runOpenCodeLiveE2E supports explicitly skipped Tailscale for local diagnos
 
   assert.deepEqual(calls, ["opencode", "cache"]);
   assert.equal(summary.checks.status, "passed");
+  assert.deepEqual(summary.acceptance, {
+    status: "failed",
+    mode: "diagnostic",
+    production_ready: false,
+    diagnostic_overrides: ["skip_tailscale"],
+    failed_checks: [],
+  });
   assert.deepEqual(summary.checks.items[0], {
     name: "tailscale_link",
     status: "skipped",

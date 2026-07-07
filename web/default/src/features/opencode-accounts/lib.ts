@@ -19,6 +19,23 @@ export type OpenCodeAccountDeleteTarget = {
   label: string
 } | null
 
+type OpenCodeScreenshotPointer = {
+  clientX: number
+  clientY: number
+}
+
+type OpenCodeScreenshotElementRect = {
+  left: number
+  top: number
+  width: number
+  height: number
+}
+
+type OpenCodeRemoteViewport = {
+  width: number
+  height: number
+}
+
 export function requireSuccessfulOpenCodeResponse<
   T extends OpenCodeBusinessResponse,
 >(response: T | null | undefined, fallbackMessage: string) {
@@ -66,4 +83,58 @@ export function canConfirmOpenCodeAccountDelete(
   isDeleting: boolean
 ) {
   return target !== null && !isDeleting
+}
+
+export function mapContainedScreenshotClickToRemotePoint(
+  pointer: OpenCodeScreenshotPointer,
+  elementRect: OpenCodeScreenshotElementRect,
+  viewport: OpenCodeRemoteViewport
+) {
+  if (
+    elementRect.width <= 0 ||
+    elementRect.height <= 0 ||
+    viewport.width <= 0 ||
+    viewport.height <= 0
+  ) {
+    return null
+  }
+
+  const viewportAspectRatio = viewport.width / viewport.height
+  const elementAspectRatio = elementRect.width / elementRect.height
+  const contentWidth =
+    elementAspectRatio > viewportAspectRatio
+      ? elementRect.height * viewportAspectRatio
+      : elementRect.width
+  const contentHeight =
+    elementAspectRatio > viewportAspectRatio
+      ? elementRect.height
+      : elementRect.width / viewportAspectRatio
+  const contentLeft = elementRect.left + (elementRect.width - contentWidth) / 2
+  const contentTop = elementRect.top + (elementRect.height - contentHeight) / 2
+  const normalizedX = (pointer.clientX - contentLeft) / contentWidth
+  const normalizedY = (pointer.clientY - contentTop) / contentHeight
+
+  if (
+    normalizedX < 0 ||
+    normalizedX > 1 ||
+    normalizedY < 0 ||
+    normalizedY > 1
+  ) {
+    return null
+  }
+
+  return {
+    x: clampRemoteCoordinate(
+      Math.round(normalizedX * viewport.width),
+      viewport.width
+    ),
+    y: clampRemoteCoordinate(
+      Math.round(normalizedY * viewport.height),
+      viewport.height
+    ),
+  }
+}
+
+function clampRemoteCoordinate(coordinate: number, remoteExtent: number) {
+  return Math.min(Math.max(coordinate, 0), remoteExtent - 1)
 }

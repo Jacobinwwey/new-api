@@ -74,6 +74,7 @@ import {
   canConfirmOpenCodeAccountDelete,
   isOpenCodeAccountDeleteDialogOpen,
   isOpenCodeAccountPageRefreshing,
+  mapContainedScreenshotClickToRemotePoint,
   openCodeAccountWorkspaceGridRows,
   refreshOpenCodeAccountPageData,
   type OpenCodeAccountDeleteTarget,
@@ -279,13 +280,13 @@ export function OpenCodeAccounts() {
   const handleScreenshotClick = (event: MouseEvent<HTMLImageElement>) => {
     if (selectedAccountID === null) return
     const rect = event.currentTarget.getBoundingClientRect()
-    const x = Math.round(
-      ((event.clientX - rect.left) / rect.width) * VIEWPORT_WIDTH
+    const point = mapContainedScreenshotClickToRemotePoint(
+      { clientX: event.clientX, clientY: event.clientY },
+      rect,
+      { width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT }
     )
-    const y = Math.round(
-      ((event.clientY - rect.top) / rect.height) * VIEWPORT_HEIGHT
-    )
-    clickMutation.mutate({ id: selectedAccountID, x, y })
+    if (point === null) return
+    clickMutation.mutate({ id: selectedAccountID, ...point })
   }
 
   return (

@@ -5,6 +5,7 @@ import {
   canConfirmOpenCodeAccountDelete,
   isOpenCodeAccountDeleteDialogOpen,
   isOpenCodeAccountPageRefreshing,
+  mapContainedScreenshotClickToRemotePoint,
   openCodeAccountWorkspaceGridRows,
   refreshOpenCodeAccountPageData,
   requireSuccessfulOpenCodeResponse,
@@ -128,5 +129,81 @@ describe('OpenCode account page helpers', () => {
     assert.equal(canConfirmOpenCodeAccountDelete(null, false), false)
     assert.equal(canConfirmOpenCodeAccountDelete(target, true), false)
     assert.equal(canConfirmOpenCodeAccountDelete(target, false), true)
+  })
+
+  test('maps contained screenshot clicks without letterbox offset', () => {
+    assert.deepEqual(
+      mapContainedScreenshotClickToRemotePoint(
+        { clientX: 640, clientY: 450 },
+        { left: 0, top: 0, width: 1280, height: 900 },
+        { width: 1280, height: 900 }
+      ),
+      { x: 640, y: 450 }
+    )
+  })
+
+  test('maps contained screenshot clicks inside horizontal letterbox content only', () => {
+    assert.equal(
+      mapContainedScreenshotClickToRemotePoint(
+        { clientX: 100, clientY: 450 },
+        { left: 0, top: 0, width: 1600, height: 900 },
+        { width: 1280, height: 900 }
+      ),
+      null
+    )
+    assert.deepEqual(
+      mapContainedScreenshotClickToRemotePoint(
+        { clientX: 800, clientY: 450 },
+        { left: 0, top: 0, width: 1600, height: 900 },
+        { width: 1280, height: 900 }
+      ),
+      { x: 640, y: 450 }
+    )
+    assert.deepEqual(
+      mapContainedScreenshotClickToRemotePoint(
+        { clientX: 1440, clientY: 900 },
+        { left: 0, top: 0, width: 1600, height: 900 },
+        { width: 1280, height: 900 }
+      ),
+      { x: 1279, y: 899 }
+    )
+  })
+
+  test('maps contained screenshot clicks inside vertical letterbox content only', () => {
+    assert.equal(
+      mapContainedScreenshotClickToRemotePoint(
+        { clientX: 640, clientY: 100 },
+        { left: 0, top: 0, width: 1280, height: 1200 },
+        { width: 1280, height: 900 }
+      ),
+      null
+    )
+    assert.deepEqual(
+      mapContainedScreenshotClickToRemotePoint(
+        { clientX: 640, clientY: 600 },
+        { left: 0, top: 0, width: 1280, height: 1200 },
+        { width: 1280, height: 900 }
+      ),
+      { x: 640, y: 450 }
+    )
+  })
+
+  test('ignores screenshot clicks when geometry is invalid', () => {
+    assert.equal(
+      mapContainedScreenshotClickToRemotePoint(
+        { clientX: 1, clientY: 1 },
+        { left: 0, top: 0, width: 0, height: 900 },
+        { width: 1280, height: 900 }
+      ),
+      null
+    )
+    assert.equal(
+      mapContainedScreenshotClickToRemotePoint(
+        { clientX: 1, clientY: 1 },
+        { left: 0, top: 0, width: 1280, height: 900 },
+        { width: 0, height: 900 }
+      ),
+      null
+    )
   })
 })

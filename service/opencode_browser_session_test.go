@@ -23,6 +23,62 @@ func TestBuildOpenCodeAuthCommandSpecPassesKeyTextThroughStdin(t *testing.T) {
 	assert.Equal(t, "secret-login-text", spec.stdin)
 }
 
+func TestNormalizeOpenCodeLoginPressKeyAllowsOnlySafeControlKeys(t *testing.T) {
+	key, err := normalizeOpenCodeLoginPressKey("Enter")
+	require.NoError(t, err)
+	assert.Equal(t, "Enter", key)
+
+	key, err = normalizeOpenCodeLoginPressKey(" ArrowLeft ")
+	require.NoError(t, err)
+	assert.Equal(t, "ArrowLeft", key)
+
+	_, err = normalizeOpenCodeLoginPressKey("Control+L")
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "Control+L")
+
+	_, err = normalizeOpenCodeLoginPressKey("secret pasted into key field")
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "secret pasted")
+}
+
+func TestPressOpenCodeLoginSessionKeyPassesOnlySafeKeyArgument(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node is required for opencode auth sidecar tests")
+	}
+	tempRoot := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(tempRoot, "scripts"), 0o700))
+	markerPath := filepath.Join(tempRoot, "press-marker.txt")
+	t.Setenv("OPENCODE_PRESS_MARKER", markerPath)
+	t.Setenv("OPENCODE_AUTH_STATE_DIR", t.TempDir())
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tempRoot, "scripts", "opencode-auth-session.mjs"),
+		[]byte(`import fs from "node:fs";
+const args = process.argv.slice(2);
+fs.writeFileSync(process.env.OPENCODE_PRESS_MARKER, args.join("\n"));
+const accountID = Number(args[args.indexOf("--account-id") + 1]);
+console.log(JSON.stringify({ success: true, status: { account_id: accountID, running: true, status: "running" } }));
+`),
+		0o700,
+	))
+	previousWorkingDirectory, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(tempRoot))
+	t.Cleanup(func() {
+		require.NoError(t, os.Chdir(previousWorkingDirectory))
+	})
+
+	status, err := PressOpenCodeLoginSessionKey(context.Background(), 202, OpenCodeLoginPressInput{Key: "Tab"})
+	require.NoError(t, err)
+	assert.True(t, status.Running)
+
+	marker, err := os.ReadFile(markerPath)
+	require.NoError(t, err)
+	argv := string(marker)
+	assert.Contains(t, argv, "--action\npress")
+	assert.Contains(t, argv, "--account-id\n202")
+	assert.Contains(t, argv, "--key\nTab")
+}
+
 func TestSanitizeOpenCodeLoginSessionStatusDropsAuthorizationPayload(t *testing.T) {
 	status := sanitizeOpenCodeLoginSessionStatus(OpenCodeLoginSessionStatus{
 		AccountID: 9,

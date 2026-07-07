@@ -273,6 +273,27 @@ func KeyOpenCodeAccountLogin(c *gin.Context) {
 	common.ApiSuccess(c, status)
 }
 
+func PressOpenCodeAccountLogin(c *gin.Context) {
+	id, ok := parseOpenCodeAccountID(c)
+	if !ok {
+		return
+	}
+	if !ensureOpenCodeAccountExists(c, id) {
+		return
+	}
+	var req service.OpenCodeLoginPressInput
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiErrorMsg(c, "无效的请求参数: "+err.Error())
+		return
+	}
+	status, err := service.PressOpenCodeLoginSessionKey(c.Request.Context(), id, req)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, status)
+}
+
 func ExtractOpenCodeAccountLogin(c *gin.Context) {
 	id, ok := parseOpenCodeAccountID(c)
 	if !ok {

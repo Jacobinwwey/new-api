@@ -59,3 +59,17 @@ export type OpenCodeClickRequest = {
 export type OpenCodeKeyRequest = {
   text: string
 }
+
+export type OpenCodePressKey =
+  | 'Enter'
+  | 'Tab'
+  | 'Backspace'
+  | 'Escape'
+  | 'ArrowUp'
+  | 'ArrowDown'
+  | 'ArrowLeft'
+  | 'ArrowRight'
+
+export type OpenCodePressRequest = {
+  key: OpenCodePressKey
+}

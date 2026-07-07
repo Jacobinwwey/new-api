@@ -13,6 +13,7 @@ import {
   browserProcessArgsMatchState,
   buildOpenCodeBrowserStateExpression,
   isDirectScriptExecution,
+  openCodePressKeySpec,
   retryTransientBrowserAction,
   sanitizeBrowserStatusURL,
   shouldProbeOpenCodeResourceURL,
@@ -236,6 +237,42 @@ test("recorded process matching accepts Windows command line strings without pre
     ),
     false,
   );
+});
+
+test("openCodePressKeySpec accepts only fixed browser-control keys", () => {
+  assert.deepEqual(openCodePressKeySpec("Enter"), {
+    key: "Enter",
+    code: "Enter",
+    windowsVirtualKeyCode: 13,
+  });
+  assert.deepEqual(openCodePressKeySpec("ArrowLeft"), {
+    key: "ArrowLeft",
+    code: "ArrowLeft",
+    windowsVirtualKeyCode: 37,
+  });
+  assert.equal(openCodePressKeySpec(" enter "), null);
+  assert.equal(openCodePressKeySpec("Control+L"), null);
+  assert.equal(openCodePressKeySpec("secret pasted into key field"), null);
+});
+
+test("press action rejects unsupported keys without echoing the raw key", async () => {
+  const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-press-key-test-"));
+  const accountID = 46;
+
+  const result = await runSidecar([
+    "--action",
+    "press",
+    "--account-id",
+    String(accountID),
+    "--state-dir",
+    stateDir,
+    "--key",
+    "secret pasted into key field",
+  ]);
+
+  assert.equal(result.success, false);
+  assert.match(result.message, /unsupported opencode login key/);
+  assert.doesNotMatch(result.message, /secret pasted/);
 });
 
 test("purge action removes account state and browser profile artifacts", async () => {

@@ -9,6 +9,7 @@ import type {
   OpenCodeClickRequest,
   OpenCodeKeyRequest,
   OpenCodeLoginStatus,
+  OpenCodePressRequest,
   OpenCodeScreenshot,
 } from './types'
 
@@ -110,6 +111,20 @@ export async function keyOpenCodeLogin(
   return requireSuccessfulOpenCodeResponse(
     res.data,
     'Failed to type into OpenCode login session'
+  )
+}
+
+export async function pressOpenCodeLogin(
+  id: number,
+  request: OpenCodePressRequest
+) {
+  const res = await api.post<ApiResponse<OpenCodeLoginStatus>>(
+    `/api/opencode/accounts/${id}/login/press`,
+    request
+  )
+  return requireSuccessfulOpenCodeResponse(
+    res.data,
+    'Failed to press key in OpenCode login session'
   )
 }
 

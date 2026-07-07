@@ -55,6 +55,10 @@ type OpenCodeLoginKeyInput struct {
 	Text string `json:"text"`
 }
 
+type OpenCodeLoginPressInput struct {
+	Key string `json:"key"`
+}
+
 type openCodeAuthSidecarResponse struct {
 	Success      bool                       `json:"success"`
 	Message      string                     `json:"message"`
@@ -66,6 +70,17 @@ type openCodeAuthSidecarResponse struct {
 type openCodeAuthCommandSpec struct {
 	args  []string
 	stdin string
+}
+
+var openCodeLoginPressKeys = map[string]struct{}{
+	"Enter":      {},
+	"Tab":        {},
+	"Backspace":  {},
+	"Escape":     {},
+	"ArrowUp":    {},
+	"ArrowDown":  {},
+	"ArrowLeft":  {},
+	"ArrowRight": {},
 }
 
 func StartOpenCodeLoginSession(ctx context.Context, accountID int) (OpenCodeLoginSessionStatus, error) {
@@ -85,6 +100,14 @@ func ClickOpenCodeLoginSession(ctx context.Context, accountID int, click OpenCod
 
 func TypeOpenCodeLoginSessionText(ctx context.Context, accountID int, input OpenCodeLoginKeyInput) (OpenCodeLoginSessionStatus, error) {
 	return runOpenCodeAuthStatusAction(ctx, "key", accountID, nil, input.Text)
+}
+
+func PressOpenCodeLoginSessionKey(ctx context.Context, accountID int, input OpenCodeLoginPressInput) (OpenCodeLoginSessionStatus, error) {
+	key, err := normalizeOpenCodeLoginPressKey(input.Key)
+	if err != nil {
+		return OpenCodeLoginSessionStatus{}, err
+	}
+	return runOpenCodeAuthStatusAction(ctx, "press", accountID, map[string]string{"key": key}, "")
 }
 
 func StopOpenCodeLoginSession(ctx context.Context, accountID int) (OpenCodeLoginSessionStatus, error) {
@@ -180,6 +203,14 @@ func buildOpenCodeAuthCommandSpec(scriptPath string, action string, accountID in
 		},
 		stdin: stdin,
 	}
+}
+
+func normalizeOpenCodeLoginPressKey(rawKey string) (string, error) {
+	key := strings.TrimSpace(rawKey)
+	if _, ok := openCodeLoginPressKeys[key]; !ok {
+		return "", errors.New("unsupported opencode login key")
+	}
+	return key, nil
 }
 
 func sanitizeOpenCodeLoginSessionStatus(status OpenCodeLoginSessionStatus) OpenCodeLoginSessionStatus {

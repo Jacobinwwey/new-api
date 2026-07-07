@@ -21,6 +21,7 @@ func registerOpenCodeAccountRoutes(apiRouter *gin.RouterGroup) {
 		route.GET("/:id/login/screenshot", controller.GetOpenCodeAccountLoginScreenshot)
 		route.POST("/:id/login/click", controller.ClickOpenCodeAccountLogin)
 		route.POST("/:id/login/key", controller.KeyOpenCodeAccountLogin)
+		route.POST("/:id/login/press", controller.PressOpenCodeAccountLogin)
 		route.POST("/:id/login/extract", controller.ExtractOpenCodeAccountLogin)
 		route.POST("/:id/login/stop", controller.StopOpenCodeAccountLogin)
 

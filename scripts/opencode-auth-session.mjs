@@ -11,6 +11,16 @@ import { pathToFileURL } from "node:url";
 const DEFAULT_VIEWPORT = { width: 1280, height: 900 };
 const MAX_JSON_RESPONSE_COUNT = 20;
 const MAX_JSON_RESPONSE_CHARS = 262144;
+const SAFE_PRESS_KEYS = Object.freeze({
+  Enter: { key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 },
+  Tab: { key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 },
+  Backspace: { key: "Backspace", code: "Backspace", windowsVirtualKeyCode: 8 },
+  Escape: { key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 },
+  ArrowUp: { key: "ArrowUp", code: "ArrowUp", windowsVirtualKeyCode: 38 },
+  ArrowDown: { key: "ArrowDown", code: "ArrowDown", windowsVirtualKeyCode: 40 },
+  ArrowLeft: { key: "ArrowLeft", code: "ArrowLeft", windowsVirtualKeyCode: 37 },
+  ArrowRight: { key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 },
+});
 
 function parseArgs(argv) {
   const args = {};
@@ -30,6 +40,11 @@ function json(data) {
 
 function fail(message) {
   json({ success: false, message });
+}
+
+export function openCodePressKeySpec(rawKey) {
+  const key = String(rawKey || "").trim();
+  return SAFE_PRESS_KEYS[key] || null;
 }
 
 async function readStdinText() {
@@ -610,6 +625,17 @@ async function keySession(args) {
   json({ success: true, status: await statusFromState(state) });
 }
 
+async function pressSession(args) {
+  const keySpec = openCodePressKeySpec(args.key);
+  if (!keySpec) throw new Error("unsupported opencode login key");
+  const state = await readState(args["state-dir"], Number(args["account-id"]));
+  await withPage(state, async (cdp) => {
+    await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", ...keySpec });
+    await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", ...keySpec });
+  });
+  json({ success: true, status: await statusFromState(state) });
+}
+
 async function extractSession(args) {
   const state = await readState(args["state-dir"], Number(args["account-id"]));
   const browserState = await withPage(state, async (cdp) => {
@@ -680,6 +706,7 @@ async function main() {
     else if (action === "screenshot") await screenshotSession(args);
     else if (action === "click") await clickSession(args);
     else if (action === "key") await keySession(args);
+    else if (action === "press") await pressSession(args);
     else if (action === "extract") await extractSession(args);
     else if (action === "stop") await stopSession(args);
     else if (action === "purge") await purgeSession(args);

@@ -436,6 +436,13 @@ console.log(JSON.stringify({ success: true, status: { account_id: 404, running: 
 			handler: KeyOpenCodeAccountLogin,
 		},
 		{
+			name:    "press",
+			method:  http.MethodPost,
+			path:    "/api/opencode/accounts/404/login/press",
+			body:    `{"key":"Enter"}`,
+			handler: PressOpenCodeAccountLogin,
+		},
+		{
 			name:    "stop",
 			method:  http.MethodPost,
 			path:    "/api/opencode/accounts/404/login/stop",

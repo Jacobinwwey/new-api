@@ -1,13 +1,22 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertTriangle,
+  ArrowDownIcon,
+  ArrowLeftIcon,
+  ArrowRightIcon,
+  ArrowUpIcon,
   Check,
+  CornerDownLeftIcon,
+  DeleteIcon,
   Download,
+  IndentIncreaseIcon,
+  type LucideIcon,
   MousePointerClick,
   Play,
   RefreshCw,
   Square,
   Trash2,
+  XIcon,
 } from 'lucide-react'
 import { type MouseEvent, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -34,6 +43,12 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { getChannels } from '@/features/channels/api'
 import { getChannelTypeLabel } from '@/features/channels/lib'
 import type { Channel } from '@/features/channels/types'
@@ -50,6 +65,7 @@ import {
   getOpenCodeLoginStatus,
   keyOpenCodeLogin,
   listOpenCodeAccounts,
+  pressOpenCodeLogin,
   refreshOpenCodeQuota,
   startOpenCodeLogin,
   stopOpenCodeLogin,
@@ -62,10 +78,24 @@ import {
   refreshOpenCodeAccountPageData,
   type OpenCodeAccountDeleteTarget,
 } from './lib'
-import type { OpenCodeAccount } from './types'
+import type { OpenCodeAccount, OpenCodePressKey } from './types'
 
 const VIEWPORT_WIDTH = 1280
 const VIEWPORT_HEIGHT = 900
+const OPEN_CODE_PRESS_KEY_CONTROLS: {
+  key: OpenCodePressKey
+  label: string
+  Icon: LucideIcon
+}[] = [
+  { key: 'Enter', label: 'Enter', Icon: CornerDownLeftIcon },
+  { key: 'Tab', label: 'Tab', Icon: IndentIncreaseIcon },
+  { key: 'Backspace', label: 'Backspace', Icon: DeleteIcon },
+  { key: 'Escape', label: 'Escape', Icon: XIcon },
+  { key: 'ArrowUp', label: 'Arrow up', Icon: ArrowUpIcon },
+  { key: 'ArrowDown', label: 'Arrow down', Icon: ArrowDownIcon },
+  { key: 'ArrowLeft', label: 'Arrow left', Icon: ArrowLeftIcon },
+  { key: 'ArrowRight', label: 'Arrow right', Icon: ArrowRightIcon },
+]
 
 export function OpenCodeAccounts() {
   const { t } = useTranslation()
@@ -176,6 +206,14 @@ export function OpenCodeAccounts() {
       keyOpenCodeLogin(request.id, { text: request.text }),
     onSuccess: async () => {
       setTextInput('')
+      await statusQuery.refetch()
+    },
+  })
+
+  const pressMutation = useMutation({
+    mutationFn: (request: { id: number; key: OpenCodePressKey }) =>
+      pressOpenCodeLogin(request.id, { key: request.key }),
+    onSuccess: async () => {
       await statusQuery.refetch()
     },
   })
@@ -469,6 +507,40 @@ export function OpenCodeAccounts() {
                     {t('Type Text')}
                   </Button>
                 </div>
+                <TooltipProvider>
+                  <div className='flex min-w-0 flex-wrap items-center gap-1'>
+                    {OPEN_CODE_PRESS_KEY_CONTROLS.map(({ key, label, Icon }) => {
+                      const translatedLabel = t(label)
+                      return (
+                        <Tooltip key={key}>
+                          <TooltipTrigger
+                            render={
+                              <Button
+                                variant='outline'
+                                size='icon-sm'
+                                aria-label={translatedLabel}
+                                disabled={
+                                  selectedAccountID === null ||
+                                  pressMutation.isPending
+                                }
+                                onClick={() =>
+                                  runSelected((id) =>
+                                    pressMutation.mutate({ id, key })
+                                  )
+                                }
+                              >
+                                <Icon />
+                              </Button>
+                            }
+                          />
+                          <TooltipContent>
+                            <p>{translatedLabel}</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      )
+                    })}
+                  </div>
+                </TooltipProvider>
               </div>
             </section>
           </div>

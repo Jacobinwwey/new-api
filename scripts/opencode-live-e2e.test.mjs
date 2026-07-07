@@ -67,7 +67,7 @@ test("runOpenCodeLiveE2E passes when all gates pass", async () => {
   const summary = await runOpenCodeLiveE2E({
     continueOnFailure: false,
     tailscale: { target: "remote-box" },
-    opencode: { baseURL: "https://new-api.example.test" },
+    opencode: { baseURL: "https://new-api.example.test", minActiveReadyAccounts: 1 },
     cacheSmoke: { model: "glm-5.2" },
     runners: {
       runTailscaleLinkPreflight: async () => {
@@ -76,7 +76,14 @@ test("runOpenCodeLiveE2E passes when all gates pass", async () => {
       },
       runOpenCodePreflight: async () => {
         calls.push("opencode");
-        return passedStage({ accounts: { active_ready: 1 } });
+        return passedStage({
+          accounts: {
+            active_ready: 1,
+            activation_contract: {
+              ready: 1,
+            },
+          },
+        });
       },
       runCacheSmoke: async () => {
         calls.push("cache");
@@ -89,9 +96,65 @@ test("runOpenCodeLiveE2E passes when all gates pass", async () => {
   assert.equal(summary.checks.status, "passed");
   assert.deepEqual(
     summary.checks.items.map((item) => item.name),
-    ["tailscale_link", "opencode_preflight", "glm_cache_smoke"],
+    [
+      "tailscale_link",
+      "opencode_preflight",
+      "opencode_activation_contract_ready",
+      "glm_cache_smoke",
+    ],
   );
   assert.doesNotMatch(JSON.stringify(summary), /new-api\.example\.test|relay-key-secret|root-token-secret/);
+});
+
+test("runOpenCodeLiveE2E fails when OpenCode activation-contract categories contradict readiness", async () => {
+  const calls = [];
+  const summary = await runOpenCodeLiveE2E({
+    continueOnFailure: false,
+    tailscale: { target: "remote-box" },
+    opencode: { minActiveReadyAccounts: 1 },
+    cacheSmoke: {},
+    runners: {
+      runTailscaleLinkPreflight: async () => {
+        calls.push("tailscale");
+        return passedStage();
+      },
+      runOpenCodePreflight: async () => {
+        calls.push("opencode");
+        return passedStage({
+          accounts: {
+            active_ready: 1,
+            activation_contract: {
+              codex_oauth_key_required: 1,
+            },
+          },
+        });
+      },
+      runCacheSmoke: async () => {
+        calls.push("cache");
+        return passedStage();
+      },
+    },
+  });
+
+  assert.deepEqual(calls, ["tailscale", "opencode"]);
+  assert.equal(summary.checks.status, "failed");
+  assert.deepEqual(
+    summary.checks.items.find((item) => item.name === "opencode_activation_contract_ready"),
+    {
+      name: "opencode_activation_contract_ready",
+      status: "failed",
+      actual: "missing",
+      expected_min: 1,
+    },
+  );
+  assert.deepEqual(summary.checks.items.at(-1), {
+    name: "glm_cache_smoke",
+    status: "skipped",
+    actual: "skipped",
+    expected: "passed",
+    reason: "blocked_by_opencode_preflight",
+  });
+  assert.equal(summary.cache_smoke, null);
 });
 
 test("runOpenCodeLiveE2E stops before credentialed gates when Tailscale fails", async () => {

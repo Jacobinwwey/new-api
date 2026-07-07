@@ -106,7 +106,14 @@ export async function runOpenCodeLiveE2E(config) {
     config,
   );
   checks.push(stageCheck("opencode_preflight", summary.opencode?.checks?.status));
-  if (shouldStop(summary.opencode, config)) {
+  const opencodeContractCheck = opencodeActivationContractReadyCheck(
+    summary.opencode,
+    config.opencode,
+  );
+  if (opencodeContractCheck) {
+    checks.push(opencodeContractCheck);
+  }
+  if (shouldStop(summary.opencode, config) || shouldStopCheck(opencodeContractCheck, config)) {
     checks.push(
       stageCheck("glm_cache_smoke", "skipped", "blocked_by_opencode_preflight", {
         allowSkipped: true,
@@ -166,6 +173,29 @@ function readBoolean(raw, fallback, name) {
 
 function shouldStop(stageSummary, config) {
   return !config.continueOnFailure && stageSummary?.checks?.status !== "passed";
+}
+
+function shouldStopCheck(check, config) {
+  return Boolean(!config.continueOnFailure && check && check.status !== "passed");
+}
+
+function opencodeActivationContractReadyCheck(stageSummary, opencodeConfig = {}) {
+  if (stageSummary?.checks?.status !== "passed") {
+    return null;
+  }
+  const expectedMin = Number(opencodeConfig?.minActiveReadyAccounts || 0);
+  if (!Number.isFinite(expectedMin) || expectedMin <= 0) {
+    return null;
+  }
+  const contract = stageSummary?.accounts?.activation_contract;
+  const ready = Number(contract?.ready);
+  const passed = Number.isFinite(ready) && ready >= expectedMin;
+  return {
+    name: "opencode_activation_contract_ready",
+    status: passed ? "passed" : "failed",
+    actual: Number.isFinite(ready) ? ready : "missing",
+    expected_min: expectedMin,
+  };
 }
 
 async function runStage(name, execute, config) {

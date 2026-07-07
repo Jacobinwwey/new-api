@@ -36,6 +36,8 @@ type OpenCodeRemoteViewport = {
   height: number
 }
 
+export const OPEN_CODE_INTERACTION_SCREENSHOT_REFRESH_DELAY_MS = 350
+
 export function requireSuccessfulOpenCodeResponse<
   T extends OpenCodeBusinessResponse,
 >(response: T | null | undefined, fallbackMessage: string) {
@@ -83,6 +85,28 @@ export function canConfirmOpenCodeAccountDelete(
   isDeleting: boolean
 ) {
   return target !== null && !isDeleting
+}
+
+export function canRefreshOpenCodeLoginScreenshot(
+  accountID: number,
+  selectedAccountID: number | null,
+  isScreenshotPending: boolean
+) {
+  return selectedAccountID === accountID && !isScreenshotPending
+}
+
+export function canUseOpenCodeLoginScreenshotResponse(
+  accountID: number,
+  selectedAccountID: number | null
+) {
+  return selectedAccountID === accountID
+}
+
+export function shouldClearOpenCodeLoginScreenshotOnAccountSelect(
+  currentAccountID: number | null,
+  nextAccountID: number
+) {
+  return currentAccountID !== nextAccountID
 }
 
 export function mapContainedScreenshotClickToRemotePoint(

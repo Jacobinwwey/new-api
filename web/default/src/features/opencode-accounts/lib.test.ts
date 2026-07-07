@@ -3,12 +3,15 @@ import { describe, test } from 'node:test'
 
 import {
   canConfirmOpenCodeAccountDelete,
+  canRefreshOpenCodeLoginScreenshot,
+  canUseOpenCodeLoginScreenshotResponse,
   isOpenCodeAccountDeleteDialogOpen,
   isOpenCodeAccountPageRefreshing,
   mapContainedScreenshotClickToRemotePoint,
   openCodeAccountWorkspaceGridRows,
   refreshOpenCodeAccountPageData,
   requireSuccessfulOpenCodeResponse,
+  shouldClearOpenCodeLoginScreenshotOnAccountSelect,
 } from './lib'
 
 function createRefreshSource() {
@@ -129,6 +132,34 @@ describe('OpenCode account page helpers', () => {
     assert.equal(canConfirmOpenCodeAccountDelete(null, false), false)
     assert.equal(canConfirmOpenCodeAccountDelete(target, true), false)
     assert.equal(canConfirmOpenCodeAccountDelete(target, false), true)
+  })
+
+  test('refreshes login screenshots only for the selected idle account', () => {
+    assert.equal(canRefreshOpenCodeLoginScreenshot(7, 7, false), true)
+    assert.equal(canRefreshOpenCodeLoginScreenshot(7, 8, false), false)
+    assert.equal(canRefreshOpenCodeLoginScreenshot(7, null, false), false)
+    assert.equal(canRefreshOpenCodeLoginScreenshot(7, 7, true), false)
+  })
+
+  test('applies login screenshots only to the still-selected account', () => {
+    assert.equal(canUseOpenCodeLoginScreenshotResponse(7, 7), true)
+    assert.equal(canUseOpenCodeLoginScreenshotResponse(7, 8), false)
+    assert.equal(canUseOpenCodeLoginScreenshotResponse(7, null), false)
+  })
+
+  test('clears stale login screenshots when selecting another account', () => {
+    assert.equal(
+      shouldClearOpenCodeLoginScreenshotOnAccountSelect(7, 8),
+      true
+    )
+    assert.equal(
+      shouldClearOpenCodeLoginScreenshotOnAccountSelect(7, 7),
+      false
+    )
+    assert.equal(
+      shouldClearOpenCodeLoginScreenshotOnAccountSelect(null, 7),
+      true
+    )
   })
 
   test('maps contained screenshot clicks without letterbox offset', () => {

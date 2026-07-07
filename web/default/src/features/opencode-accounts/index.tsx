@@ -18,7 +18,7 @@ import {
   Trash2,
   XIcon,
 } from 'lucide-react'
-import { type MouseEvent, useState } from 'react'
+import { type MouseEvent, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -71,12 +71,16 @@ import {
   stopOpenCodeLogin,
 } from './api'
 import {
+  OPEN_CODE_INTERACTION_SCREENSHOT_REFRESH_DELAY_MS,
   canConfirmOpenCodeAccountDelete,
+  canRefreshOpenCodeLoginScreenshot,
+  canUseOpenCodeLoginScreenshotResponse,
   isOpenCodeAccountDeleteDialogOpen,
   isOpenCodeAccountPageRefreshing,
   mapContainedScreenshotClickToRemotePoint,
   openCodeAccountWorkspaceGridRows,
   refreshOpenCodeAccountPageData,
+  shouldClearOpenCodeLoginScreenshotOnAccountSelect,
   type OpenCodeAccountDeleteTarget,
 } from './lib'
 import type { OpenCodeAccount, OpenCodePressKey } from './types'
@@ -108,6 +112,11 @@ export function OpenCodeAccounts() {
   const [screenshot, setScreenshot] = useState('')
   const [deleteTarget, setDeleteTarget] =
     useState<OpenCodeAccountDeleteTarget>(null)
+  const selectedAccountIDRef = useRef<number | null>(null)
+  const screenshotPendingRef = useRef(false)
+  const screenshotRefreshTimerRef = useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null)
 
   const accountsQuery = useQuery({
     queryKey: ['opencode-accounts'],
@@ -136,6 +145,7 @@ export function OpenCodeAccounts() {
   const selectedAccount =
     accounts.find((account) => account.id === selectedID) ?? null
   const selectedAccountID = selectedAccount?.id ?? null
+  selectedAccountIDRef.current = selectedAccountID
 
   const statusQuery = useQuery({
     queryKey: ['opencode-login-status', selectedAccountID],
@@ -159,6 +169,14 @@ export function OpenCodeAccounts() {
     mutationFn: createOpenCodeAccount,
     onSuccess: async (response) => {
       await refreshAccounts()
+      if (
+        shouldClearOpenCodeLoginScreenshotOnAccountSelect(
+          selectedID,
+          response.data.id
+        )
+      ) {
+        setScreenshot('')
+      }
       setSelectedID(response.data.id)
       setLabel('')
       setChannelID('')
@@ -179,43 +197,93 @@ export function OpenCodeAccounts() {
     },
   })
 
-  const startMutation = useMutation({
-    mutationFn: startOpenCodeLogin,
-    onSuccess: async () => {
-      await statusQuery.refetch()
-      toast.success(t('OpenCode login session started'))
-    },
-  })
-
   const screenshotMutation = useMutation({
     mutationFn: getOpenCodeLoginScreenshot,
-    onSuccess: (response) => {
+    onSuccess: (response, accountID) => {
+      if (
+        !canUseOpenCodeLoginScreenshotResponse(
+          accountID,
+          selectedAccountIDRef.current
+        )
+      ) {
+        return
+      }
       setScreenshot(response.data.image_base64)
+    },
+  })
+  screenshotPendingRef.current = screenshotMutation.isPending
+
+  const scheduleScreenshotRefreshAfterInteraction = (accountID: number) => {
+    if (
+      !canRefreshOpenCodeLoginScreenshot(
+        accountID,
+        selectedAccountIDRef.current,
+        screenshotPendingRef.current
+      )
+    ) {
+      return
+    }
+    if (screenshotRefreshTimerRef.current !== null) {
+      clearTimeout(screenshotRefreshTimerRef.current)
+    }
+    screenshotRefreshTimerRef.current = setTimeout(() => {
+      screenshotRefreshTimerRef.current = null
+      if (
+        !canRefreshOpenCodeLoginScreenshot(
+          accountID,
+          selectedAccountIDRef.current,
+          screenshotPendingRef.current
+        )
+      ) {
+        return
+      }
+      screenshotMutation.mutate(accountID)
+    }, OPEN_CODE_INTERACTION_SCREENSHOT_REFRESH_DELAY_MS)
+  }
+
+  useEffect(
+    () => () => {
+      if (screenshotRefreshTimerRef.current !== null) {
+        clearTimeout(screenshotRefreshTimerRef.current)
+      }
+    },
+    []
+  )
+
+  const startMutation = useMutation({
+    mutationFn: startOpenCodeLogin,
+    onSuccess: async (_response, accountID) => {
+      await statusQuery.refetch()
+      scheduleScreenshotRefreshAfterInteraction(accountID)
+      toast.success(t('OpenCode login session started'))
     },
   })
 
   const clickMutation = useMutation({
     mutationFn: (point: { id: number; x: number; y: number }) =>
       clickOpenCodeLogin(point.id, { x: point.x, y: point.y }),
-    onSuccess: async () => {
+    onSuccess: async (_response, point) => {
       await statusQuery.refetch()
+      scheduleScreenshotRefreshAfterInteraction(point.id)
     },
   })
 
   const keyMutation = useMutation({
     mutationFn: (request: { id: number; text: string }) =>
       keyOpenCodeLogin(request.id, { text: request.text }),
-    onSuccess: async () => {
+    onSuccess: async (_response, request) => {
       setTextInput('')
       await statusQuery.refetch()
+      scheduleScreenshotRefreshAfterInteraction(request.id)
     },
   })
 
   const pressMutation = useMutation({
     mutationFn: (request: { id: number; key: OpenCodePressKey }) =>
       pressOpenCodeLogin(request.id, { key: request.key }),
-    onSuccess: async () => {
+    onSuccess: async (_response, request) => {
       await statusQuery.refetch()
+      scheduleScreenshotRefreshAfterInteraction(request.id)
     },
   })
 
@@ -275,6 +343,15 @@ export function OpenCodeAccounts() {
       return
     }
     action(selectedAccountID)
+  }
+
+  const selectAccount = (accountID: number) => {
+    if (
+      shouldClearOpenCodeLoginScreenshotOnAccountSelect(selectedID, accountID)
+    ) {
+      setScreenshot('')
+    }
+    setSelectedID(accountID)
   }
 
   const handleScreenshotClick = (event: MouseEvent<HTMLImageElement>) => {
@@ -379,7 +456,7 @@ export function OpenCodeAccounts() {
                         account={account}
                         selected={account.id === selectedID}
                         deleteDisabled={deleteMutation.isPending}
-                        onSelect={() => setSelectedID(account.id)}
+                        onSelect={() => selectAccount(account.id)}
                         onDelete={() =>
                           setDeleteTarget({
                             id: account.id,

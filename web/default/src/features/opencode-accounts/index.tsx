@@ -85,16 +85,16 @@ import {
   isOpenCodeAccountPageRefreshing,
   openCodeLoginStatusLabel,
   mapContainedScreenshotClickToRemotePoint,
+  normalizeOpenCodeLoginScreenshot,
   openCodeAccountWorkspaceGridRows,
   shouldClearOpenCodeLoginScreenshotForStatus,
   refreshOpenCodeAccountPageData,
   shouldClearOpenCodeLoginScreenshotOnAccountSelect,
   type OpenCodeAccountDeleteTarget,
+  type OpenCodeLoginScreenshotImage,
 } from './lib'
 import type { OpenCodeAccount, OpenCodePressKey } from './types'
 
-const VIEWPORT_WIDTH = 1280
-const VIEWPORT_HEIGHT = 900
 const OPEN_CODE_PRESS_KEY_CONTROLS: {
   key: OpenCodePressKey
   label: string
@@ -117,7 +117,8 @@ export function OpenCodeAccounts() {
   const [label, setLabel] = useState('')
   const [channelID, setChannelID] = useState('')
   const [textInput, setTextInput] = useState('')
-  const [screenshot, setScreenshot] = useState('')
+  const [screenshot, setScreenshot] =
+    useState<OpenCodeLoginScreenshotImage | null>(null)
   const [deleteTarget, setDeleteTarget] =
     useState<OpenCodeAccountDeleteTarget>(null)
   const selectedAccountIDRef = useRef<number | null>(null)
@@ -183,7 +184,7 @@ export function OpenCodeAccounts() {
           response.data.id
         )
       ) {
-        setScreenshot('')
+        setScreenshot(null)
       }
       setSelectedID(response.data.id)
       setLabel('')
@@ -198,7 +199,7 @@ export function OpenCodeAccounts() {
       await refreshAccounts()
       if (selectedID === deletedID) {
         setSelectedID(null)
-        setScreenshot('')
+        setScreenshot(null)
       }
       setDeleteTarget(null)
       toast.success(t('OpenCode account deleted'))
@@ -216,7 +217,7 @@ export function OpenCodeAccounts() {
       ) {
         return
       }
-      setScreenshot(response.data.image_base64)
+      setScreenshot(normalizeOpenCodeLoginScreenshot(response.data))
     },
   })
   screenshotPendingRef.current = screenshotMutation.isPending
@@ -269,7 +270,7 @@ export function OpenCodeAccounts() {
       return
     }
     clearScheduledScreenshotRefreshes()
-    setScreenshot('')
+    setScreenshot(null)
   }, [
     clearScheduledScreenshotRefreshes,
     loginSessionStatus,
@@ -341,7 +342,7 @@ export function OpenCodeAccounts() {
     mutationFn: stopOpenCodeLogin,
     onSuccess: async () => {
       clearScheduledScreenshotRefreshes()
-      setScreenshot('')
+      setScreenshot(null)
       await statusQuery.refetch()
       toast.success(t('OpenCode login session stopped'))
     },
@@ -377,7 +378,7 @@ export function OpenCodeAccounts() {
     if (
       shouldClearOpenCodeLoginScreenshotOnAccountSelect(selectedID, accountID)
     ) {
-      setScreenshot('')
+      setScreenshot(null)
     }
     setSelectedID(accountID)
   }
@@ -385,11 +386,12 @@ export function OpenCodeAccounts() {
   const handleScreenshotClick = (event: PointerEvent<HTMLButtonElement>) => {
     if (event.button !== 0) return
     if (selectedAccountID === null) return
+    if (screenshot === null) return
     const rect = event.currentTarget.getBoundingClientRect()
     const point = mapContainedScreenshotClickToRemotePoint(
       { clientX: event.clientX, clientY: event.clientY },
       rect,
-      { width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT }
+      { width: screenshot.width, height: screenshot.height }
     )
     if (point === null) return
     clickMutation.mutate({ id: selectedAccountID, ...point })
@@ -594,7 +596,7 @@ export function OpenCodeAccounts() {
                       onPointerUp={handleScreenshotClick}
                     >
                       <img
-                        src={`data:image/png;base64,${screenshot}`}
+                        src={`data:image/png;base64,${screenshot.imageBase64}`}
                         alt=''
                         draggable={false}
                         className='pointer-events-none h-full max-h-full w-full max-w-full object-contain select-none'

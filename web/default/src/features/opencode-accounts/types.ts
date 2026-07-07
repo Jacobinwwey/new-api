@@ -50,6 +50,8 @@ export type OpenCodeLoginStatus = {
 
 export type OpenCodeScreenshot = {
   image_base64: string
+  width: number
+  height: number
 }
 
 export type OpenCodeClickRequest = {

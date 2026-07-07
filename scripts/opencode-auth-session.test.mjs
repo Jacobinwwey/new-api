@@ -14,6 +14,7 @@ import {
   buildOpenCodeBrowserStateExpression,
   isDirectScriptExecution,
   normalizeOpenCodeClickPoint,
+  openCodeScreenshotDimensionsFromBase64,
   openCodePressKeySpec,
   openCodeXvfbDisplayCandidates,
   retryTransientBrowserAction,
@@ -25,6 +26,17 @@ import {
 
 const execFileAsync = promisify(execFile);
 const sidecarScriptPath = fileURLToPath(new URL("./opencode-auth-session.mjs", import.meta.url));
+
+function pngHeaderBase64(width, height) {
+  const pngSignature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const header = Buffer.alloc(24);
+  pngSignature.copy(header, 0);
+  header.writeUInt32BE(13, 8);
+  header.write("IHDR", 12, "ascii");
+  header.writeUInt32BE(width, 16);
+  header.writeUInt32BE(height, 20);
+  return header.toString("base64");
+}
 
 async function runSidecar(args) {
   const { stdout } = await execFileAsync(process.execPath, [sidecarScriptPath, ...args], {
@@ -66,6 +78,15 @@ test("retryTransientBrowserAction throws the last error after exhausting retries
   );
 
   assert.equal(attempts, 2);
+});
+
+test("openCodeScreenshotDimensionsFromBase64 reads PNG dimensions used for click mapping", () => {
+  assert.deepEqual(openCodeScreenshotDimensionsFromBase64(pngHeaderBase64(1279, 812)), {
+    width: 1279,
+    height: 812,
+  });
+  assert.throws(() => openCodeScreenshotDimensionsFromBase64("not-png"), /screenshot is not a PNG/);
+  assert.throws(() => openCodeScreenshotDimensionsFromBase64(pngHeaderBase64(0, 812)), /dimensions are invalid/);
 });
 
 test("shouldProbeOpenCodeResourceURL accepts only likely OpenCode JSON resources", () => {

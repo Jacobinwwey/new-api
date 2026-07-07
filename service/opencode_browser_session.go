@@ -47,6 +47,8 @@ type OpenCodeLoginSessionStatus struct {
 
 type OpenCodeLoginScreenshot struct {
 	ImageBase64 string `json:"image_base64"`
+	Width       int    `json:"width"`
+	Height      int    `json:"height"`
 }
 
 type OpenCodeLoginClick struct {

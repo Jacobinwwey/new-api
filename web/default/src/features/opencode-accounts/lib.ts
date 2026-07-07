@@ -36,6 +36,18 @@ type OpenCodeRemoteViewport = {
   height: number
 }
 
+type OpenCodeLoginScreenshotPayload = {
+  image_base64?: string
+  width?: number
+  height?: number
+} | null | undefined
+
+export type OpenCodeLoginScreenshotImage = {
+  imageBase64: string
+  width: number
+  height: number
+}
+
 type OpenCodeLoginStatusLabelSource = {
   title?: string
   url?: string
@@ -114,6 +126,33 @@ export function canUseOpenCodeLoginScreenshotResponse(
   selectedAccountID: number | null
 ) {
   return selectedAccountID === accountID
+}
+
+export function normalizeOpenCodeLoginScreenshot(
+  screenshot: OpenCodeLoginScreenshotPayload
+): OpenCodeLoginScreenshotImage | null {
+  const imageBase64 = screenshot?.image_base64
+  const width = screenshot?.width
+  const height = screenshot?.height
+
+  if (
+    typeof imageBase64 !== 'string' ||
+    imageBase64.length === 0 ||
+    typeof width !== 'number' ||
+    typeof height !== 'number' ||
+    !Number.isInteger(width) ||
+    !Number.isInteger(height) ||
+    width <= 0 ||
+    height <= 0
+  ) {
+    return null
+  }
+
+  return {
+    imageBase64,
+    width,
+    height,
+  }
 }
 
 export function shouldClearOpenCodeLoginScreenshotForStatus(

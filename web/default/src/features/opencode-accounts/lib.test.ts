@@ -9,6 +9,7 @@ import {
   isOpenCodeAccountDeleteDialogOpen,
   isOpenCodeAccountPageRefreshing,
   mapContainedScreenshotClickToRemotePoint,
+  normalizeOpenCodeLoginScreenshot,
   OPEN_CODE_INTERACTION_SCREENSHOT_REFRESH_DELAYS_MS,
   openCodeLoginStatusLabel,
   openCodeAccountWorkspaceGridRows,
@@ -155,6 +156,43 @@ describe('OpenCode account page helpers', () => {
     assert.equal(canUseOpenCodeLoginScreenshotResponse(7, 7), true)
     assert.equal(canUseOpenCodeLoginScreenshotResponse(7, 8), false)
     assert.equal(canUseOpenCodeLoginScreenshotResponse(7, null), false)
+  })
+
+  test('normalizes login screenshots only when remote dimensions are present', () => {
+    assert.deepEqual(
+      normalizeOpenCodeLoginScreenshot({
+        image_base64: 'png-base64',
+        width: 1279,
+        height: 812,
+      }),
+      {
+        imageBase64: 'png-base64',
+        width: 1279,
+        height: 812,
+      }
+    )
+    assert.equal(
+      normalizeOpenCodeLoginScreenshot({
+        image_base64: 'png-base64',
+        width: 0,
+        height: 812,
+      }),
+      null
+    )
+    assert.equal(
+      normalizeOpenCodeLoginScreenshot({
+        image_base64: 'png-base64',
+        width: 1279,
+      }),
+      null
+    )
+    assert.equal(
+      normalizeOpenCodeLoginScreenshot({
+        width: 1279,
+        height: 812,
+      }),
+      null
+    )
   })
 
   test('clears stale login screenshots when the remote browser is stopped', () => {

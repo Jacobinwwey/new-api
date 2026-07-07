@@ -9,6 +9,7 @@ import { spawn } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
 const DEFAULT_VIEWPORT = { width: 1280, height: 900 };
+const PNG_SIGNATURE = Object.freeze([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const XVFB_DISPLAY_MIN = 200;
 const XVFB_DISPLAY_COUNT = 300;
 const XVFB_START_ATTEMPTS = 24;
@@ -80,6 +81,24 @@ export function normalizeOpenCodeClickPoint(rawX, rawY, viewport = DEFAULT_VIEWP
     throw new Error("opencode login click coordinates are outside the viewport");
   }
   return { x: roundedX, y: roundedY };
+}
+
+export function openCodeScreenshotDimensionsFromBase64(rawBase64) {
+  const image = Buffer.from(String(rawBase64 || ""), "base64");
+  if (
+    image.length < 24 ||
+    PNG_SIGNATURE.some((byte, index) => image[index] !== byte) ||
+    image.readUInt32BE(8) !== 13 ||
+    image.subarray(12, 16).toString("ascii") !== "IHDR"
+  ) {
+    throw new Error("opencode login screenshot is not a PNG");
+  }
+  const width = image.readUInt32BE(16);
+  const height = image.readUInt32BE(20);
+  if (width <= 0 || height <= 0) {
+    throw new Error("opencode login screenshot dimensions are invalid");
+  }
+  return { width, height };
 }
 
 export function openCodeXvfbDisplayCandidates(accountID, attempts = XVFB_START_ATTEMPTS) {
@@ -693,7 +712,11 @@ async function screenshotSession(args) {
   const screenshot = await retryTransientBrowserAction(() =>
     withPage(state, async (cdp) => {
       const result = await cdp.send("Page.captureScreenshot", { format: "png", fromSurface: true });
-      return { image_base64: result.data || "" };
+      const imageBase64 = result.data || "";
+      return {
+        image_base64: imageBase64,
+        ...openCodeScreenshotDimensionsFromBase64(imageBase64),
+      };
     })
   );
   json({ success: true, screenshot, status: await statusFromState(state) });

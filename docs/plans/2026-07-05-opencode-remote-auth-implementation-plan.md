@@ -246,7 +246,7 @@ End-to-end verification:
 
 ### Progress
 
-#### Current Main Snapshot (code baseline: `e13a3163`)
+#### Current Main Snapshot (code baseline: `e6f4b229`)
 
 This snapshot records the current branch state after reviewing the implemented code against the prior requirements. It is intentionally separate from the historical progress table below: older rows that say "Implemented locally" describe the phase when that work was introduced, while the code paths listed here are now present on fork `main`. The only remaining proof gaps are live-account and network-path gaps, not missing repository representation.
 
@@ -284,6 +284,7 @@ This snapshot records the current branch state after reviewing the implemented c
 | Quota candidate classification | Implemented | Quota limit and raw display detection now exclude used/usage/consumed keys, preventing `quota.used` values from being recorded as quota limits or quota raw display values when browser payload traversal order varies. |
 | Remote browser sidecar | Implemented and smoke-tested on the remote host without credentials | Added Node CDP + Xvfb sidecar with start/status/screenshot/click/key/press/extract/stop actions. Remote smoke tests covered `about:blank` and the official OpenCode authorization entrypoint without logging in. Extract now probes likely OpenCode same-site JSON resources loaded by the page, excluding static assets and OAuth payload URLs, so API-key/workspace/quota candidates are not limited to browser storage. |
 | Remote browser safe key controls | Implemented and remotely applied | Added a separate `login/press` action for fixed browser-control keys: Enter, Tab, Backspace, Escape, and arrow keys. Text input still goes through stdin-only `login/key`; control keys use an explicit whitelist in both Go and the Node sidecar, and unsupported keys fail with a fixed message that does not echo raw input. This improves real Google/OpenCode authorization ergonomics without widening the secret-bearing text path. Pushed commit `a9094935` passed clean rollout verification and remote apply. |
+| Remote browser page-title status metadata | Implemented locally | Login status now carries a sanitized `title` field from the remote browser target. The Node sidecar strips URLs, bearer-shaped fragments, secret key/value fragments, emails, and local paths before emitting status JSON, while the Go service applies the same public-output boundary again before API responses. The Admin UI prefers title over URL for the compact status label, which helps the operator distinguish OpenCode, Google, callback, and blank pages without exposing authorization payloads. Pushed code commit `e6f4b229` has Node, Go, frontend helper, cross-package Go, typecheck, targeted oxlint, and default frontend build coverage; it has not yet been remotely applied. |
 | Sensitive browser input transport | Implemented | `login/key` now sends typed text to the Node sidecar through stdin instead of argv, so Google/OpenCode login text does not appear in process command lines. The sidecar rejects legacy `--text` input. |
 | Login status URL sanitization | Implemented locally | Status responses now strip URL credentials, query strings, and fragments from HTTP(S) browser URLs at the Node sidecar boundary before the value reaches Go, and the Go API layer keeps its own sanitization as a second boundary. Non-HTTP(S) status URLs are narrowed to normalized `about:blank`; `data:`, `file:`, `javascript:`, and other schemes are suppressed. This prevents OAuth `state`, `code`, bearer-like fragments, URL userinfo, local paths, or embedded payloads from reaching sidecar CLI output, remote smoke logs, or the Admin UI/API response. |
 | Sidecar public error sanitization | Implemented locally | Go service now sanitizes sidecar failure messages before returning them to controllers. HTTP(S) URLs are reduced through the same browser-URL sanitizer, unsafe non-HTTP URL schemes are suppressed, and secret-shaped key/value fragments, bearer tokens, emails, and local absolute paths are replaced with redacted markers. This keeps operator-facing errors useful while avoiding accidental leakage of OAuth payloads, account identifiers, local deployment paths, or command/environment-derived secrets. |
@@ -926,7 +927,7 @@ web/default/src/routes/_authenticated/opencode-accounts/index.tsx
 
 ### 当前进度
 
-#### 当前 main 快照（代码基线：`e13a3163`）
+#### 当前 main 快照（代码基线：`e6f4b229`）
 
 这个快照是在对照先前要求审阅当前实现后记录的分支状态。它刻意与下面的历史进度表分开：历史行中的“本地已实现”描述的是当时引入该工作的阶段，而这里列出的代码路径现在已经在 fork `main` 上。剩余缺口主要是真实账号与网络路径验证，不是仓库中缺少对应实现。
 
@@ -964,6 +965,7 @@ web/default/src/routes/_authenticated/opencode-accounts/index.tsx
 | Quota 候选分类 | 已实现 | quota limit 与 raw display 检测现在会排除 used/usage/consumed 键，避免浏览器 payload 遍历顺序变化时把 `quota.used` 写入 quota limit 或 quota raw 展示值。 |
 | 远端浏览器 sidecar | 已实现，并已在远端主机完成无凭证 smoke test | 已增加 Node CDP + Xvfb sidecar，支持 start/status/screenshot/click/key/press/extract/stop。远端 smoke 覆盖 `about:blank` 与官方 OpenCode 授权入口，未登录、未使用任何账号材料。extract 现在会 probe 页面已加载的疑似 OpenCode 同站 JSON 资源，并排除静态资源与 OAuth payload URL，因此 API key、workspace、quota 候选不再只依赖浏览器 storage。 |
 | 远端浏览器安全控制键 | 已实现并完成远端 apply | 已新增独立 `login/press` action，支持固定浏览器控制键：Enter、Tab、Backspace、Escape 与方向键。文本输入仍走 stdin-only 的 `login/key`；控制键在 Go 与 Node sidecar 两层都走显式白名单，未知 key 使用固定错误消息失败，不回显原始输入。这样能提升真实 Google/OpenCode 授权的人机操作效率，同时不扩大承载 secret 的文本输入路径。已推送提交 `a9094935` 通过 clean rollout verification 与远端 apply。 |
+| 远端浏览器页面标题状态元数据 | 本地已实现 | login status 现在会携带来自远端浏览器 target 的脱敏 `title` 字段。Node sidecar 在输出 status JSON 前会移除 URL、bearer-like 片段、secret key/value 片段、邮箱和本地路径，Go service 在 API 响应前再次套用同一 public-output 边界。Admin UI 的紧凑状态标签会优先展示 title，再回退 URL，因此操作者可以区分 OpenCode、Google、callback 和空白页阶段，同时不暴露授权 payload。已推送代码提交 `e6f4b229`，本地已覆盖 Node、Go、前端 helper、跨包 Go、typecheck、targeted oxlint 与 default 前端构建；尚未执行远端 apply。 |
 | 敏感浏览器输入传输 | 已实现 | `login/key` 现在通过 stdin 向 Node sidecar 传递键入文本，不再放入 argv，因此 Google/OpenCode 登录页中的输入不会出现在进程命令行中。sidecar 会拒绝旧的 `--text` 输入。 |
 | 登录状态 URL 脱敏 | 本地已实现 | status 响应现在会在 Node sidecar 边界移除 HTTP(S) 浏览器 URL 的 URL credentials、query string 与 fragment，再进入 Go 层；Go API 层仍保留自己的二次脱敏边界。非 HTTP(S) status URL 只保留规范化后的 `about:blank`；`data:`、`file:`、`javascript:` 和其它 scheme 会被抑制。这样 OAuth `state`、`code`、bearer-like fragment、URL userinfo、本地路径或内嵌 payload 不会进入 sidecar CLI 输出、远端 smoke 日志或 Admin UI/API 响应。 |
 | Sidecar public error 脱敏 | 本地已实现 | Go service 现在会在 sidecar 失败消息返回 controller 前执行脱敏。HTTP(S) URL 走同一浏览器 URL sanitizer，危险的非 HTTP URL scheme 会被抑制，secret-shaped key/value、bearer token、邮箱和本地绝对路径会替换为 redacted marker。这样面向操作者的错误仍保留可诊断上下文，但不会意外泄漏 OAuth payload、账号标识、本地部署路径或来自命令/环境的 secret。 |

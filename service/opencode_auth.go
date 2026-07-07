@@ -106,6 +106,7 @@ func scanJSONCandidate(raw string, extracted *OpenCodeExtractedAccount) bool {
 func walkOpenCodeCandidate(key string, value any, extracted *OpenCodeExtractedAccount) {
 	switch typed := value.(type) {
 	case map[string]any:
+		acceptCodexOAuthCredentialObject(typed, extracted)
 		for childKey, childValue := range typed {
 			walkOpenCodeCandidate(joinCandidateKey(key, childKey), childValue, extracted)
 		}
@@ -121,6 +122,87 @@ func walkOpenCodeCandidate(key string, value any, extracted *OpenCodeExtractedAc
 	default:
 		acceptCandidate(key, fmt.Sprintf("%v", typed), extracted)
 	}
+}
+
+func acceptCodexOAuthCredentialObject(values map[string]any, extracted *OpenCodeExtractedAccount) {
+	if extracted.Secrets.APIKey != "" {
+		return
+	}
+	credential, ok := buildCodexOAuthCredentialFromCandidate(values)
+	if !ok {
+		return
+	}
+	encoded, err := common.Marshal(credential)
+	if err != nil {
+		return
+	}
+	extracted.Secrets.APIKey = string(encoded)
+	extracted.Confidence++
+	if extracted.Secrets.Email == "" && strings.TrimSpace(credential.Email) != "" {
+		extracted.Secrets.Email = strings.TrimSpace(credential.Email)
+		extracted.Confidence++
+	}
+}
+
+func buildCodexOAuthCredentialFromCandidate(values map[string]any) (CodexOAuthKey, bool) {
+	accessToken := firstStringValue(values, "access_token", "accessToken")
+	if accessToken == "" {
+		return CodexOAuthKey{}, false
+	}
+
+	accountID := firstStringValue(
+		values,
+		"account_id",
+		"accountId",
+		"chatgpt_account_id",
+		"chatgptAccountId",
+	)
+	if accountID == "" {
+		var ok bool
+		accountID, ok = ExtractCodexAccountIDFromJWT(accessToken)
+		if !ok {
+			return CodexOAuthKey{}, false
+		}
+	}
+
+	email := firstStringValue(values, "email")
+	if email == "" {
+		if extractedEmail, ok := ExtractEmailFromJWT(accessToken); ok {
+			email = extractedEmail
+		}
+	}
+
+	credential := CodexOAuthKey{
+		IDToken:      firstStringValue(values, "id_token", "idToken"),
+		AccessToken:  accessToken,
+		RefreshToken: firstStringValue(values, "refresh_token", "refreshToken"),
+		AccountID:    accountID,
+		LastRefresh:  firstStringValue(values, "last_refresh", "lastRefresh"),
+		Email:        email,
+		Type:         firstStringValue(values, "type"),
+		Expired:      firstStringValue(values, "expired", "expires_at", "expiresAt"),
+	}
+	if credential.Type == "" {
+		credential.Type = "codex"
+	}
+	return credential, true
+}
+
+func firstStringValue(values map[string]any, keys ...string) string {
+	for _, key := range keys {
+		value, ok := values[key]
+		if !ok {
+			continue
+		}
+		text, ok := value.(string)
+		if !ok {
+			continue
+		}
+		if text = strings.TrimSpace(text); text != "" {
+			return text
+		}
+	}
+	return ""
 }
 
 func acceptCandidate(key string, value string, extracted *OpenCodeExtractedAccount) {

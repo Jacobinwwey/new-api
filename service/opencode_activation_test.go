@@ -200,3 +200,43 @@ func TestActivateOpenCodeAccountAcceptsCodexOAuthJSONKey(t *testing.T) {
 	require.NoError(t, db.First(&updatedChannel, 12).Error)
 	assert.Equal(t, codexKey, updatedChannel.Key)
 }
+
+func TestActivateOpenCodeAccountAcceptsExtractedCodexOAuthCandidate(t *testing.T) {
+	db := setupOpenCodeActivationTestDB(t)
+
+	originalSecret := common.CryptoSecret
+	common.CryptoSecret = "opencode-codex-extracted-activation-test-secret"
+	t.Cleanup(func() {
+		common.CryptoSecret = originalSecret
+	})
+
+	channel := &model.Channel{
+		Id:     13,
+		Name:   "Codex Extracted Test",
+		Type:   constant.ChannelTypeCodex,
+		Key:    `{"access_token":"old-token","account_id":"old-account"}`,
+		Status: common.ChannelStatusEnabled,
+	}
+	require.NoError(t, db.Create(channel).Error)
+
+	extracted, err := ExtractOpenCodeSecretsFromBrowserState(OpenCodeBrowserState{
+		JSONResponses: []string{
+			`{"data":{"credential":{"access_token":"extracted-access-token","refresh_token":"extracted-refresh-token","account_id":"extracted-account","email":"operator@example.test"}}}`,
+		},
+	})
+	require.NoError(t, err)
+
+	account := &model.OpenCodeAccount{
+		Label:     "extracted-json-key",
+		ChannelID: 13,
+	}
+	require.NoError(t, model.CreateOpenCodeAccount(account, extracted.Secrets))
+
+	activated, err := ActivateOpenCodeAccount(account.Id)
+	require.NoError(t, err)
+	assert.True(t, activated.Active)
+
+	var updatedChannel model.Channel
+	require.NoError(t, db.First(&updatedChannel, 13).Error)
+	assert.Equal(t, extracted.Secrets.APIKey, updatedChannel.Key)
+}

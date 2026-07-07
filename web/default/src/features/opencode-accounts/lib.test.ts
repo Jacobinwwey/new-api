@@ -6,6 +6,8 @@ import {
   canRefreshOpenCodeLoginScreenshot,
   shouldClearOpenCodeLoginScreenshotForStatus,
   canUseOpenCodeLoginScreenshotResponse,
+  openCodeRemoteBrowserPopupFeatures,
+  openCodeRemoteBrowserWindowURL,
   isOpenCodeAccountDeleteDialogOpen,
   isOpenCodeAccountPageRefreshing,
   mapContainedScreenshotClickToRemotePoint,
@@ -156,6 +158,32 @@ describe('OpenCode account page helpers', () => {
     assert.equal(canUseOpenCodeLoginScreenshotResponse(7, 7), true)
     assert.equal(canUseOpenCodeLoginScreenshotResponse(7, 8), false)
     assert.equal(canUseOpenCodeLoginScreenshotResponse(7, null), false)
+  })
+
+  test('builds a secret-free remote browser popup URL for a valid account', () => {
+    assert.equal(
+      openCodeRemoteBrowserWindowURL(7),
+      '/opencode-browser?account_id=7'
+    )
+    assert.equal(openCodeRemoteBrowserWindowURL(0), '')
+    assert.equal(openCodeRemoteBrowserWindowURL(Number.NaN), '')
+  })
+
+  test('bounds remote browser popup features to the available screen', () => {
+    assert.equal(
+      openCodeRemoteBrowserPopupFeatures({
+        availWidth: 1200,
+        availHeight: 800,
+      }),
+      'popup=yes,width=1080,height=720,left=60,top=40,resizable=yes,scrollbars=no'
+    )
+    assert.equal(
+      openCodeRemoteBrowserPopupFeatures({
+        availWidth: 640,
+        availHeight: 480,
+      }),
+      'popup=yes,width=640,height=480,left=0,top=0,resizable=yes,scrollbars=no'
+    )
   })
 
   test('normalizes login screenshots only when remote dimensions are present', () => {

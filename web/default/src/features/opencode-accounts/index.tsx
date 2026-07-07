@@ -9,6 +9,7 @@ import {
   CornerDownLeftIcon,
   DeleteIcon,
   Download,
+  ExternalLink,
   IndentIncreaseIcon,
   type LucideIcon,
   MousePointerClick,
@@ -86,6 +87,8 @@ import {
   openCodeLoginStatusLabel,
   mapContainedScreenshotClickToRemotePoint,
   normalizeOpenCodeLoginScreenshot,
+  openCodeRemoteBrowserPopupFeatures,
+  openCodeRemoteBrowserWindowURL,
   openCodeAccountWorkspaceGridRows,
   shouldClearOpenCodeLoginScreenshotForStatus,
   refreshOpenCodeAccountPageData,
@@ -374,6 +377,24 @@ export function OpenCodeAccounts() {
     action(selectedAccountID)
   }
 
+  const openRemoteBrowserWindow = () => {
+    if (selectedAccountID === null) {
+      toast.error(t('Select an OpenCode account first'))
+      return
+    }
+    const url = openCodeRemoteBrowserWindowURL(selectedAccountID)
+    const popup = window.open(
+      url,
+      'opencode-remote-browser',
+      openCodeRemoteBrowserPopupFeatures()
+    )
+    if (!popup) {
+      toast.error(t('Remote browser popup was blocked'))
+      return
+    }
+    popup.focus()
+  }
+
   const selectAccount = (accountID: number) => {
     if (
       shouldClearOpenCodeLoginScreenshotOnAccountSelect(selectedID, accountID)
@@ -545,6 +566,14 @@ export function OpenCodeAccounts() {
                 >
                   <MousePointerClick data-icon='inline-start' />
                   {t('Screenshot')}
+                </Button>
+                <Button
+                  variant='outline'
+                  onClick={openRemoteBrowserWindow}
+                  disabled={selectedAccountID === null}
+                >
+                  <ExternalLink data-icon='inline-start' />
+                  {t('Window')}
                 </Button>
                 <Button
                   variant='outline'

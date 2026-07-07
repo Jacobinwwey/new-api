@@ -14,6 +14,11 @@ type OpenCodePageRefreshSources = {
   diagnostics: OpenCodePageRefreshSource
 }
 
+type OpenCodePopupScreen = {
+  availWidth?: number
+  availHeight?: number
+} | null | undefined
+
 export type OpenCodeAccountDeleteTarget = {
   id: number
   label: string
@@ -63,6 +68,7 @@ type OpenCodeLoginScreenshotStatusSource = {
 export const OPEN_CODE_INTERACTION_SCREENSHOT_REFRESH_DELAYS_MS = [
   350, 1250, 2500, 5000,
 ] as const
+export const OPEN_CODE_REMOTE_BROWSER_PATH = '/opencode-browser'
 
 export function requireSuccessfulOpenCodeResponse<
   T extends OpenCodeBusinessResponse,
@@ -126,6 +132,36 @@ export function canUseOpenCodeLoginScreenshotResponse(
   selectedAccountID: number | null
 ) {
   return selectedAccountID === accountID
+}
+
+export function openCodeRemoteBrowserWindowURL(accountID: number) {
+  if (!Number.isInteger(accountID) || accountID <= 0) {
+    return ''
+  }
+  const search = new URLSearchParams({ account_id: String(accountID) })
+  return `${OPEN_CODE_REMOTE_BROWSER_PATH}?${search.toString()}`
+}
+
+export function openCodeRemoteBrowserPopupFeatures(
+  screenSize: OpenCodePopupScreen =
+    typeof window === 'undefined' ? null : window.screen
+) {
+  const availWidth = Math.max(0, Number(screenSize?.availWidth) || 0)
+  const availHeight = Math.max(0, Number(screenSize?.availHeight) || 0)
+  const width = popupAxisExtent(availWidth, 1440, 900)
+  const height = popupAxisExtent(availHeight, 1000, 700)
+  const left = Math.max(0, Math.round((availWidth - width) / 2))
+  const top = Math.max(0, Math.round((availHeight - height) / 2))
+
+  return [
+    'popup=yes',
+    `width=${width}`,
+    `height=${height}`,
+    `left=${left}`,
+    `top=${top}`,
+    'resizable=yes',
+    'scrollbars=no',
+  ].join(',')
 }
 
 export function normalizeOpenCodeLoginScreenshot(
@@ -231,4 +267,14 @@ export function mapContainedScreenshotClickToRemotePoint(
 
 function clampRemoteCoordinate(coordinate: number, remoteExtent: number) {
   return Math.min(Math.max(coordinate, 0), remoteExtent - 1)
+}
+
+function popupAxisExtent(
+  available: number,
+  maximum: number,
+  insetThreshold: number
+) {
+  if (available <= 0) return maximum
+  if (available < insetThreshold) return available
+  return Math.min(maximum, Math.round(available * 0.9))
 }

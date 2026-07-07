@@ -59,6 +59,29 @@ export function openCodePressKeySpec(rawKey) {
   return SAFE_PRESS_KEYS[key] || null;
 }
 
+export function normalizeOpenCodeClickPoint(rawX, rawY, viewport = DEFAULT_VIEWPORT) {
+  const x = Number(rawX);
+  const y = Number(rawY);
+  const width = Number(viewport?.width);
+  const height = Number(viewport?.height);
+  if (
+    !Number.isFinite(x) ||
+    !Number.isFinite(y) ||
+    !Number.isFinite(width) ||
+    !Number.isFinite(height) ||
+    width <= 0 ||
+    height <= 0
+  ) {
+    throw new Error("opencode login click coordinates are invalid");
+  }
+  const roundedX = Math.round(x);
+  const roundedY = Math.round(y);
+  if (roundedX < 0 || roundedY < 0 || roundedX >= width || roundedY >= height) {
+    throw new Error("opencode login click coordinates are outside the viewport");
+  }
+  return { x: roundedX, y: roundedY };
+}
+
 export function openCodeXvfbDisplayCandidates(accountID, attempts = XVFB_START_ATTEMPTS) {
   const numericAccountID = Number(accountID);
   const normalizedAccountID = Number.isInteger(numericAccountID) ? numericAccountID : 0;
@@ -678,11 +701,11 @@ async function screenshotSession(args) {
 
 async function clickSession(args) {
   const state = await readState(args["state-dir"], Number(args["account-id"]));
-  const x = Number(args.x);
-  const y = Number(args.y);
+  const { x, y } = normalizeOpenCodeClickPoint(args.x, args.y);
   await withPage(state, async (cdp) => {
-    await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", clickCount: 1 });
-    await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", clickCount: 1 });
+    await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y, button: "none", buttons: 0 });
+    await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", buttons: 1, clickCount: 1 });
+    await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", buttons: 0, clickCount: 1 });
   });
   json({ success: true, status: await statusFromState(state) });
 }

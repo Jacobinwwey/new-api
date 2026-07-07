@@ -13,6 +13,7 @@ import {
   browserProcessArgsMatchState,
   buildOpenCodeBrowserStateExpression,
   isDirectScriptExecution,
+  normalizeOpenCodeClickPoint,
   openCodePressKeySpec,
   openCodeXvfbDisplayCandidates,
   retryTransientBrowserAction,
@@ -275,6 +276,14 @@ test("openCodePressKeySpec accepts only fixed browser-control keys", () => {
   assert.equal(openCodePressKeySpec(" enter "), null);
   assert.equal(openCodePressKeySpec("Control+L"), null);
   assert.equal(openCodePressKeySpec("secret pasted into key field"), null);
+});
+
+test("normalizeOpenCodeClickPoint accepts only finite in-viewport coordinates", () => {
+  assert.deepEqual(normalizeOpenCodeClickPoint("120.4", "80.5"), { x: 120, y: 81 });
+  assert.deepEqual(normalizeOpenCodeClickPoint(1279, 899), { x: 1279, y: 899 });
+  assert.throws(() => normalizeOpenCodeClickPoint("NaN", 80), /coordinates are invalid/);
+  assert.throws(() => normalizeOpenCodeClickPoint(1280, 80), /outside the viewport/);
+  assert.throws(() => normalizeOpenCodeClickPoint(120, -1), /outside the viewport/);
 });
 
 test("openCodeXvfbDisplayCandidates starts from account-derived display and then probes alternatives", () => {

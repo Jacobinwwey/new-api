@@ -18,7 +18,7 @@ import {
   Trash2,
   XIcon,
 } from 'lucide-react'
-import { type MouseEvent, useEffect, useRef, useState } from 'react'
+import { type PointerEvent, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -71,7 +71,7 @@ import {
   stopOpenCodeLogin,
 } from './api'
 import {
-  OPEN_CODE_INTERACTION_SCREENSHOT_REFRESH_DELAY_MS,
+  OPEN_CODE_INTERACTION_SCREENSHOT_REFRESH_DELAYS_MS,
   canConfirmOpenCodeAccountDelete,
   canRefreshOpenCodeLoginScreenshot,
   canUseOpenCodeLoginScreenshotResponse,
@@ -115,9 +115,7 @@ export function OpenCodeAccounts() {
     useState<OpenCodeAccountDeleteTarget>(null)
   const selectedAccountIDRef = useRef<number | null>(null)
   const screenshotPendingRef = useRef(false)
-  const screenshotRefreshTimerRef = useRef<ReturnType<
-    typeof setTimeout
-  > | null>(null)
+  const screenshotRefreshTimerRefs = useRef<ReturnType<typeof setTimeout>[]>([])
 
   const accountsQuery = useQuery({
     queryKey: ['opencode-accounts'],
@@ -214,39 +212,40 @@ export function OpenCodeAccounts() {
   })
   screenshotPendingRef.current = screenshotMutation.isPending
 
+  const clearScheduledScreenshotRefreshes = () => {
+    for (const timer of screenshotRefreshTimerRefs.current) {
+      clearTimeout(timer)
+    }
+    screenshotRefreshTimerRefs.current = []
+  }
+
   const scheduleScreenshotRefreshAfterInteraction = (accountID: number) => {
-    if (
-      !canRefreshOpenCodeLoginScreenshot(
-        accountID,
-        selectedAccountIDRef.current,
-        screenshotPendingRef.current
-      )
-    ) {
-      return
-    }
-    if (screenshotRefreshTimerRef.current !== null) {
-      clearTimeout(screenshotRefreshTimerRef.current)
-    }
-    screenshotRefreshTimerRef.current = setTimeout(() => {
-      screenshotRefreshTimerRef.current = null
-      if (
-        !canRefreshOpenCodeLoginScreenshot(
-          accountID,
-          selectedAccountIDRef.current,
-          screenshotPendingRef.current
-        )
-      ) {
-        return
-      }
-      screenshotMutation.mutate(accountID)
-    }, OPEN_CODE_INTERACTION_SCREENSHOT_REFRESH_DELAY_MS)
+    clearScheduledScreenshotRefreshes()
+    screenshotRefreshTimerRefs.current =
+      OPEN_CODE_INTERACTION_SCREENSHOT_REFRESH_DELAYS_MS.map((delayMs) => {
+        const timer = setTimeout(() => {
+          screenshotRefreshTimerRefs.current =
+            screenshotRefreshTimerRefs.current.filter(
+              (activeTimer) => activeTimer !== timer
+            )
+          if (
+            !canRefreshOpenCodeLoginScreenshot(
+              accountID,
+              selectedAccountIDRef.current,
+              screenshotPendingRef.current
+            )
+          ) {
+            return
+          }
+          screenshotMutation.mutate(accountID)
+        }, delayMs)
+        return timer
+      })
   }
 
   useEffect(
     () => () => {
-      if (screenshotRefreshTimerRef.current !== null) {
-        clearTimeout(screenshotRefreshTimerRef.current)
-      }
+      clearScheduledScreenshotRefreshes()
     },
     []
   )
@@ -355,7 +354,8 @@ export function OpenCodeAccounts() {
     setSelectedID(accountID)
   }
 
-  const handleScreenshotClick = (event: MouseEvent<HTMLImageElement>) => {
+  const handleScreenshotClick = (event: PointerEvent<HTMLButtonElement>) => {
+    if (event.button !== 0) return
     if (selectedAccountID === null) return
     const rect = event.currentTarget.getBoundingClientRect()
     const point = mapContainedScreenshotClickToRemotePoint(
@@ -559,12 +559,19 @@ export function OpenCodeAccounts() {
               <div className='grid min-h-0 grid-rows-[minmax(0,1fr)_auto] gap-3'>
                 <div className='bg-muted/30 flex min-h-[280px] items-center justify-center overflow-hidden rounded-md border'>
                   {screenshot ? (
-                    <img
-                      src={`data:image/png;base64,${screenshot}`}
-                      alt={t('Remote browser')}
-                      className='h-full max-h-full w-full max-w-full cursor-crosshair object-contain'
-                      onClick={handleScreenshotClick}
-                    />
+                    <button
+                      type='button'
+                      aria-label={t('Remote browser')}
+                      className='focus-visible:ring-ring relative flex h-full max-h-full w-full max-w-full cursor-crosshair appearance-none items-center justify-center overflow-hidden rounded-none border-0 bg-transparent p-0 focus-visible:ring-2 focus-visible:ring-offset-2'
+                      onPointerUp={handleScreenshotClick}
+                    >
+                      <img
+                        src={`data:image/png;base64,${screenshot}`}
+                        alt=''
+                        draggable={false}
+                        className='pointer-events-none h-full max-h-full w-full max-w-full object-contain select-none'
+                      />
+                    </button>
                   ) : (
                     <span className='text-muted-foreground text-sm'>
                       {t('Start login and capture a screenshot')}
@@ -591,36 +598,38 @@ export function OpenCodeAccounts() {
                 </div>
                 <TooltipProvider>
                   <div className='flex min-w-0 flex-wrap items-center gap-1'>
-                    {OPEN_CODE_PRESS_KEY_CONTROLS.map(({ key, label, Icon }) => {
-                      const translatedLabel = t(label)
-                      return (
-                        <Tooltip key={key}>
-                          <TooltipTrigger
-                            render={
-                              <Button
-                                variant='outline'
-                                size='icon-sm'
-                                aria-label={translatedLabel}
-                                disabled={
-                                  selectedAccountID === null ||
-                                  pressMutation.isPending
-                                }
-                                onClick={() =>
-                                  runSelected((id) =>
-                                    pressMutation.mutate({ id, key })
-                                  )
-                                }
-                              >
-                                <Icon />
-                              </Button>
-                            }
-                          />
-                          <TooltipContent>
-                            <p>{translatedLabel}</p>
-                          </TooltipContent>
-                        </Tooltip>
-                      )
-                    })}
+                    {OPEN_CODE_PRESS_KEY_CONTROLS.map(
+                      ({ key, label, Icon }) => {
+                        const translatedLabel = t(label)
+                        return (
+                          <Tooltip key={key}>
+                            <TooltipTrigger
+                              render={
+                                <Button
+                                  variant='outline'
+                                  size='icon-sm'
+                                  aria-label={translatedLabel}
+                                  disabled={
+                                    selectedAccountID === null ||
+                                    pressMutation.isPending
+                                  }
+                                  onClick={() =>
+                                    runSelected((id) =>
+                                      pressMutation.mutate({ id, key })
+                                    )
+                                  }
+                                >
+                                  <Icon />
+                                </Button>
+                              }
+                            />
+                            <TooltipContent>
+                              <p>{translatedLabel}</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        )
+                      }
+                    )}
                   </div>
                 </TooltipProvider>
               </div>

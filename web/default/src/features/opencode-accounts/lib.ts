@@ -43,7 +43,9 @@ type OpenCodeLoginStatusLabelSource = {
   fallback: string
 }
 
-export const OPEN_CODE_INTERACTION_SCREENSHOT_REFRESH_DELAY_MS = 350
+export const OPEN_CODE_INTERACTION_SCREENSHOT_REFRESH_DELAYS_MS = [
+  350, 1250, 2500, 5000,
+] as const
 
 export function requireSuccessfulOpenCodeResponse<
   T extends OpenCodeBusinessResponse,

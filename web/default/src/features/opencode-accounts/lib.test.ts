@@ -8,6 +8,7 @@ import {
   isOpenCodeAccountDeleteDialogOpen,
   isOpenCodeAccountPageRefreshing,
   mapContainedScreenshotClickToRemotePoint,
+  OPEN_CODE_INTERACTION_SCREENSHOT_REFRESH_DELAYS_MS,
   openCodeLoginStatusLabel,
   openCodeAccountWorkspaceGridRows,
   refreshOpenCodeAccountPageData,
@@ -142,6 +143,13 @@ describe('OpenCode account page helpers', () => {
     assert.equal(canRefreshOpenCodeLoginScreenshot(7, 7, true), false)
   })
 
+  test('uses staggered screenshot refreshes after remote browser interactions', () => {
+    assert.deepEqual(
+      [...OPEN_CODE_INTERACTION_SCREENSHOT_REFRESH_DELAYS_MS],
+      [350, 1250, 2500, 5000]
+    )
+  })
+
   test('applies login screenshots only to the still-selected account', () => {
     assert.equal(canUseOpenCodeLoginScreenshotResponse(7, 7), true)
     assert.equal(canUseOpenCodeLoginScreenshotResponse(7, 8), false)
@@ -149,14 +157,8 @@ describe('OpenCode account page helpers', () => {
   })
 
   test('clears stale login screenshots when selecting another account', () => {
-    assert.equal(
-      shouldClearOpenCodeLoginScreenshotOnAccountSelect(7, 8),
-      true
-    )
-    assert.equal(
-      shouldClearOpenCodeLoginScreenshotOnAccountSelect(7, 7),
-      false
-    )
+    assert.equal(shouldClearOpenCodeLoginScreenshotOnAccountSelect(7, 8), true)
+    assert.equal(shouldClearOpenCodeLoginScreenshotOnAccountSelect(7, 7), false)
     assert.equal(
       shouldClearOpenCodeLoginScreenshotOnAccountSelect(null, 7),
       true

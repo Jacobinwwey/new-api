@@ -104,6 +104,7 @@ test("runOpenCodePreflight passes stable diagnostics and summarizes accounts wit
             active: true,
             activation_ready: true,
             credential_integrity: "ok",
+            credential_key_source: "crypto_secret",
             email_masked: "u***@example.test",
             missing_activation_fields: [],
           },
@@ -113,8 +114,20 @@ test("runOpenCodePreflight passes stable diagnostics and summarizes accounts wit
             active: false,
             activation_ready: false,
             credential_integrity: "decrypt_failed: opencode-api-key-controller-test",
+            credential_key_source: "session_secret_fallback",
             email_masked: "",
             missing_activation_fields: [`api_${"key"}`, "channel_id"],
+          },
+          {
+            id: 3,
+            label: "codex-plain-key",
+            active: false,
+            activation_ready: false,
+            credential_integrity: "ok",
+            credential_key_source: "crypto_secret",
+            email_masked: "",
+            has_api_key: true,
+            missing_activation_fields: ["codex_oauth_key"],
           },
         ],
       });
@@ -155,17 +168,26 @@ test("runOpenCodePreflight passes stable diagnostics and summarizes accounts wit
     uses_fallback_credential_key: false,
   });
   assert.deepEqual(summary.accounts, {
-    total: 2,
+    total: 3,
     active: 1,
     active_ready: 1,
     activation_ready: 1,
     activation_ready_inconsistent: 0,
     credential_integrity: {
-      ok: 1,
+      ok: 2,
       decrypt_failed: 1,
     },
+    credential_key_source: {
+      crypto_secret: 2,
+      session_secret_fallback: 1,
+    },
+    activation_contract: {
+      ready: 1,
+      decrypt_failed: 1,
+      codex_oauth_key_required: 1,
+    },
     missing_activation_fields: {
-      credential: 1,
+      credential: 2,
       channel: 1,
     },
   });
@@ -182,6 +204,7 @@ test("runOpenCodePreflight passes stable diagnostics and summarizes accounts wit
   assert.doesNotMatch(encoded, /root-token-secret/);
   assert.doesNotMatch(encoded, /u\*\*\*@example\.test/);
   assert.doesNotMatch(encoded, /api_key/);
+  assert.match(encoded, /codex_oauth_key_required/);
   assert.doesNotMatch(encoded, /opencode-api-key-controller-test/);
   assert.doesNotMatch(encoded, /new-api\.example\.test/);
 });

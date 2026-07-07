@@ -246,9 +246,11 @@ End-to-end verification:
 
 ### Progress
 
-#### Current Main Snapshot (code baseline: `98b804ee`)
+#### Current Main Snapshot (latest reviewed main before this update: `48f9ee1e`)
 
 This snapshot records the current branch state after reviewing the implemented code against the prior requirements. It is intentionally separate from the historical progress table below: older rows that say "Implemented locally" describe the phase when that work was introduced, while the code paths listed here are now present on fork `main`. The only remaining proof gaps are live-account and network-path gaps, not missing repository representation.
+
+The current update tightens the preflight evidence boundary before live account import. Account readiness is no longer represented only by raw booleans and coarse missing-field counts; `scripts/opencode-e2e-preflight.mjs` now reports fixed-category account summaries for credential key source and activation contract state. This gives the operator enough machine-readable signal to distinguish `ready`, `decrypt_failed`, `missing_channel`, `missing_credential`, `codex_oauth_key_required`, and `incomplete` without printing account labels, channel names, masked emails, raw missing-field names, API keys, cookies, OAuth tokens, workspace IDs, or deployment addresses.
 
 | Prior requirement | Current code state on `main` | Evidence paths | Remaining risk / next action |
 |---|---|---|---|
@@ -275,6 +277,7 @@ This snapshot records the current branch state after reviewing the implemented c
 | Cache smoke response usage contract gate | Implemented locally | `scripts/glm-cache-smoke.mjs` now rejects malformed request-side `usage` counters from `/v1/responses` while preserving missing-field compatibility and accepting numeric strings. This prevents malformed relay usage from reaching request summaries as `NaN` or JSON `null` evidence during live `glm-5.2` smoke runs. |
 | Cache smoke stats contract gate | Implemented locally | `scripts/glm-cache-smoke.mjs` now rejects usage-cache stats responses that omit the `data` object or provide non-finite/negative values for present numeric counters. This closes a proof-quality gap where `--require-stats` could previously accept a malformed stats payload as available evidence when no stricter threshold was configured. |
 | OpenCode E2E preflight runner | Implemented locally | Added `scripts/opencode-e2e-preflight.mjs` plus Node tests. The runner performs non-mutating GET checks for `/api/status`, root-only OpenCode diagnostics, OpenCode account readiness summary, and the channel-affinity usage stats endpoint required by the later cache smoke. It reads root auth only from environment variables, emits only endpoint status, credential key-source class, account counts, fixed credential-integrity category counts, missing-field category counts, safe affinity-stats identity, and the count of accounts that are both active and consistently activation-ready. It exits non-zero when required root auth, stable credential key, diagnostics payload contract, account-list array contract, account readiness consistency, affinity stats readability, affinity stats identity, minimum activation-ready account counts, minimum active account counts, or minimum active-ready account counts are not satisfied. The active-ready gate prevents a false pass where one account is active while a different account is activation-ready, and the contract gates prevent malformed diagnostics/accounts/stats payloads from being treated as deployable. The readiness gate also refuses account payloads that claim `activation_ready` while credential integrity is not `ok` or missing fields are still present. Credential-integrity values from account payloads are mapped into fixed categories before summary output, so a malformed backend string is not echoed. Endpoint errors redact the configured deployment URL plus generic secret-shaped fragments such as bearer tokens, OAuth `code`/`state`, API keys, cookies, workspace IDs, emails, and local absolute paths. This turns the first post-rollout verification step into a machine gate without printing root tokens, cookies, raw emails, workspace IDs, raw missing-field names, account secrets, deployment URLs, or local deployment paths. |
+| OpenCode preflight readiness categories | Implemented locally | The preflight account summary now adds fixed-category `credential_key_source` and `activation_contract` counters beside the existing active/ready totals. `activation_contract` classifies each account as `ready`, `decrypt_failed`, `codex_oauth_key_required`, `missing_channel`, `missing_credential`, or `incomplete`, derived from public readiness fields only. This closes a proof-quality gap before live `glm-5.2` testing: an operator can tell whether a deployed account is blocked by an unstable key source, decrypt failure, missing binding, missing credential, or Codex/plain-key mismatch without seeing labels, channel names, masked emails, raw missing-field names, API keys, cookies, workspace IDs, OAuth payloads, or deployment addresses. Tests cover the Codex/plain-key mismatch category and assert the summary still does not echo raw `api_key` field names or test secrets. |
 | OpenCode live E2E orchestration gate | Implemented locally | Added `scripts/opencode-live-e2e.mjs` plus Node tests. The runner composes `tailscale-link-preflight`, `opencode-e2e-preflight`, and `glm-cache-smoke` with strict production-oriented defaults: at least one active-ready OpenCode account, stable credential key source, readable affinity stats, two warm-up calls, six measured calls, request and stats hit-rate thresholds of `0.8`, at least one cache-signal token, and a Tailscale TCP check for the deployed New API service port. Tailscale failure stops the run before credentialed OpenCode/cache gates by default, so a known-broken tailnet does not consume live API quota or produce misleading cache evidence. `--continue-on-failure true` and `--skip-tailscale true` are explicit diagnostic overrides, not production acceptance modes. The live gate now treats any actually executed OpenCode/cache stage that returns `skipped` or omits `checks.status` as failed; `skipped` is accepted only for explicitly disabled Tailscale or downstream stages blocked by an earlier failed gate. Stage exceptions are converted into failed stage summaries with redacted deployment URL, Tailscale target, admin/relay credentials, prompt cache key, input text, OAuth payloads, emails, and local paths, preserving fail-fast behavior without printing raw exception text. Successful stage summaries are also recursively sanitized at the orchestration boundary, including both JSON keys and values, so a buggy lower-level runner cannot reintroduce raw live-run material into the combined JSON output. The sanitizer now covers prompt echo variants as well: raw prefixes, full JSON strings, JSON inner escaped strings, and JSON inner prefixes. The live E2E default intentionally does not require a remote Deskflow server port, because the current Deskflow topology is remote-client to local-server/proxy. The clean rollout helper now includes this script's tests and syntax check in its Node gate. |
 | Private network address redaction | Implemented locally | The cache smoke runner, OpenCode preflight runner, auth-session smoke runner, live E2E orchestrator, and clean rollout helper now redact Tailscale/CGNAT, loopback, link-local, and RFC1918 IPv4 addresses from failure text and recursively sanitized stage summaries, not just from configured base URLs. Regression tests cover `100.64/10` tailnet and LAN address leaks in relay failures, preflight endpoint failures, auth sidecar smoke errors, live E2E thrown-stage errors, successful nested stage summaries, and rollout helper output. This does not prove network health, but it makes failed real E2E and rollout diagnostics safer to paste, archive, or commit. |
 | Channel-affinity raw key privacy | Implemented locally | Channel-affinity cache suffixes now use a stable SHA1-derived key part for the affinity value rather than embedding raw `prompt_cache_key` or request-header values. Regression coverage proves the cache suffix keeps rule/model/group context while omitting the original affinity value. This intentionally invalidates old in-memory/Redis affinity entries, which is acceptable because the cache is opportunistic and will re-warm. |
@@ -454,9 +457,18 @@ The latest live E2E hardening handles prompt echo variants at the orchestration 
 
 The newest diagnostic-output hardening treats private network addresses as sensitive runtime metadata. `glm-cache-smoke`, `opencode-e2e-preflight`, `opencode-auth-session-smoke`, `opencode-live-e2e`, and `new-api-clean-rollout` now redact `100.64/10` tailnet/CGNAT addresses, loopback/link-local addresses, and RFC1918 LAN ranges even when those values appear outside the configured deployment URL. The tradeoff is intentionally conservative: a failed live E2E summary may lose exact peer/address text, but the Tailscale preflight already reports route health through categories and anonymized hashes, so raw IP addresses are not needed for repository-safe evidence.
 
+The newest preflight refinement keeps that same evidence discipline for account readiness. The service API remains the owner of truth for whether an account is activation-ready; the script only projects already-public fields into fixed categories suitable for live-run gating. This is deliberately not a new business layer and not a second activation rule engine. The benefit is clearer failure localization before spending live quota: a failed preflight can now say "decrypt/configuration/channel/Codex-contract class" instead of forcing an operator to inspect individual account rows or infer state from a boolean. The cost is that these categories are coarse by design; detailed remediation still belongs in the Admin Web and backend errors, not in a commit-safe smoke artifact.
+
 ### Verification Update
 
 Validated successfully:
+
+Latest local verification for this update:
+
+```text
+node --test scripts/opencode-e2e-preflight.test.mjs
+node --check scripts/opencode-e2e-preflight.mjs
+```
 
 ```text
 node --test scripts/glm-cache-smoke.test.mjs scripts/opencode-e2e-preflight.test.mjs scripts/opencode-auth-session.test.mjs scripts/opencode-auth-session-smoke.test.mjs scripts/new-api-clean-rollout.test.mjs scripts/tailscale-link-preflight.test.mjs scripts/opencode-live-e2e.test.mjs
@@ -667,10 +679,12 @@ NEW_API_ADMIN_USER_ID=<admin-user-id> \
 node scripts/opencode-e2e-preflight.mjs
 ```
 
+Inspect the preflight summary by fixed categories only. `accounts.activation_contract.ready` plus `accounts.active_ready` is the acceptance signal for proceeding; `decrypt_failed`, `missing_channel`, `missing_credential`, or `codex_oauth_key_required` should be treated as configuration/import blockers before any live cache smoke. Do not use raw account rows, channel names, emails, cookies, workspace IDs, or OAuth payloads as commit-safe evidence.
+
 4. Open the deployed Admin Web and verify `/opencode-accounts` does not show the page-level fallback-key warning; if it does, configure a stable `CRYPTO_SECRET` before importing production account material.
 5. Complete the official OpenCode/Google authorization in the remote browser session with an operator-controlled OpenCode subscription account.
 6. Extract account material and verify only masked indicators are visible in the UI.
-7. Activate the bound New API channel, confirm channel cache refresh, then rerun preflight with `--min-active-ready-accounts 1`. Keep `--min-activation-ready-accounts 1 --min-active-accounts 1` only as supplemental diagnostics; the live cache smoke gate should require a single account that satisfies both states.
+7. Activate the bound New API channel, confirm channel cache refresh, then rerun preflight with `--min-active-ready-accounts 1`. Keep `--min-activation-ready-accounts 1 --min-active-accounts 1` only as supplemental diagnostics; the live cache smoke gate should require a single account that satisfies both states. If `activation_contract` reports `codex_oauth_key_required`, do not force activation; re-run extraction or adjust the bound channel contract so the Codex JSON credential shape is satisfied.
 8. After Tailscale is healthy and an OpenCode account is active-ready, prefer the combined live E2E gate as the final acceptance path. If it fails, fall back to the individual preflight and smoke runners above to isolate the failed boundary:
 
 ```bash
@@ -950,9 +964,11 @@ web/default/src/routes/_authenticated/opencode-accounts/index.tsx
 
 ### 当前进度
 
-#### 当前 main 快照（代码基线：`98b804ee`）
+#### 当前 main 快照（本次更新前最新审阅 main：`48f9ee1e`）
 
 这个快照是在对照先前要求审阅当前实现后记录的分支状态。它刻意与下面的历史进度表分开：历史行中的“本地已实现”描述的是当时引入该工作的阶段，而这里列出的代码路径现在已经在 fork `main` 上。剩余缺口主要是真实账号与网络路径验证，不是仓库中缺少对应实现。
+
+本次更新收紧了真实账号导入前的 preflight 证据边界。账号 readiness 不再只由原始布尔值和粗粒度 missing-field 计数表示；`scripts/opencode-e2e-preflight.mjs` 现在会为 credential key source 与 activation contract state 输出固定类别汇总。这样操作者可以用机器可读信号区分 `ready`、`decrypt_failed`、`missing_channel`、`missing_credential`、`codex_oauth_key_required` 与 `incomplete`，同时不打印账号 label、channel 名、masked email、原始 missing-field 名、API key、cookie、OAuth token、workspace ID 或部署地址。
 
 | 先前要求 | 当前 `main` 代码状态 | 证据路径 | 剩余风险 / 下一步 |
 |---|---|---|---|
@@ -979,6 +995,7 @@ web/default/src/routes/_authenticated/opencode-accounts/index.tsx
 | Cache smoke response usage contract gate | 本地已实现 | `scripts/glm-cache-smoke.mjs` 现在会拒绝 `/v1/responses` 请求侧 `usage` 中畸形的 counter，同时保留缺失字段兼容并接受数字字符串。这避免真实 `glm-5.2` smoke 时把畸形 relay usage 写进请求摘要，形成 `NaN` 或 JSON `null` 证据。 |
 | Cache smoke stats contract gate | 本地已实现 | `scripts/glm-cache-smoke.mjs` 现在会拒绝缺少 `data` 对象的 usage-cache stats 响应，也会拒绝已出现但不是有限非负数字的 counter 字段。这补上了一个证据质量缺口：先前在只配置 `--require-stats`、未配置更严格阈值时，畸形 stats payload 可能被误当成可用统计证据。 |
 | OpenCode E2E preflight runner | 本地已实现 | 已新增 `scripts/opencode-e2e-preflight.mjs` 及 Node 测试。runner 会对 `/api/status`、root-only OpenCode diagnostics、OpenCode 账号 readiness 汇总，以及后续 cache smoke 依赖的 channel-affinity usage stats endpoint 执行非破坏性 GET 检查。它只从环境变量读取 root auth，输出只包含 endpoint 状态、credential key-source 类别、账号计数、固定 credential-integrity 类别计数、missing-field 类别计数、安全的 affinity-stats identity，以及同时处于 active 与一致 activation-ready 状态的账号数；当 root auth、稳定 credential key、diagnostics payload 契约、账号列表数组契约、账号 readiness 一致性、affinity stats 可读性、affinity stats identity、最小 activation-ready 账号数、最小 active 账号数或最小 active-ready 账号数不满足要求时非零退出。active-ready gate 可避免一个账号 active、另一个账号 activation-ready 时误判为可执行真实 cache smoke；payload/identity gate 可避免畸形 diagnostics/accounts/stats 响应被误当成可上线状态。readiness gate 还会拒绝声称 `activation_ready`、但 credential integrity 不是 `ok` 或仍存在 missing fields 的账号 payload。账号 payload 中的 credential-integrity 值会先映射为固定类别再进入摘要，因此畸形后端字符串不会被原样回显。endpoint 错误会脱敏已配置部署 URL，以及 bearer token、OAuth `code`/`state`、API key、cookie、workspace ID、邮箱和本地绝对路径等通用敏感形态。这样远端 rollout 后的第一步验证可以变成机器门，同时不打印 root token、cookie、原始邮箱、workspace ID、原始 missing-field 名称、账号 secret、部署 URL 或本地部署路径。 |
+| OpenCode preflight readiness 固定类别 | 本地已实现 | preflight 账号摘要现在会在既有 active/ready 总数旁增加固定类别 `credential_key_source` 与 `activation_contract` 计数。`activation_contract` 会把每个账号分类为 `ready`、`decrypt_failed`、`codex_oauth_key_required`、`missing_channel`、`missing_credential` 或 `incomplete`，且只从公开 readiness 字段推导。这补上了真实 `glm-5.2` 测试前的证据质量缺口：操作者可以判断部署态账号是被不稳定 key source、解密失败、缺少绑定、缺少凭据还是 Codex/plain-key 契约不匹配阻塞，而不需要看到 label、channel 名、masked email、原始 missing-field 名、API key、cookie、workspace ID、OAuth payload 或部署地址。测试覆盖 Codex/plain-key mismatch 类别，并断言摘要仍不会回显原始 `api_key` 字段名或测试 secret。 |
 | OpenCode live E2E 编排 gate | 本地已实现 | 已新增 `scripts/opencode-live-e2e.mjs` 及 Node 测试。runner 会用面向生产的严格默认值串联 `tailscale-link-preflight`、`opencode-e2e-preflight` 与 `glm-cache-smoke`：至少一个 active-ready OpenCode 账号、稳定 credential key source、可读 affinity stats、2 次 warm-up、6 次测量请求、request 与 stats 命中率阈值 `0.8`、至少一个 cache-signal token，以及部署态 New API 服务端口的 Tailscale TCP 检查。默认情况下 Tailscale 失败会在进入带真实凭据的 OpenCode/cache gate 前停止，因此已知坏的 tailnet 不会继续消耗真实 API quota，也不会生成误导性的 cache 证据。`--continue-on-failure true` 与 `--skip-tailscale true` 是显式诊断开关，不是生产验收模式。live gate 现在会把实际执行的 OpenCode/cache stage 返回 `skipped` 或缺失 `checks.status` 视为失败；只有显式禁用 Tailscale 或被前置失败阻断的 downstream stage 才允许保留 `skipped`。stage 异常现在会被转换成 failed stage summary，并在进入摘要前脱敏部署 URL、Tailscale target、admin/relay 凭据、prompt cache key、input 文本、OAuth payload、邮箱和本地路径；这样保留 fail-fast 行为，但不打印原始异常文本。成功 stage summary 也会在编排层递归脱敏，包括 JSON key 和 value，因此即使底层 runner 有 bug，也不能把 live-run 原始材料重新带回组合 JSON 输出。sanitizer 现在还覆盖 prompt 回显变体：raw 前缀、完整 JSON 字符串、JSON 内层转义字符串和 JSON 内层前缀。live E2E 默认不再要求远端 Deskflow server 端口，因为当前 Deskflow 拓扑是 remote-client 到 local-server/proxy。clean rollout helper 现在会在 Node gate 中覆盖该脚本的测试与语法检查。 |
 | 私网地址输出脱敏 | 本地已实现 | cache smoke runner、OpenCode preflight runner、auth-session smoke runner、live E2E orchestrator 与 clean rollout helper 现在会从失败文本和递归脱敏的 stage summary 中移除 Tailscale/CGNAT、loopback、link-local 与 RFC1918 IPv4 地址，而不只依赖已配置 base URL 的片段替换。回归测试覆盖 relay 失败、preflight endpoint 失败、auth sidecar smoke 错误、live E2E stage 抛错、成功嵌套 stage summary 与 rollout helper 输出里的 `100.64/10` tailnet 和 LAN 地址泄漏。该改动不证明网络健康，但能让真实 E2E 或 rollout 失败诊断更适合复制、归档或提交。 |
 | Channel-affinity 原始 key 隐私 | 本地已实现 | channel-affinity cache suffix 现在对 affinity value 使用稳定 SHA1 派生 key part，而不是嵌入原始 `prompt_cache_key` 或请求头值。回归测试证明 cache suffix 会保留 rule/model/group 上下文，同时不包含原始 affinity value。该变更会让旧的内存/Redis affinity entry 失效；这是可接受的，因为 affinity cache 是机会性缓存，会自动重新预热。 |
@@ -1158,9 +1175,18 @@ live E2E runner 现在默认只对部署态 New API 服务端口做 Tailscale TC
 
 最新诊断输出加固还把私网地址视为敏感运行时元数据。`glm-cache-smoke`、`opencode-e2e-preflight`、`opencode-auth-session-smoke`、`opencode-live-e2e` 与 `new-api-clean-rollout` 现在会在这些值没有出现在已配置 deployment URL 中时，也脱敏 `100.64/10` tailnet/CGNAT 地址、loopback/link-local 地址与 RFC1918 LAN 段。这里的取舍是保守的：失败的 live E2E 摘要可能失去精确 peer/address 文本，但 Tailscale preflight 已经用类别与匿名 hash 表达路由健康，raw IP 不应成为可提交证据的一部分。
 
+最新 preflight 收敛把同样的证据纪律扩展到账号 readiness。service API 仍然拥有账号是否 activation-ready 的真相；脚本只把已经公开的字段投影成适合 live-run gate 的固定类别。这不是新的业务层，也不是第二套激活规则引擎。收益是消耗 live quota 前的失败定位更清晰：失败 preflight 可以指出“解密/配置/channel/Codex 契约”类别，而不是要求操作者检查单个账号行或从布尔值推断状态。代价是这些类别刻意保持粗粒度；详细修复动作仍应落在 Admin Web 与后端错误中，而不是放进可提交的 smoke artifact。
+
 ### 验证更新
 
 已成功验证：
+
+本次更新的最新本地验证：
+
+```text
+node --test scripts/opencode-e2e-preflight.test.mjs
+node --check scripts/opencode-e2e-preflight.mjs
+```
 
 ```text
 node --test scripts/glm-cache-smoke.test.mjs scripts/opencode-e2e-preflight.test.mjs scripts/opencode-auth-session.test.mjs scripts/opencode-auth-session-smoke.test.mjs scripts/new-api-clean-rollout.test.mjs scripts/tailscale-link-preflight.test.mjs scripts/opencode-live-e2e.test.mjs
@@ -1371,10 +1397,12 @@ NEW_API_ADMIN_USER_ID=<admin-user-id> \
 node scripts/opencode-e2e-preflight.mjs
 ```
 
+只按固定类别判读 preflight 摘要。`accounts.activation_contract.ready` 加 `accounts.active_ready` 是继续推进的验收信号；`decrypt_failed`、`missing_channel`、`missing_credential` 或 `codex_oauth_key_required` 都应先按配置/导入阻塞处理，再执行任何真实 cache smoke。不要把原始账号行、channel 名、邮箱、cookie、workspace ID 或 OAuth payload 当作可提交证据。
+
 4. 打开已部署的 Admin Web，确认 `/opencode-accounts` 不显示页面级 fallback-key 告警；如果仍显示，先配置稳定 `CRYPTO_SECRET`，再导入生产账号材料。
 5. 使用操作者控制的 OpenCode 订阅账号，在远端浏览器会话中完成官方 OpenCode/Google 授权。
 6. 提取账号材料，并确认 UI 只显示 masked indicator。
-7. 激活绑定的 New API channel，确认 channel cache refresh，然后用 `--min-active-ready-accounts 1` 重跑 preflight。`--min-activation-ready-accounts 1 --min-active-accounts 1` 只能作为补充诊断；真实 cache smoke gate 应要求同一个账号同时满足两个状态。
+7. 激活绑定的 New API channel，确认 channel cache refresh，然后用 `--min-active-ready-accounts 1` 重跑 preflight。`--min-activation-ready-accounts 1 --min-active-accounts 1` 只能作为补充诊断；真实 cache smoke gate 应要求同一个账号同时满足两个状态。如果 `activation_contract` 报告 `codex_oauth_key_required`，不要强行激活；应重新提取或调整绑定 channel 契约，使 Codex JSON 凭据形态满足要求。
 8. Tailscale 健康且 OpenCode 账号达到 active-ready 后，优先使用组合 live E2E gate 作为最终验收路径。如果它失败，再回退到上面的独立 preflight 与 smoke runner 定位具体边界：
 
 ```bash

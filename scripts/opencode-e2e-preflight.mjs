@@ -411,6 +411,8 @@ function summarizeAccounts(data) {
   const accounts = Array.isArray(data) ? data : [];
   const missingActivationFields = {};
   const credentialIntegrity = {};
+  const credentialKeySource = {};
+  const activationContract = {};
   let activationReady = 0;
   let activationReadyInconsistent = 0;
   let active = 0;
@@ -419,6 +421,8 @@ function summarizeAccounts(data) {
     if (account?.active) active += 1;
     const integrity = credentialIntegrityCategory(account?.credential_integrity);
     credentialIntegrity[integrity] = (credentialIntegrity[integrity] || 0) + 1;
+    const keySource = credentialKeySourceCategory(account?.credential_key_source);
+    credentialKeySource[keySource] = (credentialKeySource[keySource] || 0) + 1;
     const missingFields = Array.isArray(account?.missing_activation_fields)
       ? account.missing_activation_fields
       : [];
@@ -428,6 +432,8 @@ function summarizeAccounts(data) {
     }
     if (ready) activationReady += 1;
     if (account?.active && ready) activeReady += 1;
+    const contract = activationContractCategory(account, integrity, missingFields, ready);
+    activationContract[contract] = (activationContract[contract] || 0) + 1;
     for (const field of missingFields) {
       const key = missingActivationFieldCategory(field);
       if (!key) continue;
@@ -441,6 +447,8 @@ function summarizeAccounts(data) {
     activation_ready: activationReady,
     activation_ready_inconsistent: activationReadyInconsistent,
     credential_integrity: credentialIntegrity,
+    credential_key_source: credentialKeySource,
+    activation_contract: activationContract,
     missing_activation_fields: missingActivationFields,
   };
 }
@@ -474,6 +482,39 @@ function missingActivationFieldCategory(field) {
   if (value.includes("account")) return "account";
   if (value.includes("email")) return "email";
   return "other";
+}
+
+function credentialKeySourceCategory(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return "unknown";
+  if (CREDENTIAL_KEY_SOURCES.has(normalized)) {
+    return normalized;
+  }
+  return "other";
+}
+
+function activationContractCategory(account, integrity, missingFields, ready) {
+  if (ready) return "ready";
+  if (integrity === "decrypt_failed") return "decrypt_failed";
+  const normalizedFields = missingFields.map((field) =>
+    String(field || "").trim().toLowerCase(),
+  );
+  if (normalizedFields.includes("credentials_decryptable")) {
+    return "decrypt_failed";
+  }
+  if (normalizedFields.includes("codex_oauth_key")) {
+    return "codex_oauth_key_required";
+  }
+  if (normalizedFields.some((field) => missingActivationFieldCategory(field) === "channel")) {
+    return "missing_channel";
+  }
+  if (
+    normalizedFields.some((field) => missingActivationFieldCategory(field) === "credential") ||
+    account?.has_api_key === false
+  ) {
+    return "missing_credential";
+  }
+  return "incomplete";
 }
 
 function buildChecksSummary(items) {

@@ -14,7 +14,7 @@ const DEFAULT_URL = "about:blank";
 const DEFAULT_PRESS_KEY = "Escape";
 const DEFAULT_SIDECAR_PATH = fileURLToPath(new URL("./opencode-auth-session.mjs", import.meta.url));
 const SECRET_ASSIGNMENT_PATTERN =
-  /\b(api[-_]?key|cookie|workspace[-_]?id|access[-_]?token|refresh[-_]?token|id[-_]?token|authorization|code|state)\s*[:=]\s*["']?[^"',\s&}]+/gi;
+  /\b(api[-_]?key|cookie|workspace[-_]?id|access[-_]?token|refresh[-_]?token|id[-_]?token|authorization|token|prompt[-_]?cache[-_]?key|code|state)\s*[:=]\s*["']?[^"',\s&}]+/gi;
 const BEARER_TOKEN_PATTERN = /\bBearer\s+[A-Za-z0-9._~+/=-]{12,}/gi;
 const EMAIL_PATTERN = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
 const HTTP_URL_PATTERN = /https?:\/\/[^\s"'<>]+/gi;

@@ -59,6 +59,7 @@ test("redactAuthSessionSmokeText strips paths, hosts, emails, and secret-shaped 
     "operator@example.test",
     `api_${"key"}=live-secret-value`,
     `${"cook"}ie=session-secret-value`,
+    `${"tok"}en=plain-token-secret`,
     `${"Bea"}rer bearer-secret-value-12345`,
   ].join(" ");
 
@@ -70,8 +71,9 @@ test("redactAuthSessionSmokeText strips paths, hosts, emails, and secret-shaped 
   assert.match(redacted, /<redacted-email>/);
   assert.match(redacted, new RegExp(`api_${"key"}=<redacted>`));
   assert.match(redacted, new RegExp(`${"cook"}ie=<redacted>`));
+  assert.match(redacted, new RegExp(`${"tok"}en=<redacted>`));
   assert.match(redacted, /Bearer <redacted>/);
-  assert.doesNotMatch(redacted, /oauth-code|oauth-state|live-secret-value|session-secret-value|bearer-secret-value/);
+  assert.doesNotMatch(redacted, /oauth-code|oauth-state|live-secret-value|session-secret-value|plain-token-secret|bearer-secret-value/);
 });
 
 test("summarizeAuthSessionStatus exposes only fixed categories", () => {

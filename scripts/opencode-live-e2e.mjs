@@ -10,12 +10,18 @@ import {
   runOpenCodePreflight,
 } from "./opencode-e2e-preflight.mjs";
 import {
+  buildAuthSessionSmokeConfig,
+  runAuthSessionSmoke,
+} from "./opencode-auth-session-smoke.mjs";
+import {
   buildTailscaleLinkPreflightConfig,
   runTailscaleLinkPreflight,
 } from "./tailscale-link-preflight.mjs";
 
 const SECRET_ASSIGNMENT_PATTERN =
-  /\b(api[_-]?key|cookie|workspace[_-]?id|access[_-]?token|refresh[_-]?token|id[_-]?token|authorization)\s*[:=]\s*["']?[^"',\s&}]+/gi;
+  /\b(api[_-]?key|cookie|workspace[_-]?id|access[_-]?token|refresh[_-]?token|id[_-]?token|authorization|token|prompt[_-]?cache[_-]?key)\s*[:=]\s*["']?[^"',\s&}]+/gi;
+const SECRET_OBJECT_KEY_PATTERN =
+  /^(api[_-]?key|cookie|workspace[_-]?id|access[_-]?token|refresh[_-]?token|id[_-]?token|authorization|token|prompt[_-]?cache[_-]?key)$/i;
 const OAUTH_QUERY_PATTERN = /([?&](?:code|state|access_token|refresh_token|id_token)=)[^&\s]+/gi;
 const BEARER_TOKEN_PATTERN = /\bBearer\s+[A-Za-z0-9._~+/=-]{12,}/gi;
 const EMAIL_PATTERN = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
@@ -26,6 +32,7 @@ const POSIX_ABSOLUTE_PATH_PATTERN =
   /(^|[\s"'(])\/(?:home|root|opt|var|srv|etc|mnt|tmp|data)\/[^\s"'<>)]*/g;
 const MIN_INPUT_REDACTION_PREFIX_LENGTH = 32;
 const MAX_INPUT_REDACTION_PREFIX_LENGTH = 512;
+const PRODUCTION_AUTH_SMOKE_URL = "https://opencode.ai/auth";
 
 const LIVE_E2E_DEFAULT_ARGS = {
   "min-active-ready-accounts": "1",
@@ -62,6 +69,11 @@ export function buildOpenCodeLiveE2EConfig(argv = process.argv, env = process.en
     false,
     "skip-tailscale",
   );
+  const skipAuthSmoke = readBoolean(
+    args["skip-auth-smoke"] || env.OPENCODE_LIVE_E2E_SKIP_AUTH_SMOKE,
+    false,
+    "skip-auth-smoke",
+  );
   return {
     continueOnFailure: readBoolean(
       args["continue-on-failure"] || env.OPENCODE_LIVE_E2E_CONTINUE_ON_FAILURE,
@@ -69,6 +81,7 @@ export function buildOpenCodeLiveE2EConfig(argv = process.argv, env = process.en
       "continue-on-failure",
     ),
     tailscale: skipTailscale ? null : buildTailscaleLinkPreflightConfig(effectiveArgv, env),
+    authSmoke: skipAuthSmoke ? null : buildAuthSmokeConfig(effectiveArgv, args, env),
     opencode: buildOpenCodePreflightConfig(effectiveArgv, env),
     cacheSmoke: buildCacheSmokeConfig(effectiveArgv, env),
   };
@@ -77,12 +90,14 @@ export function buildOpenCodeLiveE2EConfig(argv = process.argv, env = process.en
 export async function runOpenCodeLiveE2E(config) {
   const runners = {
     runTailscaleLinkPreflight,
+    runAuthSessionSmoke,
     runOpenCodePreflight,
     runCacheSmoke,
     ...(config.runners || {}),
   };
   const summary = {
     tailscale: null,
+    auth_smoke: null,
     opencode: null,
     cache_smoke: null,
   };
@@ -97,6 +112,11 @@ export async function runOpenCodeLiveE2E(config) {
     checks.push(stageCheck("tailscale_link", summary.tailscale?.checks?.status));
     if (shouldStop(summary.tailscale, config)) {
       checks.push(
+        stageCheck("opencode_auth_smoke", "skipped", "blocked_by_tailscale", {
+          allowSkipped: true,
+        }),
+      );
+      checks.push(
         stageCheck("opencode_preflight", "skipped", "blocked_by_tailscale", {
           allowSkipped: true,
         }),
@@ -110,6 +130,30 @@ export async function runOpenCodeLiveE2E(config) {
     }
   } else {
     checks.push(stageCheck("tailscale_link", "skipped", "disabled", { allowSkipped: true }));
+  }
+
+  if (config.authSmoke) {
+    summary.auth_smoke = await runStage(
+      "opencode_auth_smoke",
+      async () => authSmokeStageSummary(await runners.runAuthSessionSmoke(config.authSmoke)),
+      config,
+    );
+    checks.push(stageCheck("opencode_auth_smoke", summary.auth_smoke?.checks?.status));
+    if (shouldStop(summary.auth_smoke, config)) {
+      checks.push(
+        stageCheck("opencode_preflight", "skipped", "blocked_by_auth_smoke", {
+          allowSkipped: true,
+        }),
+      );
+      checks.push(
+        stageCheck("glm_cache_smoke", "skipped", "blocked_by_auth_smoke", {
+          allowSkipped: true,
+        }),
+      );
+      return finalizeLiveE2E(summary, checks, config);
+    }
+  } else {
+    checks.push(stageCheck("opencode_auth_smoke", "skipped", "disabled", { allowSkipped: true }));
   }
 
   summary.opencode = await runStage(
@@ -165,6 +209,22 @@ function appendDefaultArgs(argv, args, defaults) {
   return nextArgv;
 }
 
+function buildAuthSmokeConfig(argv, args, env) {
+  const authSmokeURL =
+    args["auth-smoke-url"] ||
+    env.OPENCODE_LIVE_E2E_AUTH_SMOKE_URL ||
+    env.OPENCODE_AUTH_SMOKE_URL ||
+    PRODUCTION_AUTH_SMOKE_URL;
+  const authSmokeArgv = [...argv, "--url", authSmokeURL];
+  if (args["auth-smoke-timeout"] || env.OPENCODE_LIVE_E2E_AUTH_SMOKE_TIMEOUT_SECONDS) {
+    authSmokeArgv.push(
+      "--timeout",
+      args["auth-smoke-timeout"] || env.OPENCODE_LIVE_E2E_AUTH_SMOKE_TIMEOUT_SECONDS,
+    );
+  }
+  return buildAuthSessionSmokeConfig(authSmokeArgv, env);
+}
+
 function readBoolean(raw, fallback, name) {
   if (raw === undefined || raw === null || raw === "") return fallback;
   switch (String(raw).trim().toLowerCase()) {
@@ -205,6 +265,30 @@ function opencodeActivationContractReadyCheck(stageSummary, opencodeConfig = {})
     status: passed ? "passed" : "failed",
     actual: Number.isFinite(ready) ? ready : "missing",
     expected_min: expectedMin,
+  };
+}
+
+function authSmokeStageSummary(report = {}) {
+  const rawChecks =
+    report && typeof report.checks === "object" && !Array.isArray(report.checks)
+      ? report.checks
+      : {};
+  const items = Object.entries(rawChecks).map(([name, value]) => ({
+    name: `auth_smoke_${name}`,
+    status: value === true ? "passed" : "failed",
+    actual: value === true,
+    expected: true,
+  }));
+  return {
+    ...report,
+    smoke_checks: rawChecks,
+    checks: {
+      status:
+        report.success === true && items.every((item) => item.status === "passed")
+          ? "passed"
+          : "failed",
+      items,
+    },
   };
 }
 
@@ -281,6 +365,11 @@ function diagnosticOverrideNames(config) {
   } else {
     names.push(...tailscaleDiagnosticOverrideNames(config.tailscale));
   }
+  if (!config.authSmoke) {
+    names.push("skip_auth_smoke");
+  } else {
+    names.push(...authSmokeDiagnosticOverrideNames(config.authSmoke));
+  }
   names.push(...opencodeDiagnosticOverrideNames(config.opencode));
   names.push(...cacheSmokeDiagnosticOverrideNames(config.cacheSmoke));
   return names;
@@ -324,6 +413,17 @@ function opencodeDiagnosticOverrideNames(opencode = {}) {
     Number(opencode.minActiveReadyAccounts) < PRODUCTION_MIN_ACTIVE_READY_ACCOUNTS
   ) {
     names.push("opencode_active_ready_accounts_relaxed");
+  }
+  return names;
+}
+
+function authSmokeDiagnosticOverrideNames(authSmoke = {}) {
+  const names = [];
+  if (normalizeComparableURL(authSmoke.url) !== normalizeComparableURL(PRODUCTION_AUTH_SMOKE_URL)) {
+    names.push("auth_smoke_url_not_official_auth");
+  }
+  if (authSmoke.runScreenshot === false) {
+    names.push("auth_smoke_screenshot_disabled");
   }
   return names;
 }
@@ -379,6 +479,10 @@ function finiteNumber(value) {
   return value !== undefined && value !== null && value !== "" && Number.isFinite(Number(value));
 }
 
+function normalizeComparableURL(value) {
+  return String(value || "").trim().replace(/\/+$/g, "").toLowerCase();
+}
+
 function sanitizeLiveText(text, config) {
   let result = String(text || "");
   for (const fragment of sensitiveFragments(config)) {
@@ -405,16 +509,20 @@ function sanitizeStageSummary(value, config) {
     return value.map((item) => sanitizeStageSummary(item, config));
   }
   return Object.fromEntries(
-    Object.entries(value).map(([key, item]) => [
-      sanitizeLiveText(key, config),
-      sanitizeStageSummary(item, config),
-    ]),
+    Object.entries(value).map(([key, item]) => {
+      const safeKey = sanitizeLiveText(key, config);
+      const safeValue = SECRET_OBJECT_KEY_PATTERN.test(String(key))
+        ? "<redacted>"
+        : sanitizeStageSummary(item, config);
+      return [safeKey, safeValue];
+    }),
   );
 }
 
 function sensitiveFragments(config) {
   const fragments = [
     config?.tailscale?.target,
+    config?.authSmoke?.url,
     config?.opencode?.baseURL,
     config?.opencode?.adminToken,
     config?.opencode?.adminCookie,
@@ -424,6 +532,7 @@ function sensitiveFragments(config) {
     config?.cacheSmoke?.adminCookie,
     config?.cacheSmoke?.promptCacheKey,
     ...inputTextFragments(config?.cacheSmoke?.input),
+    ...deploymentURLParts(config?.authSmoke?.url),
     ...deploymentURLParts(config?.opencode?.baseURL),
     ...deploymentURLParts(config?.cacheSmoke?.baseURL),
   ].filter(Boolean);

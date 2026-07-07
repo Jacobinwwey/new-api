@@ -13,6 +13,43 @@ import {
 const LIVE_E2E_SCRIPT_PATH = fileURLToPath(
   new URL("./opencode-live-e2e.mjs", import.meta.url),
 );
+const PRODUCTION_AUTH_SMOKE_URL = "https://opencode.ai/auth";
+
+function productionAuthSmokeConfig(overrides = {}) {
+  return {
+    url: PRODUCTION_AUTH_SMOKE_URL,
+    runScreenshot: true,
+    ...overrides,
+  };
+}
+
+function passedAuthSmoke(overrides = {}) {
+  return {
+    success: true,
+    checks: {
+      start_running: true,
+      status_running: true,
+      press_running: true,
+      screenshot_png: true,
+      stop_stopped: true,
+    },
+    ...overrides,
+  };
+}
+
+function failedAuthSmoke(overrides = {}) {
+  return {
+    success: false,
+    checks: {
+      start_running: false,
+      status_running: false,
+      press_running: false,
+      screenshot_png: false,
+      stop_stopped: true,
+    },
+    ...overrides,
+  };
+}
 
 test("buildOpenCodeLiveE2EConfig applies strict live defaults", () => {
   const config = buildOpenCodeLiveE2EConfig(
@@ -37,6 +74,8 @@ test("buildOpenCodeLiveE2EConfig applies strict live defaults", () => {
   assert.equal(config.continueOnFailure, false);
   assert.equal(config.tailscale.target, "remote-box");
   assert.deepEqual(config.tailscale.ports, [3000, 24800]);
+  assert.equal(config.authSmoke.url, PRODUCTION_AUTH_SMOKE_URL);
+  assert.equal(config.authSmoke.runScreenshot, true);
   assert.equal(config.opencode.minActiveReadyAccounts, 1);
   assert.equal(config.opencode.requireRoot, true);
   assert.equal(config.opencode.requireStableCredentialKey, true);
@@ -68,6 +107,7 @@ test("buildOpenCodeLiveE2EConfig defaults Tailscale ports to the New API service
   );
 
   assert.deepEqual(config.tailscale.ports, [3000]);
+  assert.equal(config.authSmoke.url, PRODUCTION_AUTH_SMOKE_URL);
 });
 
 test("runOpenCodeLiveE2E passes when all gates pass", async () => {
@@ -75,12 +115,17 @@ test("runOpenCodeLiveE2E passes when all gates pass", async () => {
   const summary = await runOpenCodeLiveE2E({
     continueOnFailure: false,
     tailscale: { target: "remote-box" },
+    authSmoke: productionAuthSmokeConfig(),
     opencode: { baseURL: "https://new-api.example.test", minActiveReadyAccounts: 1 },
     cacheSmoke: { model: "glm-5.2" },
     runners: {
       runTailscaleLinkPreflight: async () => {
         calls.push("tailscale");
         return passedStage({ route: "direct" });
+      },
+      runAuthSessionSmoke: async () => {
+        calls.push("auth");
+        return passedAuthSmoke();
       },
       runOpenCodePreflight: async () => {
         calls.push("opencode");
@@ -100,12 +145,13 @@ test("runOpenCodeLiveE2E passes when all gates pass", async () => {
     },
   });
 
-  assert.deepEqual(calls, ["tailscale", "opencode", "cache"]);
+  assert.deepEqual(calls, ["tailscale", "auth", "opencode", "cache"]);
   assert.equal(summary.checks.status, "passed");
   assert.deepEqual(
     summary.checks.items.map((item) => item.name),
     [
       "tailscale_link",
+      "opencode_auth_smoke",
       "opencode_preflight",
       "opencode_activation_contract_ready",
       "glm_cache_smoke",
@@ -134,6 +180,7 @@ test("runOpenCodeLiveE2E treats relaxed Tailscale gates as diagnostic acceptance
       requireTun: false,
       requireTCP: false,
     },
+    authSmoke: productionAuthSmokeConfig(),
     opencode: { minActiveReadyAccounts: 1 },
     cacheSmoke: {},
     runners: {
@@ -153,6 +200,10 @@ test("runOpenCodeLiveE2E treats relaxed Tailscale gates as diagnostic acceptance
           },
         });
       },
+      runAuthSessionSmoke: async () => {
+        calls.push("auth");
+        return passedAuthSmoke();
+      },
       runOpenCodePreflight: async () => {
         calls.push("opencode");
         return passedStage({
@@ -171,7 +222,7 @@ test("runOpenCodeLiveE2E treats relaxed Tailscale gates as diagnostic acceptance
     },
   });
 
-  assert.deepEqual(calls, ["tailscale", "opencode", "cache"]);
+  assert.deepEqual(calls, ["tailscale", "auth", "opencode", "cache"]);
   assert.equal(summary.checks.status, "passed");
   assert.deepEqual(summary.acceptance, {
     status: "failed",
@@ -193,6 +244,7 @@ test("runOpenCodeLiveE2E treats relaxed OpenCode gates as diagnostic acceptance"
   const summary = await runOpenCodeLiveE2E({
     continueOnFailure: false,
     tailscale: { target: "remote-box" },
+    authSmoke: productionAuthSmokeConfig(),
     opencode: {
       minActiveReadyAccounts: 0,
       requireRoot: false,
@@ -204,6 +256,10 @@ test("runOpenCodeLiveE2E treats relaxed OpenCode gates as diagnostic acceptance"
       runTailscaleLinkPreflight: async () => {
         calls.push("tailscale");
         return passedStage();
+      },
+      runAuthSessionSmoke: async () => {
+        calls.push("auth");
+        return passedAuthSmoke();
       },
       runOpenCodePreflight: async () => {
         calls.push("opencode");
@@ -221,7 +277,7 @@ test("runOpenCodeLiveE2E treats relaxed OpenCode gates as diagnostic acceptance"
     },
   });
 
-  assert.deepEqual(calls, ["tailscale", "opencode", "cache"]);
+  assert.deepEqual(calls, ["tailscale", "auth", "opencode", "cache"]);
   assert.equal(summary.checks.status, "passed");
   assert.deepEqual(summary.acceptance, {
     status: "failed",
@@ -237,26 +293,22 @@ test("runOpenCodeLiveE2E treats relaxed OpenCode gates as diagnostic acceptance"
   });
 });
 
-test("runOpenCodeLiveE2E treats relaxed cache-smoke gates as diagnostic acceptance", async () => {
+test("runOpenCodeLiveE2E treats relaxed auth-smoke gates as diagnostic acceptance", async () => {
   const calls = [];
   const summary = await runOpenCodeLiveE2E({
     continueOnFailure: false,
     tailscale: { target: "remote-box" },
+    authSmoke: productionAuthSmokeConfig({ url: "about:blank", runScreenshot: false }),
     opencode: { minActiveReadyAccounts: 1 },
-    cacheSmoke: {
-      model: "gpt-4.1",
-      warmupRequestCount: 0,
-      requestCount: 2,
-      requireStats: false,
-      skipStats: true,
-      minRequestHitRate: 0.2,
-      minStatsHitRate: 0.2,
-      minCacheSignalTokens: 0,
-    },
+    cacheSmoke: { model: "glm-5.2" },
     runners: {
       runTailscaleLinkPreflight: async () => {
         calls.push("tailscale");
         return passedStage();
+      },
+      runAuthSessionSmoke: async () => {
+        calls.push("auth");
+        return passedAuthSmoke();
       },
       runOpenCodePreflight: async () => {
         calls.push("opencode");
@@ -276,7 +328,65 @@ test("runOpenCodeLiveE2E treats relaxed cache-smoke gates as diagnostic acceptan
     },
   });
 
-  assert.deepEqual(calls, ["tailscale", "opencode", "cache"]);
+  assert.deepEqual(calls, ["tailscale", "auth", "opencode", "cache"]);
+  assert.equal(summary.checks.status, "passed");
+  assert.deepEqual(summary.acceptance, {
+    status: "failed",
+    mode: "diagnostic",
+    production_ready: false,
+    diagnostic_overrides: [
+      "auth_smoke_url_not_official_auth",
+      "auth_smoke_screenshot_disabled",
+    ],
+    failed_checks: [],
+  });
+});
+
+test("runOpenCodeLiveE2E treats relaxed cache-smoke gates as diagnostic acceptance", async () => {
+  const calls = [];
+  const summary = await runOpenCodeLiveE2E({
+    continueOnFailure: false,
+    tailscale: { target: "remote-box" },
+    authSmoke: productionAuthSmokeConfig(),
+    opencode: { minActiveReadyAccounts: 1 },
+    cacheSmoke: {
+      model: "gpt-4.1",
+      warmupRequestCount: 0,
+      requestCount: 2,
+      requireStats: false,
+      skipStats: true,
+      minRequestHitRate: 0.2,
+      minStatsHitRate: 0.2,
+      minCacheSignalTokens: 0,
+    },
+    runners: {
+      runTailscaleLinkPreflight: async () => {
+        calls.push("tailscale");
+        return passedStage();
+      },
+      runAuthSessionSmoke: async () => {
+        calls.push("auth");
+        return passedAuthSmoke();
+      },
+      runOpenCodePreflight: async () => {
+        calls.push("opencode");
+        return passedStage({
+          accounts: {
+            active_ready: 1,
+            activation_contract: {
+              ready: 1,
+            },
+          },
+        });
+      },
+      runCacheSmoke: async () => {
+        calls.push("cache");
+        return passedStage();
+      },
+    },
+  });
+
+  assert.deepEqual(calls, ["tailscale", "auth", "opencode", "cache"]);
   assert.equal(summary.checks.status, "passed");
   assert.deepEqual(summary.acceptance, {
     status: "failed",
@@ -301,12 +411,17 @@ test("runOpenCodeLiveE2E fails when OpenCode activation-contract categories cont
   const summary = await runOpenCodeLiveE2E({
     continueOnFailure: false,
     tailscale: { target: "remote-box" },
+    authSmoke: productionAuthSmokeConfig(),
     opencode: { minActiveReadyAccounts: 1 },
     cacheSmoke: {},
     runners: {
       runTailscaleLinkPreflight: async () => {
         calls.push("tailscale");
         return passedStage();
+      },
+      runAuthSessionSmoke: async () => {
+        calls.push("auth");
+        return passedAuthSmoke();
       },
       runOpenCodePreflight: async () => {
         calls.push("opencode");
@@ -326,7 +441,7 @@ test("runOpenCodeLiveE2E fails when OpenCode activation-contract categories cont
     },
   });
 
-  assert.deepEqual(calls, ["tailscale", "opencode"]);
+  assert.deepEqual(calls, ["tailscale", "auth", "opencode"]);
   assert.equal(summary.checks.status, "failed");
   assert.deepEqual(summary.acceptance, {
     status: "failed",
@@ -359,12 +474,17 @@ test("runOpenCodeLiveE2E stops before credentialed gates when Tailscale fails", 
   const summary = await runOpenCodeLiveE2E({
     continueOnFailure: false,
     tailscale: { target: "remote-box" },
+    authSmoke: productionAuthSmokeConfig(),
     opencode: {},
     cacheSmoke: {},
     runners: {
       runTailscaleLinkPreflight: async () => {
         calls.push("tailscale");
         return failedStage({ target: { found: true, expired: true } });
+      },
+      runAuthSessionSmoke: async () => {
+        calls.push("auth");
+        return passedAuthSmoke();
       },
       runOpenCodePreflight: async () => {
         calls.push("opencode");
@@ -387,6 +507,7 @@ test("runOpenCodeLiveE2E stops before credentialed gates when Tailscale fails", 
     failed_checks: ["tailscale_link"],
   });
   assert.equal(summary.opencode, null);
+  assert.equal(summary.auth_smoke, null);
   assert.equal(summary.cache_smoke, null);
   assert.deepEqual(summary.checks.items, [
     {
@@ -395,6 +516,13 @@ test("runOpenCodeLiveE2E stops before credentialed gates when Tailscale fails", 
       actual: "failed",
       expected: "passed_or_explicitly_skipped",
       reason: "",
+    },
+    {
+      name: "opencode_auth_smoke",
+      status: "skipped",
+      actual: "skipped",
+      expected: "passed",
+      reason: "blocked_by_tailscale",
     },
     {
       name: "opencode_preflight",
@@ -413,17 +541,72 @@ test("runOpenCodeLiveE2E stops before credentialed gates when Tailscale fails", 
   ]);
 });
 
+test("runOpenCodeLiveE2E stops before credentialed gates when auth smoke fails", async () => {
+  const calls = [];
+  const summary = await runOpenCodeLiveE2E({
+    continueOnFailure: false,
+    tailscale: { target: "remote-box" },
+    authSmoke: productionAuthSmokeConfig(),
+    opencode: {},
+    cacheSmoke: {},
+    runners: {
+      runTailscaleLinkPreflight: async () => {
+        calls.push("tailscale");
+        return passedStage();
+      },
+      runAuthSessionSmoke: async () => {
+        calls.push("auth");
+        return failedAuthSmoke({
+          message: `browser failed at https://opencode.ai/auth?state=${"oauth-state"} token=${"auth-secret"}`,
+        });
+      },
+      runOpenCodePreflight: async () => {
+        calls.push("opencode");
+        return passedStage();
+      },
+      runCacheSmoke: async () => {
+        calls.push("cache");
+        return passedStage();
+      },
+    },
+  });
+
+  assert.deepEqual(calls, ["tailscale", "auth"]);
+  assert.equal(summary.checks.status, "failed");
+  assert.deepEqual(summary.acceptance, {
+    status: "failed",
+    mode: "production",
+    production_ready: false,
+    diagnostic_overrides: [],
+    failed_checks: ["opencode_auth_smoke"],
+  });
+  assert.equal(summary.opencode, null);
+  assert.equal(summary.cache_smoke, null);
+  assert.deepEqual(summary.checks.items.map((item) => [item.name, item.status, item.reason]), [
+    ["tailscale_link", "passed", ""],
+    ["opencode_auth_smoke", "failed", ""],
+    ["opencode_preflight", "skipped", "blocked_by_auth_smoke"],
+    ["glm_cache_smoke", "skipped", "blocked_by_auth_smoke"],
+  ]);
+  assert.doesNotMatch(JSON.stringify(summary), /oauth-state|auth-secret|opencode\.ai/);
+});
+
 test("runOpenCodeLiveE2E can continue after failures for diagnostics", async () => {
   const calls = [];
   const summary = await runOpenCodeLiveE2E({
     continueOnFailure: true,
     tailscale: { target: "remote-box" },
+    authSmoke: productionAuthSmokeConfig(),
     opencode: {},
     cacheSmoke: {},
     runners: {
       runTailscaleLinkPreflight: async () => {
         calls.push("tailscale");
         return failedStage({ target: { found: true, expired: true } });
+      },
+      runAuthSessionSmoke: async () => {
+        calls.push("auth");
+        return passedAuthSmoke();
       },
       runOpenCodePreflight: async () => {
         calls.push("opencode");
@@ -436,7 +619,7 @@ test("runOpenCodeLiveE2E can continue after failures for diagnostics", async () 
     },
   });
 
-  assert.deepEqual(calls, ["tailscale", "opencode", "cache"]);
+  assert.deepEqual(calls, ["tailscale", "auth", "opencode", "cache"]);
   assert.equal(summary.checks.status, "failed");
   assert.deepEqual(summary.acceptance, {
     status: "failed",
@@ -449,6 +632,7 @@ test("runOpenCodeLiveE2E can continue after failures for diagnostics", async () 
     summary.checks.items.map((item) => [item.name, item.status]),
     [
       ["tailscale_link", "failed"],
+      ["opencode_auth_smoke", "passed"],
       ["opencode_preflight", "failed"],
       ["glm_cache_smoke", "failed"],
     ],
@@ -459,10 +643,12 @@ test("runOpenCodeLiveE2E fails when OpenCode readiness is skipped unexpectedly",
   const summary = await runOpenCodeLiveE2E({
     continueOnFailure: false,
     tailscale: { target: "remote-box" },
+    authSmoke: productionAuthSmokeConfig(),
     opencode: {},
     cacheSmoke: {},
     runners: {
       runTailscaleLinkPreflight: async () => passedStage(),
+      runAuthSessionSmoke: async () => passedAuthSmoke(),
       runOpenCodePreflight: async () => skippedStage(),
       runCacheSmoke: async () => passedStage(),
     },
@@ -475,6 +661,13 @@ test("runOpenCodeLiveE2E fails when OpenCode readiness is skipped unexpectedly",
       status: "passed",
       actual: "passed",
       expected: "passed_or_explicitly_skipped",
+      reason: "",
+    },
+    {
+      name: "opencode_auth_smoke",
+      status: "passed",
+      actual: "passed",
+      expected: "passed",
       reason: "",
     },
     {
@@ -498,10 +691,12 @@ test("runOpenCodeLiveE2E fails when cache smoke checks are skipped unexpectedly"
   const summary = await runOpenCodeLiveE2E({
     continueOnFailure: false,
     tailscale: { target: "remote-box" },
+    authSmoke: productionAuthSmokeConfig(),
     opencode: {},
     cacheSmoke: {},
     runners: {
       runTailscaleLinkPreflight: async () => passedStage(),
+      runAuthSessionSmoke: async () => passedAuthSmoke(),
       runOpenCodePreflight: async () => passedStage(),
       runCacheSmoke: async () => skippedStage(),
     },
@@ -510,6 +705,7 @@ test("runOpenCodeLiveE2E fails when cache smoke checks are skipped unexpectedly"
   assert.equal(summary.checks.status, "failed");
   assert.deepEqual(summary.checks.items.map((item) => [item.name, item.status, item.actual]), [
     ["tailscale_link", "passed", "passed"],
+    ["opencode_auth_smoke", "passed", "passed"],
     ["opencode_preflight", "passed", "passed"],
     ["glm_cache_smoke", "failed", "skipped"],
   ]);
@@ -520,6 +716,7 @@ test("runOpenCodeLiveE2E redacts stage exceptions and keeps fail-fast semantics"
   const summary = await runOpenCodeLiveE2E({
     continueOnFailure: false,
     tailscale: { target: "private-tailnet-host" },
+    authSmoke: productionAuthSmokeConfig(),
     opencode: {
       baseURL: "https://new-api.example.test",
       adminToken: "root-token-secret",
@@ -536,6 +733,12 @@ test("runOpenCodeLiveE2E redacts stage exceptions and keeps fail-fast semantics"
         calls.push("tailscale");
         return passedStage();
       },
+      runAuthSessionSmoke: async () => {
+        calls.push("auth");
+        return passedAuthSmoke({
+          message: `https://opencode.ai/auth token=${"browser-secret"} operator@example.test`,
+        });
+      },
       runOpenCodePreflight: async () => {
         calls.push("opencode");
         throw new Error(
@@ -549,7 +752,7 @@ test("runOpenCodeLiveE2E redacts stage exceptions and keeps fail-fast semantics"
     },
   });
 
-  assert.deepEqual(calls, ["tailscale", "opencode"]);
+  assert.deepEqual(calls, ["tailscale", "auth", "opencode"]);
   assert.equal(summary.checks.status, "failed");
   assert.equal(summary.opencode.checks.status, "failed");
   assert.equal(summary.opencode.error.message.includes("<redacted>"), true);
@@ -562,6 +765,8 @@ test("runOpenCodeLiveE2E redacts stage exceptions and keeps fail-fast semantics"
     "new-api.example.test",
     "api_" + "key=x",
     "user@example.test",
+    "operator@example.test",
+    "browser-secret",
     `${"100"}.64.0.250`,
     `${"192"}.168.255.250`,
     "C:\\Users\\operator\\secret",
@@ -575,6 +780,7 @@ test("runOpenCodeLiveE2E redacts successful stage summaries defensively", async 
   const summary = await runOpenCodeLiveE2E({
     continueOnFailure: true,
     tailscale: { target: "private-tailnet-host" },
+    authSmoke: productionAuthSmokeConfig(),
     opencode: {
       baseURL: "https://new-api.example.test",
       adminToken: "root-token-secret",
@@ -590,6 +796,14 @@ test("runOpenCodeLiveE2E redacts successful stage summaries defensively", async 
       runTailscaleLinkPreflight: async () =>
         passedStage({
           diagnostic: "private-tailnet-host via https://new-api.example.test",
+        }),
+      runAuthSessionSmoke: async () =>
+        passedAuthSmoke({
+          browser: {
+            url: "https://opencode.ai/auth",
+            email: "operator@example.test",
+            token: "auth-smoke-secret",
+          },
         }),
       runOpenCodePreflight: async () =>
         passedStage({
@@ -626,6 +840,8 @@ test("runOpenCodeLiveE2E redacts successful stage summaries defensively", async 
     "Bearer " + "abcdefghijklmnop",
     "api_" + "key=x",
     "user@example.test",
+    "operator@example.test",
+    "auth-smoke-secret",
     `${"100"}.64.0.250`,
     `${"192"}.168.255.250`,
     "C:\\Users\\operator\\secret",
@@ -682,9 +898,14 @@ test("runOpenCodeLiveE2E supports explicitly skipped Tailscale for local diagnos
   const summary = await runOpenCodeLiveE2E({
     continueOnFailure: false,
     tailscale: null,
+    authSmoke: productionAuthSmokeConfig(),
     opencode: {},
     cacheSmoke: {},
     runners: {
+      runAuthSessionSmoke: async () => {
+        calls.push("auth");
+        return passedAuthSmoke();
+      },
       runOpenCodePreflight: async () => {
         calls.push("opencode");
         return passedStage();
@@ -696,7 +917,7 @@ test("runOpenCodeLiveE2E supports explicitly skipped Tailscale for local diagnos
     },
   });
 
-  assert.deepEqual(calls, ["opencode", "cache"]);
+  assert.deepEqual(calls, ["auth", "opencode", "cache"]);
   assert.equal(summary.checks.status, "passed");
   assert.deepEqual(summary.acceptance, {
     status: "failed",
@@ -792,6 +1013,8 @@ test("CLI exits non-zero when diagnostic overrides make acceptance non-productio
         LIVE_E2E_SCRIPT_PATH,
         "--skip-tailscale",
         "true",
+        "--skip-auth-smoke",
+        "true",
         "--base-url",
         `http://127.0.0.1:${address.port}`,
         "--warmup-requests",
@@ -838,6 +1061,7 @@ test("CLI exits non-zero when diagnostic overrides make acceptance non-productio
       production_ready: false,
       diagnostic_overrides: [
         "skip_tailscale",
+        "skip_auth_smoke",
         "cache_warmup_requests_relaxed",
         "cache_measured_requests_relaxed",
       ],

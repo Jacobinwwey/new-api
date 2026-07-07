@@ -49,7 +49,7 @@ const EMAIL_PATTERN = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
 const POSIX_ABSOLUTE_PATH_PATTERN =
   /(^|[\s"'(])\/(?:home|root|opt|var|srv|etc|mnt|tmp|data)\/[^\s"'<>)]*/g;
 const PRIVATE_IP_PATTERN =
-  /\b(?:10|127|169\.254|172\.(?:1[6-9]|2\d|3[0-1])|192\.168)\.\d{1,3}\.\d{1,3}\b/g;
+  /\b(?:10|100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])|127|169\.254|172\.(?:1[6-9]|2\d|3[0-1])|192\.168)\.\d{1,3}\.\d{1,3}\b/g;
 
 export function parseExecStartPath(raw) {
   const text = String(raw || "").trim();

@@ -265,7 +265,7 @@ test("runOpenCodeLiveE2E redacts stage exceptions and keeps fail-fast semantics"
       runOpenCodePreflight: async () => {
         calls.push("opencode");
         throw new Error(
-          "failed root-token-secret relay-key-secret stable-cache-key private-tailnet-host https://new-api.example.test api_key=x user@example.test C:\\Users\\operator\\secret",
+          `failed root-token-secret relay-key-secret stable-cache-key private-tailnet-host https://new-api.example.test api_key=x user@example.test tailnet=${"100"}.64.0.250 lan=${"192"}.168.255.250 C:\\Users\\operator\\secret`,
         );
       },
       runCacheSmoke: async () => {
@@ -288,6 +288,8 @@ test("runOpenCodeLiveE2E redacts stage exceptions and keeps fail-fast semantics"
     "new-api.example.test",
     "api_" + "key=x",
     "user@example.test",
+    `${"100"}.64.0.250`,
+    `${"192"}.168.255.250`,
     "C:\\Users\\operator\\secret",
   ]) {
     assert.equal(serialized.includes(fragment), false);
@@ -320,6 +322,8 @@ test("runOpenCodeLiveE2E redacts successful stage summaries defensively", async 
           account: {
             ["root-token-secret"]: "secret key name",
             email: "user@example.test",
+            tailnet: `${"100"}.64.0.250`,
+            lan: `${"192"}.168.255.250`,
             path: "C:\\Users\\operator\\secret",
             token: "root-token-secret",
             notes: ["relay-key-secret", "stable-cache-key", "private prompt text for live e2e"],
@@ -348,6 +352,8 @@ test("runOpenCodeLiveE2E redacts successful stage summaries defensively", async 
     "Bearer " + "abcdefghijklmnop",
     "api_" + "key=x",
     "user@example.test",
+    `${"100"}.64.0.250`,
+    `${"192"}.168.255.250`,
     "C:\\Users\\operator\\secret",
   ]) {
     assert.equal(serialized.includes(fragment), false);

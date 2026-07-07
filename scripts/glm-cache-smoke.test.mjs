@@ -290,6 +290,8 @@ test("runCacheSmoke redacts generic secret-shaped relay failures", async () => {
         `${"Bea"}rer upstream-bearer-secret-value`,
         "https://opencode.ai/auth/callback?code=oauth-code-secret&state=oauth-state-secret",
         "operator@example.test",
+        `tailnet=${"100"}.64.0.250`,
+        `lan=${"192"}.168.255.250`,
         "D:\\srv\\release\\private\\session.txt",
         "/opt/release/private/session.txt",
       ].join(" "),
@@ -318,9 +320,10 @@ test("runCacheSmoke redacts generic secret-shaped relay failures", async () => {
       assert.match(message, /relay rejected/);
       assert.doesNotMatch(
         message,
-        /upstream-key-secret|upstream-cookie-secret|upstream-workspace-secret|upstream-access-secret|upstream-refresh-secret|upstream-id-secret|upstream-authorization-secret|upstream-bearer-secret-value|oauth-code-secret|oauth-state-secret|operator@example\.test/,
+        /upstream-key-secret|upstream-cookie-secret|upstream-workspace-secret|upstream-access-secret|upstream-refresh-secret|upstream-id-secret|upstream-authorization-secret|upstream-bearer-secret-value|oauth-code-secret|oauth-state-secret|operator@example\.test|100\.126\.180\.64|192\.168\.1\.20/,
       );
       assert.doesNotMatch(message, /D:\\srv|\/opt\/release/);
+      assert.match(message, /<redacted-ip>/);
       assert.match(message, new RegExp(`api_${"key"}=<redacted>`));
       assert.match(message, new RegExp(`${"cook"}ie=<redacted>`));
       assert.match(message, new RegExp(`workspace_${"id"}=<redacted>`));

@@ -55,6 +55,7 @@ test("redactAuthSessionSmokeText strips paths, hosts, emails, and secret-shaped 
   const text = [
     "failed at /opt/new-api/private/session.txt",
     "https://example.test/callback?code=oauth-code&state=oauth-state",
+    `tailnet=${"100"}.64.0.20`,
     "operator@example.test",
     `api_${"key"}=live-secret-value`,
     `${"cook"}ie=session-secret-value`,
@@ -65,6 +66,7 @@ test("redactAuthSessionSmokeText strips paths, hosts, emails, and secret-shaped 
 
   assert.match(redacted, /<redacted-path>/);
   assert.match(redacted, /<redacted-url>/);
+  assert.match(redacted, /<redacted-ip>/);
   assert.match(redacted, /<redacted-email>/);
   assert.match(redacted, new RegExp(`api_${"key"}=<redacted>`));
   assert.match(redacted, new RegExp(`${"cook"}ie=<redacted>`));

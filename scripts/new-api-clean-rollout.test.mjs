@@ -33,6 +33,7 @@ test("shellQuote preserves spaces and single quotes for bash", () => {
 test("redactText removes paths, private addresses, and secret-shaped fragments", () => {
   const message = [
     "failed at /opt/new-api/private/session.txt",
+    `http://100.${"64"}.0.20:3000`,
     `http://192.${"168"}.1.20:3000`,
     "operator@example.test",
     `api_${"key"}=live-secret-value`,
@@ -46,6 +47,7 @@ test("redactText removes paths, private addresses, and secret-shaped fragments",
   assert.match(redacted, /<redacted-path>/);
   assert.match(redacted, /<redacted-ip>/);
   assert.match(redacted, /<redacted-email>/);
+  assert.doesNotMatch(redacted, /100\.64\.0\.20|192\.168\.1\.20/);
   assert.match(redacted, new RegExp(`api_${"key"}=<redacted>`));
   assert.match(redacted, new RegExp(`${"cook"}ie=<redacted>`));
   assert.match(redacted, new RegExp(`workspace_${"id"}=<redacted>`));

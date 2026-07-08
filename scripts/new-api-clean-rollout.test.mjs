@@ -7,7 +7,9 @@ import {
   RUNTIME_SCRIPTS,
   WEB_DEFAULT_CHECK_COMMANDS,
   buildAuthRuntimeSmokeCommand,
+  buildGoBuildCommand,
   buildRolloutConfig,
+  normalizeGoModulePath,
   parseExecStartPath,
   redactText,
   shellQuote,
@@ -28,6 +30,25 @@ test("shellQuote preserves spaces and single quotes for bash", () => {
   assert.equal(shellQuote("plain"), "'plain'");
   assert.equal(shellQuote("path with spaces"), "'path with spaces'");
   assert.equal(shellQuote("owner's path"), "'owner'\\''s path'");
+});
+
+test("normalizeGoModulePath rejects unsafe module paths before shell command construction", () => {
+  assert.equal(normalizeGoModulePath("github.com/QuantumNous/new-api\n"), "github.com/QuantumNous/new-api");
+  assert.throws(() => normalizeGoModulePath("github.com/example/repo; touch /tmp/pwned"), /unsafe/);
+  assert.throws(() => normalizeGoModulePath(""), /unsafe/);
+});
+
+test("buildGoBuildCommand targets the actual go module version symbol", () => {
+  const command = buildGoBuildCommand(
+    "/tmp/new-api-src",
+    "/tmp/new-api",
+    "github.com/QuantumNous/new-api",
+    "4d6d9d334159ab2f9f9c5665a62dd1101b1de3bd",
+  );
+
+  assert.match(command, /github\.com\/QuantumNous\/new-api\/common\.Version=4d6d9d3/);
+  assert.doesNotMatch(command, /(?:^|\s)new-api\/common\.Version=/);
+  assert.match(command, /go build -ldflags/);
 });
 
 test("redactText removes paths, private addresses, and secret-shaped fragments", () => {

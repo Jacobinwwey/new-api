@@ -72,6 +72,22 @@ export function shellQuote(value) {
   return `'${String(value).replace(/'/g, "'\\''")}'`;
 }
 
+export function normalizeGoModulePath(raw) {
+  const modulePath = String(raw || "").trim();
+  if (!/^[A-Za-z0-9][A-Za-z0-9._~+/-]*$/.test(modulePath) || modulePath.includes("//")) {
+    throw new Error("go module path is missing or unsafe");
+  }
+  return modulePath;
+}
+
+export function buildGoBuildCommand(srcDir, artifactPath, modulePath, revision) {
+  const versionSymbol = `${normalizeGoModulePath(modulePath)}/common.Version`;
+  return [
+    `cd ${shellQuote(srcDir)}`,
+    `go build -ldflags ${shellQuote(`-s -w -X ${versionSymbol}=${revision}`)} -o ${shellQuote(artifactPath)} .`,
+  ].join(" && ");
+}
+
 export function buildRolloutConfig(argv = process.argv, env = process.env) {
   const args = parseArgs(argv);
   return {
@@ -202,12 +218,12 @@ export async function runCleanRollout(config) {
     }
 
     if (config.runGoBuild) {
+      const modulePath = normalizeGoModulePath(
+        (await runCommand(`cd ${shellQuote(srcDir)} && go list -m`, { timeoutMs: stepTimeoutMs })).stdout,
+      );
       await runStep(
         "go_build",
-        [
-          `cd ${shellQuote(srcDir)}`,
-          `go build -ldflags ${shellQuote(`-s -w -X 'new-api/common.Version=${config.revision}'`)} -o ${shellQuote(artifactPath)} .`,
-        ].join(" && "),
+        buildGoBuildCommand(srcDir, artifactPath, modulePath, config.revision),
         stepTimeoutMs,
       );
       const artifact = await stat(artifactPath);

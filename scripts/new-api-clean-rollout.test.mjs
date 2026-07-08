@@ -7,6 +7,7 @@ import {
   RUNTIME_SCRIPTS,
   WEB_DEFAULT_CHECK_COMMANDS,
   buildAuthRuntimeSmokeCommand,
+  buildBinaryVersionCommand,
   buildGoBuildCommand,
   buildRolloutConfig,
   normalizeGoModulePath,
@@ -49,6 +50,13 @@ test("buildGoBuildCommand targets the actual go module version symbol", () => {
   assert.match(command, /github\.com\/QuantumNous\/new-api\/common\.Version=4d6d9d3/);
   assert.doesNotMatch(command, /(?:^|\s)new-api\/common\.Version=/);
   assert.match(command, /go build -ldflags/);
+});
+
+test("buildBinaryVersionCommand quotes the installed binary path", () => {
+  assert.equal(
+    buildBinaryVersionCommand("/srv/new api/current/new-api"),
+    "'/srv/new api/current/new-api' --version",
+  );
 });
 
 test("redactText removes paths, private addresses, and secret-shaped fragments", () => {

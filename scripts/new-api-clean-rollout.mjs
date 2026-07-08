@@ -88,6 +88,10 @@ export function buildGoBuildCommand(srcDir, artifactPath, modulePath, revision) 
   ].join(" && ");
 }
 
+export function buildBinaryVersionCommand(binaryPath) {
+  return `${shellQuote(binaryPath)} --version`;
+}
+
 export function buildRolloutConfig(argv = process.argv, env = process.env) {
   const args = parseArgs(argv);
   return {
@@ -231,6 +235,7 @@ export async function runCleanRollout(config) {
         throw new Error("built artifact is missing or empty");
       }
       console.log("artifact=ok");
+      await assertBinaryVersion(artifactPath, config.revision, "artifact_version");
     }
 
     if (!config.apply) {
@@ -262,11 +267,12 @@ async function applyRuntimeArtifact(config, srcDir, artifactPath) {
 
   await installArtifact(srcDir, artifactPath, service);
   console.log("install=ok");
+  await assertBinaryVersion(service.execPath, config.revision, "installed_version");
 
   try {
     process.kill(Number(service.pid), "SIGTERM");
     await waitForRestart(config.serviceName, service.pid, config.readyTimeoutSeconds);
-    await waitForHTTP(config.statusURL, config.readyTimeoutSeconds);
+    await waitForHTTPVersion(config.statusURL, config.revision, config.readyTimeoutSeconds);
     console.log("restart=ok");
     console.log("http_smoke=ok");
     if (config.runAuthRuntimeSmoke) {
@@ -411,6 +417,15 @@ async function waitForHTTP(statusURL, timeoutSeconds) {
   throw new Error("HTTP status smoke failed within readiness window");
 }
 
+async function waitForHTTPVersion(statusURL, expectedRevision, timeoutSeconds) {
+  const deadline = Date.now() + timeoutSeconds * 1000;
+  while (Date.now() < deadline) {
+    if (await httpVersionMatches(statusURL, expectedRevision)) return;
+    await sleep(1000);
+  }
+  throw new Error("HTTP status version smoke failed within readiness window");
+}
+
 async function httpStatusOK(url) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 5000);
@@ -422,6 +437,33 @@ async function httpStatusOK(url) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function httpVersionMatches(url, expectedRevision) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 5000);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    return response.ok && response.headers.get("x-new-api-version") === expectedRevision;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function assertBinaryVersion(binaryPath, expectedRevision, label) {
+  const result = await runCommand(buildBinaryVersionCommand(binaryPath), { timeoutMs: 15000 });
+  const version = firstOutputLine(result.stdout);
+  if (result.exitCode !== 0 || version !== expectedRevision) {
+    const got = version ? redactText(version).slice(0, 16) : "empty";
+    throw new Error(`${label} mismatch: expected ${expectedRevision.slice(0, 8)}, got ${got}`);
+  }
+  console.log(`${label}=ok`);
+}
+
+function firstOutputLine(text) {
+  return String(text || "").trim().split(/\r?\n/, 1)[0] || "";
 }
 
 async function runStep(name, command, timeoutMs = DEFAULT_TIMEOUT_SECONDS * 1000, attempts = 1) {

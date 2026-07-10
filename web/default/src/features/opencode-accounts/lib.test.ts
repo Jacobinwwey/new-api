@@ -4,6 +4,7 @@ import { describe, test } from 'node:test'
 import {
   canConfirmOpenCodeAccountDelete,
   canRefreshOpenCodeLoginScreenshot,
+  mapRemoteHotspotToContainedScreenshotRect,
   shouldClearOpenCodeLoginScreenshotForStatus,
   canUseOpenCodeLoginScreenshotResponse,
   openCodeRemoteBrowserPopupFeatures,
@@ -18,6 +19,7 @@ import {
   refreshOpenCodeAccountPageData,
   requireSuccessfulOpenCodeResponse,
   shouldClearOpenCodeLoginScreenshotOnAccountSelect,
+  shouldAutoSyncOpenCodeKeyPage,
 } from './lib'
 
 function createRefreshSource() {
@@ -192,11 +194,33 @@ describe('OpenCode account page helpers', () => {
         image_base64: 'png-base64',
         width: 1279,
         height: 812,
+        hotspots: [
+          {
+            id: 'google-1',
+            label: 'Continue with Google',
+            provider: 'google',
+            x: 100,
+            y: 120,
+            width: 220,
+            height: 44,
+          },
+        ],
       }),
       {
         imageBase64: 'png-base64',
         width: 1279,
         height: 812,
+        hotspots: [
+          {
+            id: 'google-1',
+            label: 'Continue with Google',
+            provider: 'google',
+            x: 100,
+            y: 120,
+            width: 220,
+            height: 44,
+          },
+        ],
       }
     )
     assert.equal(
@@ -247,6 +271,33 @@ describe('OpenCode account page helpers', () => {
     assert.equal(
       shouldClearOpenCodeLoginScreenshotOnAccountSelect(null, 7),
       true
+    )
+  })
+
+  test('auto-syncs a Key page exactly once for each browser session', () => {
+    const keyPageStatus = {
+      account_id: 7,
+      running: true,
+      status: 'running',
+      page: 'keys',
+      started_at: 1_784_300_000,
+    }
+
+    assert.equal(shouldAutoSyncOpenCodeKeyPage(keyPageStatus, ''), true)
+    assert.equal(
+      shouldAutoSyncOpenCodeKeyPage(keyPageStatus, '7:1784300000'),
+      false
+    )
+    assert.equal(
+      shouldAutoSyncOpenCodeKeyPage(
+        { ...keyPageStatus, page: 'workspace' },
+        ''
+      ),
+      false
+    )
+    assert.equal(
+      shouldAutoSyncOpenCodeKeyPage({ ...keyPageStatus, running: false }, ''),
+      false
     )
   })
 
@@ -362,6 +413,30 @@ describe('OpenCode account page helpers', () => {
         { width: 0, height: 900 }
       ),
       null
+    )
+  })
+
+  test('maps remote hotspots back onto the contained screenshot box', () => {
+    assert.deepEqual(
+      mapRemoteHotspotToContainedScreenshotRect(
+        {
+          id: 'google-1',
+          label: 'Continue with Google',
+          provider: 'google',
+          x: 320,
+          y: 180,
+          width: 200,
+          height: 60,
+        },
+        { left: 0, top: 0, width: 1600, height: 900 },
+        { width: 1280, height: 900 }
+      ),
+      {
+        left: 480,
+        top: 180,
+        width: 200,
+        height: 60,
+      }
     )
   })
 })

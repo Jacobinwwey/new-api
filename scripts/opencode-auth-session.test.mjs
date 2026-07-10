@@ -10,6 +10,7 @@ import { promisify } from "node:util";
 import vm from "node:vm";
 
 import {
+  buildBrowserEnv,
   browserProcessArgsMatchState,
   buildOpenCodeBrowserStateExpression,
   isDirectScriptExecution,
@@ -20,6 +21,7 @@ import {
   retryTransientBrowserAction,
   sanitizeBrowserStatusTitle,
   sanitizeBrowserStatusURL,
+  openCodeBrowserPageKind,
   shouldProbeOpenCodeResourceURL,
   xvfbProcessArgsMatchState,
 } from "./opencode-auth-session.mjs";
@@ -135,6 +137,219 @@ test("sanitizeBrowserStatusURL strips authorization payload from browser URLs", 
   }
 });
 
+test("sanitizeBrowserStatusURL redacts workspace identifiers from public browser URLs", () => {
+  const sanitized = sanitizeBrowserStatusURL(
+    "https://opencode.ai/workspace/workspace-fixture-private/keys?tab=active",
+  );
+
+  assert.equal(sanitized, "https://opencode.ai/workspace/<redacted>/keys");
+  assert.doesNotMatch(sanitized, /workspace-fixture-private/);
+});
+
+test("OpenCode key-page kind is a secret-free status signal", () => {
+  assert.equal(
+    openCodeBrowserPageKind("https://opencode.ai/workspace/workspace-fixture-private/keys?tab=active"),
+    "keys",
+  );
+  assert.equal(openCodeBrowserPageKind("https://opencode.ai/workspace/workspace-fixture-private/usage"), "workspace");
+  assert.equal(openCodeBrowserPageKind("https://accounts.google.com/signin"), "");
+});
+
+test("workspace key-page resolution accepts only an OpenCode workspace URL", async () => {
+  const sidecar = await import("./opencode-auth-session.mjs");
+  const resolveKeyPage = sidecar.openCodeWorkspaceKeysURL ?? (() => "");
+
+  assert.equal(
+    resolveKeyPage("https://opencode.ai/workspace/workspace-fixture/usage"),
+    "https://opencode.ai/workspace/workspace-fixture/keys",
+  );
+  assert.equal(resolveKeyPage("https://accounts.google.com/workspace/workspace-fixture/keys"), "");
+  assert.equal(resolveKeyPage("https://opencode.ai/auth"), "");
+});
+
+test("API key clipboard validation rejects masked or unsafe values", async () => {
+  const sidecar = await import("./opencode-auth-session.mjs");
+  const isValidClipboardKey = sidecar.isOpenCodeAPIKeyClipboardValue ?? (() => false);
+
+  assert.equal(isValidClipboardKey("oc_fixture_key_0123456789abcdef"), true);
+  assert.equal(isValidClipboardKey("oc_fixture_key_0123456789abcdef\n"), true);
+  assert.equal(isValidClipboardKey("sk-••••••••••••"), false);
+  assert.equal(isValidClipboardKey("short-key"), false);
+  assert.equal(isValidClipboardKey("key with spaces 0123456789"), false);
+});
+
+test("API key copy-control expression selects only a visible key-semantic copy control", async () => {
+  const sidecar = await import("./opencode-auth-session.mjs");
+  const buildCopyControlExpression = sidecar.buildOpenCodeAPIKeyCopyControlExpression ?? (() => "null");
+  const makeElement = ({ label, left, top, width, height }) => ({
+    getAttribute: (name) => (name === "aria-label" ? label : ""),
+    innerText: "",
+    textContent: "",
+    value: "",
+    getBoundingClientRect: () => ({ left, top, width, height }),
+  });
+  const context = {
+    URL,
+    window: { location: { href: "https://opencode.ai/workspace/workspace-fixture/keys" } },
+    document: {
+      querySelectorAll: () => [
+        makeElement({ label: "Copy", left: 20, top: 20, width: 20, height: 20 }),
+        makeElement({ label: "Copy API key", left: 480, top: 248, width: 24, height: 24 }),
+      ],
+    },
+    getComputedStyle: () => ({
+      display: "block",
+      visibility: "visible",
+      opacity: "1",
+      pointerEvents: "auto",
+    }),
+  };
+
+  const result = new vm.Script(buildCopyControlExpression()).runInNewContext(context);
+
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), {
+    workspace_id: "workspace-fixture",
+    copy_control: { x: 492, y: 260 },
+  });
+});
+
+test("API key copy-control expression accepts a generic Copy control in a key container", async () => {
+  const sidecar = await import("./opencode-auth-session.mjs");
+  const buildCopyControlExpression = sidecar.buildOpenCodeAPIKeyCopyControlExpression ?? (() => "null");
+  const context = {
+    URL,
+    window: { location: { href: "https://opencode.ai/workspace/workspace-fixture/keys" } },
+    document: {
+      querySelectorAll: () => [
+        {
+          getAttribute: (name) => (name === "aria-label" ? "Copy" : ""),
+          innerText: "",
+          textContent: "",
+          value: "",
+          parentElement: { innerText: "API Key" },
+          getBoundingClientRect: () => ({ left: 480, top: 248, width: 24, height: 24 }),
+        },
+      ],
+    },
+    getComputedStyle: () => ({
+      display: "block",
+      visibility: "visible",
+      opacity: "1",
+      pointerEvents: "auto",
+    }),
+  };
+
+  const result = new vm.Script(buildCopyControlExpression()).runInNewContext(context);
+
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), {
+    workspace_id: "workspace-fixture",
+    copy_control: { x: 492, y: 260 },
+  });
+});
+
+test("API key copy-control expression rejects a generic copy control", async () => {
+  const sidecar = await import("./opencode-auth-session.mjs");
+  const buildCopyControlExpression = sidecar.buildOpenCodeAPIKeyCopyControlExpression ?? (() => "null");
+  const context = {
+    URL,
+    window: { location: { href: "https://opencode.ai/workspace/workspace-fixture/keys" } },
+    document: {
+      querySelectorAll: () => [
+        {
+          getAttribute: (name) => (name === "aria-label" ? "Copy" : ""),
+          innerText: "",
+          textContent: "",
+          value: "",
+          getBoundingClientRect: () => ({ left: 20, top: 20, width: 20, height: 20 }),
+        },
+      ],
+    },
+    getComputedStyle: () => ({
+      display: "block",
+      visibility: "visible",
+      opacity: "1",
+      pointerEvents: "auto",
+    }),
+  };
+
+  const result = new vm.Script(buildCopyControlExpression()).runInNewContext(context);
+
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), {
+    workspace_id: "workspace-fixture",
+    copy_control: null,
+  });
+});
+
+test("clipboard reader returns a validated API key without retaining surrounding whitespace", async () => {
+  const sidecar = await import("./opencode-auth-session.mjs");
+  const readCopiedAPIKey = sidecar.readCopiedOpenCodeAPIKey ?? (async () => "");
+
+  const value = await readCopiedAPIKey(async () => "\n  oc_fixture_key_0123456789abcdef  \n");
+
+  assert.equal(value, "oc_fixture_key_0123456789abcdef");
+});
+
+test("clipboard reader rejects an invalid copied value without echoing it", async () => {
+  const sidecar = await import("./opencode-auth-session.mjs");
+  const readCopiedAPIKey = sidecar.readCopiedOpenCodeAPIKey ?? (async () => "");
+  const invalidValue = "invalid copied value with spaces";
+
+  await assert.rejects(readCopiedAPIKey(async () => invalidValue), /copied OpenCode API key is invalid/);
+});
+
+test("key-page sync clicks the semantic copy control and returns only the validated candidate", async () => {
+  const sidecar = await import("./opencode-auth-session.mjs");
+  const syncKeyFromPage = sidecar.syncOpenCodeKeyFromPage ?? (async () => ({ workspace_id: "", api_key: "" }));
+  const calls = [];
+  let evaluateCount = 0;
+  const cdp = {
+    send: async (method, params = {}) => {
+      calls.push({ method, params });
+      if (method !== "Runtime.evaluate") return {};
+      evaluateCount += 1;
+      if (evaluateCount === 1) {
+        return { result: { value: { workspace_id: "workspace-fixture", copy_control: { x: 492, y: 260 } } } };
+      }
+      return { result: { value: "oc_fixture_key_0123456789abcdef" } };
+    },
+  };
+
+  const result = await syncKeyFromPage(cdp, "https://opencode.ai/workspace/workspace-fixture/keys");
+
+  assert.deepEqual(result, {
+    workspace_id: "workspace-fixture",
+    api_key: "oc_fixture_key_0123456789abcdef",
+  });
+  assert.deepEqual(
+    calls.filter((call) => call.method === "Input.dispatchMouseEvent").map((call) => call.params.type),
+    ["mouseMoved", "mousePressed", "mouseReleased"],
+  );
+  assert.deepEqual(
+    calls.filter((call) => call.method === "Input.dispatchMouseEvent").map((call) => [call.params.x, call.params.y]),
+    [[492, 260], [492, 260], [492, 260]],
+  );
+  assert.ok(
+    calls.some(
+      (call) =>
+        call.method === "Runtime.evaluate" &&
+        call.params.expression === "navigator.clipboard.writeText('')",
+    ),
+  );
+});
+
+test("key-page sync rejects a page without a semantic API key copy control", async () => {
+  const sidecar = await import("./opencode-auth-session.mjs");
+  const syncKeyFromPage = sidecar.syncOpenCodeKeyFromPage ?? (async () => ({ workspace_id: "", api_key: "" }));
+  const cdp = {
+    send: async () => ({ result: { value: { workspace_id: "workspace-fixture", copy_control: null } } }),
+  };
+
+  await assert.rejects(
+    syncKeyFromPage(cdp, "https://opencode.ai/workspace/workspace-fixture/keys"),
+    /OpenCode API key copy control is unavailable/,
+  );
+});
+
 test("sanitizeBrowserStatusTitle redacts account and authorization fragments", () => {
   const sanitized = sanitizeBrowserStatusTitle(
     [
@@ -164,10 +379,36 @@ test("buildOpenCodeBrowserStateExpression collects same-site JSON responses", as
   };
   const context = {
     URL,
+    document: {
+      body: {
+        innerText: "Continue with Google",
+      },
+      querySelectorAll: () => [
+        {
+          tagName: "BUTTON",
+          innerText: "Continue with Google",
+          textContent: "Continue with Google",
+          value: "",
+          getAttribute: () => "",
+          getBoundingClientRect: () => ({
+            left: 120,
+            top: 48,
+            width: 220,
+            height: 44,
+          }),
+        },
+      ],
+    },
     window: {
-      location: { href: "https://opencode.ai/auth" },
+      location: { href: "https://opencode.ai/workspace/workspace-fixture/keys" },
       localStorage: storage,
       sessionStorage: { length: 0, key: () => null, getItem: () => null },
+      getComputedStyle: () => ({
+        display: "block",
+        visibility: "visible",
+        opacity: "1",
+        pointerEvents: "auto",
+      }),
     },
     performance: {
       getEntriesByType: () => [
@@ -190,7 +431,19 @@ test("buildOpenCodeBrowserStateExpression collects same-site JSON responses", as
 
   assert.deepEqual(fetched, ["https://opencode.ai/api/account/quota"]);
   assert.equal(result.localStorage.account, "{\"email\":\"operator@example.test\"}");
+  assert.equal(result.workspace_id, "workspace-fixture");
   assert.deepEqual(Array.from(result.jsonResponses), ["{\"quota\":{\"limit\":100,\"used\":1}}"]);
+  assert.deepEqual(JSON.parse(JSON.stringify(result.hotspots)), [
+    {
+      id: "google-120-48-220-44",
+      label: "Continue with Google",
+      provider: "google",
+      x: 120,
+      y: 48,
+      width: 220,
+      height: 44,
+    },
+  ]);
 });
 
 test("isDirectScriptExecution accepts symlinked argv script paths", () => {
@@ -313,6 +566,26 @@ test("openCodeXvfbDisplayCandidates starts from account-derived display and then
   assert.deepEqual(openCodeXvfbDisplayCandidates(-1, 3), [":499", ":200", ":201"]);
 });
 
+test("buildBrowserEnv preserves proxy variables needed for external auth pages", () => {
+  const env = buildBrowserEnv({
+    HTTP_PROXY: "http://127.0.0.1:18080",
+    HTTPS_PROXY: "http://127.0.0.1:18080",
+    ALL_PROXY: "socks5://127.0.0.1:18080",
+    NO_PROXY: "localhost,127.0.0.1",
+    http_proxy: "http://127.0.0.1:18080",
+    https_proxy: "http://127.0.0.1:18080",
+    all_proxy: "socks5://127.0.0.1:18080",
+    no_proxy: "localhost,127.0.0.1",
+    DISPLAY: ":201",
+  });
+
+  assert.equal(env.HTTP_PROXY, "http://127.0.0.1:18080");
+  assert.equal(env.HTTPS_PROXY, "http://127.0.0.1:18080");
+  assert.equal(env.ALL_PROXY, "socks5://127.0.0.1:18080");
+  assert.equal(env.NO_PROXY, "localhost,127.0.0.1");
+  assert.equal(env.DISPLAY, ":201");
+});
+
 test("press action rejects unsupported keys without echoing the raw key", async () => {
   const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-press-key-test-"));
   const accountID = 46;
@@ -404,6 +677,22 @@ test("status action treats only missing state as a stopped session", async () =>
 
   assert.equal(result.success, true);
   assert.equal(result.status.status, "stopped");
+});
+
+test("sync action resolves browser state before attempting key extraction", async () => {
+  const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-sync-missing-state-test-"));
+
+  const result = await runSidecar([
+    "--action",
+    "sync",
+    "--account-id",
+    "47",
+    "--state-dir",
+    stateDir,
+  ]);
+
+  assert.equal(result.success, false);
+  assert.match(result.message, /opencode auth state is missing/);
 });
 
 test("status action rejects invalid state", async () => {

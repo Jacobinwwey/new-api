@@ -36,6 +36,7 @@ func TestOpenCodeAccountRoutesRegisterExpectedPaths(t *testing.T) {
 		http.MethodPost + " /api/opencode/accounts/:id/login/key",
 		http.MethodPost + " /api/opencode/accounts/:id/login/press",
 		http.MethodPost + " /api/opencode/accounts/:id/login/extract",
+		http.MethodPost + " /api/opencode/accounts/:id/sync",
 		http.MethodPost + " /api/opencode/accounts/:id/login/stop",
 		http.MethodPost + " /api/opencode/accounts/:id/quota/refresh",
 		http.MethodPost + " /api/opencode/accounts/:id/activate",

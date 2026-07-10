@@ -14,10 +14,13 @@ type OpenCodePageRefreshSources = {
   diagnostics: OpenCodePageRefreshSource
 }
 
-type OpenCodePopupScreen = {
-  availWidth?: number
-  availHeight?: number
-} | null | undefined
+type OpenCodePopupScreen =
+  | {
+      availWidth?: number
+      availHeight?: number
+    }
+  | null
+  | undefined
 
 export type OpenCodeAccountDeleteTarget = {
   id: number
@@ -41,14 +44,29 @@ type OpenCodeRemoteViewport = {
   height: number
 }
 
-type OpenCodeLoginScreenshotPayload = {
-  image_base64?: string
-  width?: number
-  height?: number
-} | null | undefined
+type OpenCodeLoginScreenshotPayload =
+  | {
+      image_base64?: string
+      width?: number
+      height?: number
+      hotspots?: unknown
+    }
+  | null
+  | undefined
 
 export type OpenCodeLoginScreenshotImage = {
   imageBase64: string
+  width: number
+  height: number
+  hotspots: OpenCodeLoginHotspot[]
+}
+
+export type OpenCodeLoginHotspot = {
+  id: string
+  label: string
+  provider?: string
+  x: number
+  y: number
   width: number
   height: number
 }
@@ -63,6 +81,14 @@ type OpenCodeLoginStatusLabelSource = {
 type OpenCodeLoginScreenshotStatusSource = {
   running?: boolean
   status?: string
+}
+
+type OpenCodeKeyPageSyncStatus = {
+  account_id?: number
+  running?: boolean
+  status?: string
+  page?: string
+  started_at?: number
 }
 
 export const OPEN_CODE_INTERACTION_SCREENSHOT_REFRESH_DELAYS_MS = [
@@ -143,8 +169,9 @@ export function openCodeRemoteBrowserWindowURL(accountID: number) {
 }
 
 export function openCodeRemoteBrowserPopupFeatures(
-  screenSize: OpenCodePopupScreen =
-    typeof window === 'undefined' ? null : window.screen
+  screenSize: OpenCodePopupScreen = typeof window === 'undefined'
+    ? null
+    : window.screen
 ) {
   const availWidth = Math.max(0, Number(screenSize?.availWidth) || 0)
   const availHeight = Math.max(0, Number(screenSize?.availHeight) || 0)
@@ -188,13 +215,88 @@ export function normalizeOpenCodeLoginScreenshot(
     imageBase64,
     width,
     height,
+    hotspots: normalizeOpenCodeLoginHotspots(screenshot?.hotspots),
   }
+}
+
+function normalizeOpenCodeLoginHotspots(
+  hotspots: unknown
+): OpenCodeLoginHotspot[] {
+  if (!Array.isArray(hotspots)) {
+    return []
+  }
+
+  return hotspots
+    .map((hotspot): OpenCodeLoginHotspot | null => {
+      const candidate = hotspot as Partial<OpenCodeLoginHotspot> | null
+      if (
+        !candidate ||
+        typeof candidate.id !== 'string' ||
+        typeof candidate.label !== 'string' ||
+        typeof candidate.x !== 'number' ||
+        typeof candidate.y !== 'number' ||
+        typeof candidate.width !== 'number' ||
+        typeof candidate.height !== 'number' ||
+        !Number.isFinite(candidate.x) ||
+        !Number.isFinite(candidate.y) ||
+        !Number.isFinite(candidate.width) ||
+        !Number.isFinite(candidate.height) ||
+        candidate.width <= 0 ||
+        candidate.height <= 0
+      ) {
+        return null
+      }
+
+      return {
+        id: candidate.id,
+        label: candidate.label,
+        provider:
+          typeof candidate.provider === 'string'
+            ? candidate.provider
+            : undefined,
+        x: Math.round(candidate.x),
+        y: Math.round(candidate.y),
+        width: Math.round(candidate.width),
+        height: Math.round(candidate.height),
+      }
+    })
+    .filter((hotspot): hotspot is OpenCodeLoginHotspot => hotspot !== null)
 }
 
 export function shouldClearOpenCodeLoginScreenshotForStatus(
   status: OpenCodeLoginScreenshotStatusSource | null | undefined
 ) {
   return status?.running === false || status?.status === 'stopped'
+}
+
+export function openCodeKeyPageSyncSessionKey(
+  status: OpenCodeKeyPageSyncStatus | null | undefined
+) {
+  const accountID = status?.account_id
+  const startedAt = status?.started_at
+  if (
+    !Number.isInteger(accountID) ||
+    (accountID ?? 0) <= 0 ||
+    !Number.isInteger(startedAt) ||
+    (startedAt ?? 0) <= 0
+  ) {
+    return ''
+  }
+  return `${accountID}:${startedAt}`
+}
+
+export function shouldAutoSyncOpenCodeKeyPage(
+  status: OpenCodeKeyPageSyncStatus | null | undefined,
+  attemptedSessionKey: string
+) {
+  const sessionKey = openCodeKeyPageSyncSessionKey(status)
+  return (
+    status?.running === true &&
+    status.status === 'running' &&
+    status.page === 'keys' &&
+    sessionKey !== '' &&
+    sessionKey !== attemptedSessionKey
+  )
 }
 
 export function shouldClearOpenCodeLoginScreenshotOnAccountSelect(
@@ -220,27 +322,16 @@ export function mapContainedScreenshotClickToRemotePoint(
   elementRect: OpenCodeScreenshotElementRect,
   viewport: OpenCodeRemoteViewport
 ) {
-  if (
-    elementRect.width <= 0 ||
-    elementRect.height <= 0 ||
-    viewport.width <= 0 ||
-    viewport.height <= 0
-  ) {
+  const contentRect = containedScreenshotRect(elementRect, viewport)
+  if (contentRect === null) {
     return null
   }
-
-  const viewportAspectRatio = viewport.width / viewport.height
-  const elementAspectRatio = elementRect.width / elementRect.height
-  const contentWidth =
-    elementAspectRatio > viewportAspectRatio
-      ? elementRect.height * viewportAspectRatio
-      : elementRect.width
-  const contentHeight =
-    elementAspectRatio > viewportAspectRatio
-      ? elementRect.height
-      : elementRect.width / viewportAspectRatio
-  const contentLeft = elementRect.left + (elementRect.width - contentWidth) / 2
-  const contentTop = elementRect.top + (elementRect.height - contentHeight) / 2
+  const {
+    left: contentLeft,
+    top: contentTop,
+    width: contentWidth,
+    height: contentHeight,
+  } = contentRect
   const normalizedX = (pointer.clientX - contentLeft) / contentWidth
   const normalizedY = (pointer.clientY - contentTop) / contentHeight
 
@@ -262,6 +353,56 @@ export function mapContainedScreenshotClickToRemotePoint(
       Math.round(normalizedY * viewport.height),
       viewport.height
     ),
+  }
+}
+
+export function mapRemoteHotspotToContainedScreenshotRect(
+  hotspot: OpenCodeLoginHotspot,
+  elementRect: OpenCodeScreenshotElementRect,
+  viewport: OpenCodeRemoteViewport
+) {
+  const contentRect = containedScreenshotRect(elementRect, viewport)
+  if (contentRect === null) {
+    return null
+  }
+
+  return {
+    left: contentRect.left + (hotspot.x / viewport.width) * contentRect.width,
+    top: contentRect.top + (hotspot.y / viewport.height) * contentRect.height,
+    width: (hotspot.width / viewport.width) * contentRect.width,
+    height: (hotspot.height / viewport.height) * contentRect.height,
+  }
+}
+
+function containedScreenshotRect(
+  elementRect: OpenCodeScreenshotElementRect,
+  viewport: OpenCodeRemoteViewport
+) {
+  if (
+    elementRect.width <= 0 ||
+    elementRect.height <= 0 ||
+    viewport.width <= 0 ||
+    viewport.height <= 0
+  ) {
+    return null
+  }
+
+  const viewportAspectRatio = viewport.width / viewport.height
+  const elementAspectRatio = elementRect.width / elementRect.height
+  const width =
+    elementAspectRatio > viewportAspectRatio
+      ? elementRect.height * viewportAspectRatio
+      : elementRect.width
+  const height =
+    elementAspectRatio > viewportAspectRatio
+      ? elementRect.height
+      : elementRect.width / viewportAspectRatio
+
+  return {
+    left: elementRect.left + (elementRect.width - width) / 2,
+    top: elementRect.top + (elementRect.height - height) / 2,
+    width,
+    height,
   }
 }
 

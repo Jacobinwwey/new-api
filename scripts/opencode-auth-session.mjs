@@ -16,6 +16,8 @@ const XVFB_START_ATTEMPTS = 24;
 const MAX_JSON_RESPONSE_COUNT = 20;
 const MAX_JSON_RESPONSE_CHARS = 262144;
 const BROWSER_STATUS_TITLE_MAX_CHARS = 160;
+const OPEN_CODE_LOGIN_HOTSPOT_MAX_COUNT = 8;
+const OPEN_CODE_LOGIN_HOTSPOT_LABEL_MAX_CHARS = 80;
 const BROWSER_STATUS_TITLE_HTTP_URL_PATTERN = /https?:\/\/[^\s"'<>]+/gi;
 const BROWSER_STATUS_TITLE_UNSAFE_URL_PATTERN = /\b(?:data|file|javascript):[^\s"'<>]+/gi;
 const BROWSER_STATUS_TITLE_BEARER_PATTERN = /\bbearer\s+[a-z0-9._-]+/gi;
@@ -230,10 +232,202 @@ export function sanitizeBrowserStatusURL(rawURL) {
     url.password = "";
     url.search = "";
     url.hash = "";
-    return url.toString();
+    const pathname = url.pathname.replace(/^\/workspace\/[^/]+(?=\/|$)/, "/workspace/<redacted>");
+    return `${url.origin}${pathname}`;
   } catch {
     return "";
   }
+}
+
+export function openCodeBrowserPageKind(rawURL) {
+  try {
+    const url = new URL(String(rawURL || ""));
+    const hostname = url.hostname.toLowerCase();
+    if (url.protocol !== "https:" || (hostname !== "opencode.ai" && !hostname.endsWith(".opencode.ai"))) {
+      return "";
+    }
+    const segments = url.pathname.split("/").filter(Boolean);
+    if (segments[0] !== "workspace" || !segments[1]) return "";
+    return segments[2] === "keys" ? "keys" : "workspace";
+  } catch {
+    return "";
+  }
+}
+
+export function extractOpenCodeWorkspaceID(rawURL) {
+  try {
+    const url = new URL(String(rawURL || ""));
+    const hostname = url.hostname.toLowerCase();
+    if (url.protocol !== "https:" || (hostname !== "opencode.ai" && !hostname.endsWith(".opencode.ai"))) {
+      return "";
+    }
+    const segments = url.pathname.split("/").filter(Boolean);
+    if (segments[0] !== "workspace" || !segments[1]) {
+      return "";
+    }
+    return segments[1];
+  } catch {
+    return "";
+  }
+}
+
+export function openCodeWorkspaceKeysURL(rawURL) {
+  try {
+    const url = new URL(String(rawURL || ""));
+    const workspaceID = extractOpenCodeWorkspaceID(url.toString());
+    if (!workspaceID) {
+      return "";
+    }
+    return new URL(`/workspace/${encodeURIComponent(workspaceID)}/keys`, url.origin).toString();
+  } catch {
+    return "";
+  }
+}
+
+export function isOpenCodeAPIKeyClipboardValue(rawValue) {
+  const value = String(rawValue || "").trim();
+  if (value.length < 16 || value.length > 512) {
+    return false;
+  }
+  if (/\s|[\u2022*]/.test(value)) {
+    return false;
+  }
+  return /^[A-Za-z0-9._~-]+$/.test(value);
+}
+
+export async function readCopiedOpenCodeAPIKey(readClipboard) {
+  const value = String(await readClipboard()).trim();
+  if (!isOpenCodeAPIKeyClipboardValue(value)) {
+    throw new Error("copied OpenCode API key is invalid");
+  }
+  return value;
+}
+
+export function buildOpenCodeAPIKeyCopyControlExpression() {
+  return `(() => {
+    const extractWorkspaceID = EXTRACT_WORKSPACE_SOURCE;
+    const isVisible = (element) => {
+      const style = getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return style.display !== "none" &&
+        style.visibility !== "hidden" &&
+        Number.parseFloat(style.opacity || "1") >= 0.05 &&
+        style.pointerEvents !== "none" &&
+        rect.width >= 4 &&
+        rect.height >= 4;
+    };
+    const controlSelector = [
+      "button",
+      "[role='button']",
+      "input[type='button']",
+      "input[type='submit']",
+    ].join(",");
+    const hasKeyContext = (element) => {
+      let ancestor = element.parentElement;
+      for (let depth = 0; ancestor && depth < 3; depth += 1) {
+        const text = [
+          ancestor.getAttribute?.("aria-label") || "",
+          ancestor.getAttribute?.("data-slot") || "",
+          ancestor.innerText || "",
+          ancestor.textContent || "",
+        ].join(" ");
+        if (/\\bapi\\s*key\\b|\\bkey\\b/i.test(text)) return true;
+        ancestor = ancestor.parentElement;
+      }
+      return false;
+    };
+    const copyControl = Array.from(document.querySelectorAll(controlSelector)).find((element) => {
+      if (!isVisible(element)) return false;
+      const text = String(
+        element.getAttribute("aria-label") ||
+        element.getAttribute("title") ||
+        element.innerText ||
+        element.textContent ||
+        element.value ||
+        "",
+      ).replace(/\\s+/g, " ").trim();
+      return /\\bcopy\\b/i.test(text) && (/\\bapi\\s*key\\b|\\bkey\\b/i.test(text) || hasKeyContext(element));
+    });
+    const rect = copyControl?.getBoundingClientRect();
+    return {
+      workspace_id: extractWorkspaceID(window.location.href),
+      copy_control: rect ? {
+        x: Math.round(rect.left + rect.width / 2),
+        y: Math.round(rect.top + rect.height / 2),
+      } : null,
+    };
+  })()`
+    .replace("EXTRACT_WORKSPACE_SOURCE", extractOpenCodeWorkspaceID.toString());
+}
+
+export async function syncOpenCodeKeyFromPage(cdp, pageURL) {
+  const keyPageURL = openCodeWorkspaceKeysURL(pageURL);
+  if (!keyPageURL) {
+    throw new Error("OpenCode workspace key page is unavailable");
+  }
+  const controlResult = await cdp.send("Runtime.evaluate", {
+    expression: buildOpenCodeAPIKeyCopyControlExpression(),
+    returnByValue: true,
+    awaitPromise: true,
+  });
+  const copyControl = controlResult?.result?.value?.copy_control;
+  const workspaceID = String(controlResult?.result?.value?.workspace_id || "").trim();
+  if (!workspaceID || !copyControl) {
+    throw new Error("OpenCode API key copy control is unavailable");
+  }
+  try {
+    await cdp.send("Browser.grantPermissions", {
+      origin: new URL(keyPageURL).origin,
+      permissions: ["clipboardReadWrite", "clipboardSanitizedWrite"],
+    });
+  } catch {
+  }
+  const clearClipboardResult = await cdp.send("Runtime.evaluate", {
+    expression: "navigator.clipboard.writeText('')",
+    returnByValue: true,
+    awaitPromise: true,
+    userGesture: true,
+  });
+  if (clearClipboardResult?.exceptionDetails) {
+    throw new Error("OpenCode API key clipboard cannot be prepared");
+  }
+  await cdp.send("Input.dispatchMouseEvent", {
+    type: "mouseMoved",
+    x: copyControl.x,
+    y: copyControl.y,
+    button: "none",
+    buttons: 0,
+  });
+  await cdp.send("Input.dispatchMouseEvent", {
+    type: "mousePressed",
+    x: copyControl.x,
+    y: copyControl.y,
+    button: "left",
+    buttons: 1,
+    clickCount: 1,
+  });
+  await cdp.send("Input.dispatchMouseEvent", {
+    type: "mouseReleased",
+    x: copyControl.x,
+    y: copyControl.y,
+    button: "left",
+    buttons: 0,
+    clickCount: 1,
+  });
+  const apiKey = await retryTransientBrowserAction(
+    async () =>
+      readCopiedOpenCodeAPIKey(async () => {
+        const clipboardResult = await cdp.send("Runtime.evaluate", {
+          expression: "navigator.clipboard.readText()",
+          returnByValue: true,
+          awaitPromise: true,
+          userGesture: true,
+        });
+        return clipboardResult?.result?.value || "";
+      }),
+    { attempts: 3, delayMs: 250 },
+  );
+  return { workspace_id: workspaceID, api_key: apiKey };
 }
 
 export function sanitizeBrowserStatusTitle(rawTitle) {
@@ -259,7 +453,110 @@ export function sanitizeBrowserStatusTitle(rawTitle) {
 
 export function buildOpenCodeBrowserStateExpression() {
   return `(${async function browserStateProbe(maxResponses, maxChars) {
+    const hotspotMaxCount = OPEN_CODE_LOGIN_HOTSPOT_MAX_COUNT;
+    const hotspotLabelMaxChars = OPEN_CODE_LOGIN_HOTSPOT_LABEL_MAX_CHARS;
+    const buildHotspots = () => {
+      const normalizeLabel = (rawText, limit) => {
+        const collapsed = String(rawText || "").replace(/\s+/g, " ").trim();
+        if (!collapsed) return "";
+        const chars = Array.from(collapsed);
+        if (chars.length <= limit) return collapsed;
+        return chars.slice(0, limit - 3).join("") + "...";
+      };
+      const classifyHotspot = (rawText) => {
+        const text = String(rawText || "").replace(/\s+/g, " ").trim();
+        const lower = text.toLowerCase();
+        const actionPattern = /\b(continue|sign in|log in|login|use|choose)\b/i;
+        if (/\bgoogle\b/i.test(lower) && actionPattern.test(text)) {
+          return { provider: "google", priority: 200, label: "Continue with Google" };
+        }
+        if (/\bgithub\b/i.test(lower) && actionPattern.test(text)) {
+          return { provider: "github", priority: 180, label: "Continue with GitHub" };
+        }
+        if (/\bgoogle\b/i.test(lower)) {
+          return {
+            provider: "google",
+            priority: 120,
+            label: normalizeLabel(text, hotspotLabelMaxChars) || "Google",
+          };
+        }
+        if (/\bgithub\b/i.test(lower)) {
+          return {
+            provider: "github",
+            priority: 110,
+            label: normalizeLabel(text, hotspotLabelMaxChars) || "GitHub",
+          };
+        }
+        return null;
+      };
+      const interactiveSelector = [
+        "button",
+        "a[href]",
+        "[role='button']",
+        "input[type='button']",
+        "input[type='submit']",
+      ].join(",");
+      const candidates = [];
+      const seen = new Set();
+      const elements = Array.from(document.querySelectorAll(interactiveSelector));
+      for (const element of elements) {
+        const style = window.getComputedStyle(element);
+        if (
+          style.display === "none" ||
+          style.visibility === "hidden" ||
+          Number.parseFloat(style.opacity || "1") < 0.05 ||
+          style.pointerEvents === "none"
+        ) {
+          continue;
+        }
+        const rect = element.getBoundingClientRect();
+        if (rect.width < 8 || rect.height < 8) {
+          continue;
+        }
+        const textSource =
+          element.getAttribute("aria-label") ||
+          element.getAttribute("title") ||
+          element.innerText ||
+          element.textContent ||
+          element.value ||
+          "";
+        const classification = classifyHotspot(textSource);
+        if (!classification) {
+          continue;
+        }
+        const x = Math.max(0, Math.round(rect.left));
+        const y = Math.max(0, Math.round(rect.top));
+        const width = Math.max(1, Math.round(rect.width));
+        const height = Math.max(1, Math.round(rect.height));
+        const dedupeKey = [classification.provider, x, y, width, height].join(":");
+        if (seen.has(dedupeKey)) {
+          continue;
+        }
+        seen.add(dedupeKey);
+        candidates.push({
+          id: [classification.provider, x, y, width, height].join("-"),
+          label: classification.label,
+          provider: classification.provider,
+          x,
+          y,
+          width,
+          height,
+          priority: classification.priority,
+        });
+      }
+      candidates.sort((left, right) => {
+        if (right.priority !== left.priority) return right.priority - left.priority;
+        const leftArea = left.width * left.height;
+        const rightArea = right.width * right.height;
+        if (leftArea !== rightArea) return leftArea - rightArea;
+        return left.y - right.y || left.x - right.x;
+      });
+      return candidates
+        .slice(0, hotspotMaxCount)
+        .map(({ priority, ...item }) => item);
+    };
     const shouldProbeOpenCodeResourceURL = SHOULD_PROBE_SOURCE;
+    const extractWorkspaceID = EXTRACT_WORKSPACE_SOURCE;
     const copy = (storage) => {
       const out = {};
       for (let i = 0; i < storage.length; i++) {
@@ -292,11 +589,17 @@ export function buildOpenCodeBrowserStateExpression() {
       }
     }
     return {
+      workspace_id: extractWorkspaceID(window.location.href),
       localStorage: copy(window.localStorage),
       sessionStorage: copy(window.sessionStorage),
       jsonResponses,
+      hotspots: buildHotspots(),
     };
-  }.toString().replace("SHOULD_PROBE_SOURCE", shouldProbeOpenCodeResourceURL.toString())})(${MAX_JSON_RESPONSE_COUNT}, ${MAX_JSON_RESPONSE_CHARS})`;
+  }.toString()
+    .replace("SHOULD_PROBE_SOURCE", shouldProbeOpenCodeResourceURL.toString())
+    .replace("EXTRACT_WORKSPACE_SOURCE", extractOpenCodeWorkspaceID.toString())
+    .replace("OPEN_CODE_LOGIN_HOTSPOT_MAX_COUNT", String(OPEN_CODE_LOGIN_HOTSPOT_MAX_COUNT))
+    .replace("OPEN_CODE_LOGIN_HOTSPOT_LABEL_MAX_CHARS", String(OPEN_CODE_LOGIN_HOTSPOT_LABEL_MAX_CHARS))})(${MAX_JSON_RESPONSE_COUNT}, ${MAX_JSON_RESPONSE_CHARS})`;
 }
 
 export function isDirectScriptExecution(moduleURL, argvScriptPath, resolvePath = realpathSync) {
@@ -442,6 +745,31 @@ function chromiumBinary() {
     "google-chrome-stable",
   ].filter(Boolean);
   return candidates[0];
+}
+
+export function buildBrowserEnv(baseEnv = process.env) {
+  const env = { ...baseEnv };
+  const proxyKeys = [
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "NO_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
+    "no_proxy",
+  ];
+
+  for (const key of proxyKeys) {
+    const value = String(baseEnv?.[key] || "").trim();
+    if (!value) {
+      delete env[key];
+      continue;
+    }
+    env[key] = value;
+  }
+
+  return env;
 }
 
 function requestJSON(url, timeoutMs = 5000) {
@@ -615,7 +943,7 @@ async function startSessionProcesses({ accountID, stateDir, url, display }) {
   const port = await allocatePort();
   let xvfb;
   let xvfbStartup;
-  const env = { ...process.env };
+  const env = buildBrowserEnv(process.env);
   if (shouldSpawnXvfb()) {
     xvfb = spawn("Xvfb", [display, "-screen", "0", `${DEFAULT_VIEWPORT.width}x${DEFAULT_VIEWPORT.height}x24`], {
       detached: true,
@@ -674,12 +1002,14 @@ async function startSessionProcesses({ accountID, stateDir, url, display }) {
 async function statusFromState(state) {
   let url = "";
   let title = "";
+  let page = "";
   let running = pidRunning(state.browserPid);
   if (running) {
     try {
       const target = await pageWebSocketURL(state.port);
       url = sanitizeBrowserStatusURL(target.url);
       title = sanitizeBrowserStatusTitle(target.title);
+      page = openCodeBrowserPageKind(target.url);
     } catch {
       running = false;
     }
@@ -690,6 +1020,7 @@ async function statusFromState(state) {
     status: running ? "running" : "stopped",
     url,
     title,
+    page,
     started_at: state.startedAt || 0,
   };
 }
@@ -711,11 +1042,20 @@ async function screenshotSession(args) {
   const state = await readState(args["state-dir"], Number(args["account-id"]));
   const screenshot = await retryTransientBrowserAction(() =>
     withPage(state, async (cdp) => {
+      await cdp.send("Runtime.enable");
       const result = await cdp.send("Page.captureScreenshot", { format: "png", fromSurface: true });
+      const storageResult = await cdp.send("Runtime.evaluate", {
+        returnByValue: true,
+        awaitPromise: true,
+        expression: buildOpenCodeBrowserStateExpression(),
+      });
       const imageBase64 = result.data || "";
       return {
         image_base64: imageBase64,
         ...openCodeScreenshotDimensionsFromBase64(imageBase64),
+        hotspots: Array.isArray(storageResult?.result?.value?.hotspots)
+          ? storageResult.result.value.hotspots
+          : [],
       };
     })
   );
@@ -766,6 +1106,53 @@ async function extractSession(args) {
     });
     const storage = storageResult.result?.value || {};
     return {
+      workspace_id: storage.workspace_id || "",
+      cookies: (cookiesResult.cookies || [])
+        .filter((cookie) => String(cookie.domain || "").includes("opencode.ai"))
+        .map((cookie) => ({ name: cookie.name, value: cookie.value, domain: cookie.domain })),
+      local_storage: storage.localStorage || {},
+      session_storage: storage.sessionStorage || {},
+      json_responses: storage.jsonResponses || [],
+    };
+  });
+  json({ success: true, browser_state: browserState, status: await statusFromState(state) });
+}
+
+function pageMatchesOpenCodeKeyPage(pageURL, keyPageURL) {
+  try {
+    const page = new URL(pageURL);
+    const keyPage = new URL(keyPageURL);
+    return page.origin === keyPage.origin && page.pathname === keyPage.pathname;
+  } catch {
+    return false;
+  }
+}
+
+async function syncSession(args) {
+  const state = await readState(args["state-dir"], Number(args["account-id"]));
+  const browserState = await withPage(state, async (cdp, target) => {
+    const keyPageURL = openCodeWorkspaceKeysURL(target.url);
+    if (!keyPageURL) {
+      throw new Error("OpenCode workspace key page is unavailable");
+    }
+    if (!pageMatchesOpenCodeKeyPage(target.url, keyPageURL)) {
+      await cdp.send("Page.navigate", { url: keyPageURL });
+    }
+    const syncedKey = await retryTransientBrowserAction(
+      () => syncOpenCodeKeyFromPage(cdp, keyPageURL),
+      { attempts: 5, delayMs: 500 },
+    );
+    await cdp.send("Network.enable");
+    const cookiesResult = await cdp.send("Network.getAllCookies");
+    const storageResult = await cdp.send("Runtime.evaluate", {
+      returnByValue: true,
+      awaitPromise: true,
+      expression: buildOpenCodeBrowserStateExpression(),
+    });
+    const storage = storageResult.result?.value || {};
+    return {
+      workspace_id: syncedKey.workspace_id || storage.workspace_id || "",
+      api_key: syncedKey.api_key,
       cookies: (cookiesResult.cookies || [])
         .filter((cookie) => String(cookie.domain || "").includes("opencode.ai"))
         .map((cookie) => ({ name: cookie.name, value: cookie.value, domain: cookie.domain })),
@@ -826,6 +1213,7 @@ async function main() {
     else if (action === "key") await keySession(args);
     else if (action === "press") await pressSession(args);
     else if (action === "extract") await extractSession(args);
+    else if (action === "sync") await syncSession(args);
     else if (action === "stop") await stopSession(args);
     else if (action === "purge") await purgeSession(args);
     else fail(`unsupported action: ${action}`);

@@ -41,14 +41,16 @@ type OpenCodeLoginSessionStatus struct {
 	Status    string `json:"status"`
 	URL       string `json:"url,omitempty"`
 	Title     string `json:"title,omitempty"`
+	Page      string `json:"page,omitempty"`
 	StartedAt int64  `json:"started_at,omitempty"`
 	Message   string `json:"message,omitempty"`
 }
 
 type OpenCodeLoginScreenshot struct {
-	ImageBase64 string `json:"image_base64"`
-	Width       int    `json:"width"`
-	Height      int    `json:"height"`
+	ImageBase64 string                 `json:"image_base64"`
+	Width       int                    `json:"width"`
+	Height      int                    `json:"height"`
+	Hotspots    []OpenCodeLoginHotspot `json:"hotspots,omitempty"`
 }
 
 type OpenCodeLoginClick struct {
@@ -139,6 +141,14 @@ func ExtractOpenCodeBrowserState(ctx context.Context, accountID int) (OpenCodeBr
 	return resp.BrowserState, nil
 }
 
+func SyncOpenCodeBrowserState(ctx context.Context, accountID int) (OpenCodeBrowserState, error) {
+	resp, err := runOpenCodeAuthSidecar(ctx, "sync", accountID, nil, "")
+	if err != nil {
+		return OpenCodeBrowserState{}, err
+	}
+	return resp.BrowserState, nil
+}
+
 func runOpenCodeAuthStatusAction(ctx context.Context, action string, accountID int, args map[string]string, stdin string) (OpenCodeLoginSessionStatus, error) {
 	resp, err := runOpenCodeAuthSidecar(ctx, action, accountID, args, stdin)
 	if err != nil {
@@ -221,7 +231,18 @@ func normalizeOpenCodeLoginPressKey(rawKey string) (string, error) {
 func sanitizeOpenCodeLoginSessionStatus(status OpenCodeLoginSessionStatus) OpenCodeLoginSessionStatus {
 	status.URL = sanitizeOpenCodeBrowserURL(status.URL)
 	status.Title = sanitizeOpenCodeBrowserTitle(status.Title)
+	status.Page = normalizeOpenCodeLoginPageKind(status.Page)
 	return status
+}
+
+func normalizeOpenCodeLoginPageKind(rawPage string) string {
+	page := strings.ToLower(strings.TrimSpace(rawPage))
+	switch page {
+	case "keys", "workspace":
+		return page
+	default:
+		return ""
+	}
 }
 
 func sanitizeOpenCodeBrowserURL(rawURL string) string {

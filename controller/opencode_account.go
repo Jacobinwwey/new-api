@@ -327,6 +327,22 @@ func ExtractOpenCodeAccountLogin(c *gin.Context) {
 	common.ApiSuccess(c, toOpenCodeAccountResponse(account))
 }
 
+func SyncOpenCodeAccount(c *gin.Context) {
+	id, ok := parseOpenCodeAccountID(c)
+	if !ok {
+		return
+	}
+	if !ensureOpenCodeAccountExists(c, id) {
+		return
+	}
+	account, err := service.SyncOpenCodeAccount(c.Request.Context(), id)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, toOpenCodeAccountResponse(account))
+}
+
 func StopOpenCodeAccountLogin(c *gin.Context) {
 	id, ok := parseOpenCodeAccountID(c)
 	if !ok {

@@ -9,6 +9,7 @@ import {
   DeleteIcon,
   Download,
   IndentIncreaseIcon,
+  KeyRound,
   MousePointerClick,
   Play,
   RefreshCw,
@@ -57,15 +58,20 @@ import {
   refreshOpenCodeQuota,
   startOpenCodeLogin,
   stopOpenCodeLogin,
+  syncOpenCodeAccount,
 } from './api'
 import {
   OPEN_CODE_INTERACTION_SCREENSHOT_REFRESH_DELAYS_MS,
   canRefreshOpenCodeLoginScreenshot,
   canUseOpenCodeLoginScreenshotResponse,
   mapContainedScreenshotClickToRemotePoint,
+  mapRemoteHotspotToContainedScreenshotRect,
   normalizeOpenCodeLoginScreenshot,
+  openCodeKeyPageSyncSessionKey,
   openCodeLoginStatusLabel,
+  shouldAutoSyncOpenCodeKeyPage,
   shouldClearOpenCodeLoginScreenshotForStatus,
+  type OpenCodeLoginHotspot,
   type OpenCodeLoginScreenshotImage,
 } from './lib'
 import type { OpenCodeAccount, OpenCodePressKey } from './types'
@@ -104,6 +110,7 @@ export function OpenCodeRemoteBrowserWindow(
   const selectedAccountIDRef = useRef<number | null>(selectedID)
   const screenshotPendingRef = useRef(false)
   const screenshotRefreshTimerRefs = useRef<ReturnType<typeof setTimeout>[]>([])
+  const syncAttemptSessionKeyRef = useRef('')
 
   const accountsQuery = useQuery({
     queryKey: ['opencode-accounts'],
@@ -197,7 +204,11 @@ export function OpenCodeRemoteBrowserWindow(
     }
     clearScheduledScreenshotRefreshes()
     setScreenshot(null)
-  }, [clearScheduledScreenshotRefreshes, loginStatus?.running, loginStatus?.status])
+  }, [
+    clearScheduledScreenshotRefreshes,
+    loginStatus?.running,
+    loginStatus?.status,
+  ])
 
   const startMutation = useMutation({
     mutationFn: startOpenCodeLogin,
@@ -260,6 +271,39 @@ export function OpenCodeRemoteBrowserWindow(
     },
   })
 
+  const { isPending: isSyncPending, mutate: syncOpenCodeAccountMutation } =
+    useMutation({
+      mutationFn: syncOpenCodeAccount,
+      onSuccess: async () => {
+        await queryClient.invalidateQueries({ queryKey: ['opencode-accounts'] })
+        toast.success(t('OpenCode API key synchronized and channel activated'))
+      },
+      onError: () => {
+        toast.error(t('OpenCode account synchronization failed'))
+      },
+    })
+
+  useEffect(() => {
+    if (
+      selectedAccountID === null ||
+      isSyncPending ||
+      !shouldAutoSyncOpenCodeKeyPage(
+        loginStatus,
+        syncAttemptSessionKeyRef.current
+      )
+    ) {
+      return
+    }
+    syncAttemptSessionKeyRef.current =
+      openCodeKeyPageSyncSessionKey(loginStatus)
+    syncOpenCodeAccountMutation(selectedAccountID)
+  }, [
+    loginStatus,
+    selectedAccountID,
+    isSyncPending,
+    syncOpenCodeAccountMutation,
+  ])
+
   const stopMutation = useMutation({
     mutationFn: stopOpenCodeLogin,
     onSuccess: async () => {
@@ -278,7 +322,7 @@ export function OpenCodeRemoteBrowserWindow(
     action(selectedAccountID)
   }
 
-  const handleScreenshotClick = (event: PointerEvent<HTMLButtonElement>) => {
+  const handleScreenshotClick = (event: PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return
     if (selectedAccountID === null || screenshot === null) return
     const rect = event.currentTarget.getBoundingClientRect()
@@ -291,12 +335,21 @@ export function OpenCodeRemoteBrowserWindow(
     clickMutation.mutate({ id: selectedAccountID, ...point })
   }
 
+  const clickHotspot = (hotspot: OpenCodeLoginHotspot) => {
+    if (selectedAccountID === null) return
+    clickMutation.mutate({
+      id: selectedAccountID,
+      x: hotspot.x + Math.round(hotspot.width / 2),
+      y: hotspot.y + Math.round(hotspot.height / 2),
+    })
+  }
+
   const selectedAccountValue =
     selectedAccountID === null ? null : String(selectedAccountID)
   const selectedReady = selectedAccount?.activation_ready === true
 
   return (
-    <div className='bg-background grid h-svh min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] text-foreground'>
+    <div className='bg-background text-foreground grid h-svh min-h-0 grid-rows-[auto_minmax(0,1fr)_auto]'>
       <header className='grid gap-2 border-b px-3 py-2 lg:grid-cols-[minmax(260px,360px)_minmax(0,1fr)_auto] lg:items-center'>
         <Select
           items={accounts.map((account) => ({
@@ -366,6 +419,14 @@ export function OpenCodeRemoteBrowserWindow(
           </Button>
           <Button
             variant='outline'
+            onClick={() => runSelected(syncOpenCodeAccountMutation)}
+            disabled={isSyncPending}
+          >
+            <KeyRound data-icon='inline-start' />
+            {t('Sync')}
+          </Button>
+          <Button
+            variant='outline'
             onClick={() => runSelected((id) => quotaMutation.mutate(id))}
             disabled={quotaMutation.isPending}
           >
@@ -391,11 +452,10 @@ export function OpenCodeRemoteBrowserWindow(
         </div>
       </header>
 
-      <main className='min-h-0 bg-muted/20 p-2'>
+      <main className='bg-muted/20 min-h-0 p-2'>
         <div className='bg-background flex h-full min-h-0 items-center justify-center overflow-hidden rounded-md border'>
           {screenshot ? (
-            <button
-              type='button'
+            <div
               aria-label={t('Remote browser')}
               className={cn(
                 'focus-visible:ring-ring relative flex h-full max-h-full w-full max-w-full cursor-crosshair appearance-none',
@@ -409,7 +469,15 @@ export function OpenCodeRemoteBrowserWindow(
                 draggable={false}
                 className='pointer-events-none h-full max-h-full w-full max-w-full object-contain select-none'
               />
-            </button>
+              {screenshot.hotspots.map((hotspot) => (
+                <HotspotOverlay
+                  key={hotspot.id}
+                  hotspot={hotspot}
+                  screenshot={screenshot}
+                  onClick={clickHotspot}
+                />
+              ))}
+            </div>
           ) : (
             <span className='text-muted-foreground text-sm'>
               {t('Start login and capture a screenshot')}
@@ -451,9 +519,7 @@ export function OpenCodeRemoteBrowserWindow(
                           selectedAccountID === null || pressMutation.isPending
                         }
                         onClick={() =>
-                          runSelected((id) =>
-                            pressMutation.mutate({ id, key })
-                          )
+                          runSelected((id) => pressMutation.mutate({ id, key }))
                         }
                       >
                         <Icon />
@@ -470,6 +536,67 @@ export function OpenCodeRemoteBrowserWindow(
         </TooltipProvider>
       </footer>
     </div>
+  )
+}
+
+function HotspotOverlay(props: {
+  hotspot: OpenCodeLoginHotspot
+  screenshot: OpenCodeLoginScreenshotImage
+  onClick: (hotspot: OpenCodeLoginHotspot) => void
+}) {
+  const { hotspot, screenshot, onClick } = props
+  const buttonRef = useRef<HTMLButtonElement | null>(null)
+  const [style, setStyle] = useState<{
+    left: number
+    top: number
+    width: number
+    height: number
+  } | null>(null)
+
+  useEffect(() => {
+    const button = buttonRef.current
+    if (!button) return
+    const container = button.parentElement
+    if (!container) return
+    const update = () => {
+      const rect = mapRemoteHotspotToContainedScreenshotRect(
+        hotspot,
+        {
+          left: 0,
+          top: 0,
+          width: container.clientWidth,
+          height: container.clientHeight,
+        },
+        { width: screenshot.width, height: screenshot.height }
+      )
+      setStyle(rect)
+    }
+    update()
+    const resizeObserver = new ResizeObserver(update)
+    resizeObserver.observe(container)
+    return () => resizeObserver.disconnect()
+  }, [hotspot, screenshot.height, screenshot.width])
+
+  if (style === null) {
+    return null
+  }
+
+  return (
+    <button
+      ref={buttonRef}
+      type='button'
+      className='absolute z-10 overflow-hidden rounded-md border-2 border-amber-400/90 bg-amber-400/12 text-[11px] font-medium text-amber-950 shadow-sm backdrop-blur-[1px] transition hover:bg-amber-300/20'
+      style={style}
+      onClick={(event) => {
+        event.stopPropagation()
+        onClick(hotspot)
+      }}
+      title={hotspot.label}
+    >
+      <span className='pointer-events-none absolute inset-x-0 top-0 truncate bg-amber-400/85 px-1 py-0.5 text-left text-[10px] leading-none text-black'>
+        {hotspot.label}
+      </span>
+    </button>
   )
 }
 

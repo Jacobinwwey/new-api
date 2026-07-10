@@ -443,6 +443,12 @@ console.log(JSON.stringify({ success: true, status: { account_id: 404, running: 
 			handler: PressOpenCodeAccountLogin,
 		},
 		{
+			name:    "sync",
+			method:  http.MethodPost,
+			path:    "/api/opencode/accounts/404/sync",
+			handler: SyncOpenCodeAccount,
+		},
+		{
 			name:    "stop",
 			method:  http.MethodPost,
 			path:    "/api/opencode/accounts/404/login/stop",

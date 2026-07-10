@@ -138,6 +138,16 @@ export async function extractOpenCodeLogin(id: number) {
   )
 }
 
+export async function syncOpenCodeAccount(id: number) {
+  const res = await api.post<ApiResponse<OpenCodeAccount>>(
+    `/api/opencode/accounts/${id}/sync`
+  )
+  return requireSuccessfulOpenCodeResponse(
+    res.data,
+    'Failed to synchronize OpenCode account'
+  )
+}
+
 export async function stopOpenCodeLogin(id: number) {
   const res = await api.post<ApiResponse<OpenCodeLoginStatus>>(
     `/api/opencode/accounts/${id}/login/stop`

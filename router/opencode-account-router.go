@@ -23,6 +23,7 @@ func registerOpenCodeAccountRoutes(apiRouter *gin.RouterGroup) {
 		route.POST("/:id/login/key", controller.KeyOpenCodeAccountLogin)
 		route.POST("/:id/login/press", controller.PressOpenCodeAccountLogin)
 		route.POST("/:id/login/extract", controller.ExtractOpenCodeAccountLogin)
+		route.POST("/:id/sync", controller.SyncOpenCodeAccount)
 		route.POST("/:id/login/stop", controller.StopOpenCodeAccountLogin)
 
 		route.POST("/:id/quota/refresh", controller.RefreshOpenCodeAccountQuota)

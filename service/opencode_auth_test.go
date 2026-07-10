@@ -45,6 +45,36 @@ func TestExtractOpenCodeSecretsFromBrowserStateRejectsEmptyCandidates(t *testing
 	assert.Empty(t, extracted.Secrets.APIKey)
 }
 
+func TestExtractOpenCodeSecretsFromBrowserStateAcceptsInternalKeyPageMaterial(t *testing.T) {
+	state := OpenCodeBrowserState{
+		WorkspaceID: "workspace-key-page-test",
+		APIKey:      "oc_fixture_key_0123456789abcdef",
+		Cookies: []OpenCodeBrowserCookie{
+			{Name: "auth", Value: "fixture-auth-cookie", Domain: "opencode.ai"},
+		},
+	}
+
+	extracted, err := ExtractOpenCodeSecretsFromBrowserState(state)
+	require.NoError(t, err)
+
+	assert.Equal(t, "workspace-key-page-test", extracted.Secrets.WorkspaceID)
+	assert.Equal(t, "oc_fixture_key_0123456789abcdef", extracted.Secrets.APIKey)
+	assert.Contains(t, extracted.Secrets.Cookie, "auth=fixture-auth-cookie")
+}
+
+func TestExtractOpenCodeSecretsFromBrowserStateRejectsInvalidInternalKeyPageMaterial(t *testing.T) {
+	state := OpenCodeBrowserState{
+		WorkspaceID: "workspace-key-page-test",
+		APIKey:      "masked key value",
+	}
+
+	extracted, err := ExtractOpenCodeSecretsFromBrowserState(state)
+	require.NoError(t, err)
+
+	assert.Equal(t, "workspace-key-page-test", extracted.Secrets.WorkspaceID)
+	assert.Empty(t, extracted.Secrets.APIKey)
+}
+
 func TestExtractOpenCodeSecretsFromBrowserStateDoesNotTreatOAuthTokensAsAPIKeys(t *testing.T) {
 	state := OpenCodeBrowserState{
 		JSONResponses: []string{

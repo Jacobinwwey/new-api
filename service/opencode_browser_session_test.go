@@ -84,11 +84,13 @@ func TestSanitizeOpenCodeLoginSessionStatusDropsAuthorizationPayload(t *testing.
 		AccountID: 9,
 		Running:   true,
 		Status:    "running",
+		Page:      "keys",
 		URL:       "https://operator:secret@auth.opencode.ai/authorize?client_id=app&state=oauth-state&code=auth-code#fragment",
 		StartedAt: 123,
 	})
 
 	assert.Equal(t, 9, status.AccountID)
+	assert.Equal(t, "keys", status.Page)
 	assert.Equal(t, "https://auth.opencode.ai/authorize", status.URL)
 	assert.NotContains(t, status.URL, "operator")
 	assert.NotContains(t, status.URL, "secret")

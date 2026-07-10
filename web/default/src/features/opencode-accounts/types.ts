@@ -44,12 +44,24 @@ export type OpenCodeLoginStatus = {
   status: string
   url?: string
   title?: string
+  page?: 'keys' | 'workspace'
   started_at?: number
   message?: string
 }
 
 export type OpenCodeScreenshot = {
   image_base64: string
+  width: number
+  height: number
+  hotspots?: OpenCodeLoginHotspot[]
+}
+
+export type OpenCodeLoginHotspot = {
+  id: string
+  label: string
+  provider?: string
+  x: number
+  y: number
   width: number
   height: number
 }

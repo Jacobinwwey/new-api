@@ -17,10 +17,23 @@ type OpenCodeBrowserCookie struct {
 }
 
 type OpenCodeBrowserState struct {
+	WorkspaceID    string                  `json:"workspace_id"`
+	APIKey         string                  `json:"api_key"`
 	Cookies        []OpenCodeBrowserCookie `json:"cookies"`
 	LocalStorage   map[string]string       `json:"local_storage"`
 	SessionStorage map[string]string       `json:"session_storage"`
 	JSONResponses  []string                `json:"json_responses"`
+	Hotspots       []OpenCodeLoginHotspot  `json:"hotspots"`
+}
+
+type OpenCodeLoginHotspot struct {
+	ID       string `json:"id"`
+	Label    string `json:"label"`
+	Provider string `json:"provider,omitempty"`
+	X        int    `json:"x"`
+	Y        int    `json:"y"`
+	Width    int    `json:"width"`
+	Height   int    `json:"height"`
 }
 
 type OpenCodeExtractedAccount struct {
@@ -41,6 +54,7 @@ var emailCandidatePattern = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
 
 func ExtractOpenCodeSecretsFromBrowserState(state OpenCodeBrowserState) (OpenCodeExtractedAccount, error) {
 	var extracted OpenCodeExtractedAccount
+	acceptInternalOpenCodeBrowserMaterial(state, &extracted)
 	extracted.Secrets.Cookie = buildOpenCodeCookieHeader(state.Cookies)
 	if extracted.Secrets.Cookie != "" {
 		extracted.Confidence++
@@ -58,6 +72,31 @@ func ExtractOpenCodeSecretsFromBrowserState(state OpenCodeBrowserState) (OpenCod
 		return OpenCodeExtractedAccount{}, errors.New("no OpenCode account candidates found")
 	}
 	return extracted, nil
+}
+
+func acceptInternalOpenCodeBrowserMaterial(state OpenCodeBrowserState, extracted *OpenCodeExtractedAccount) {
+	workspaceID := strings.TrimSpace(state.WorkspaceID)
+	if workspaceID != "" {
+		extracted.Secrets.WorkspaceID = workspaceID
+		extracted.Confidence++
+	}
+	apiKey := strings.TrimSpace(state.APIKey)
+	if isOpenCodeBrowserAPIKey(apiKey) {
+		extracted.Secrets.APIKey = apiKey
+		extracted.Confidence++
+	}
+}
+
+func isOpenCodeBrowserAPIKey(value string) bool {
+	if len(value) < 16 || len(value) > 512 || strings.ContainsAny(value, " \t\r\n*\u2022") {
+		return false
+	}
+	for _, char := range value {
+		if !((char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || (char >= '0' && char <= '9') || char == '.' || char == '_' || char == '~' || char == '-') {
+			return false
+		}
+	}
+	return true
 }
 
 func ExtractOpenCodeQuotaFromBrowserState(state OpenCodeBrowserState) (OpenCodeExtractedQuota, error) {

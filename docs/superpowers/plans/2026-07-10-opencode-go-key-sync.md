@@ -10,7 +10,7 @@
 
 **技术栈：** Node.js CDP、Go/Gin/GORM、React/TanStack Query、现有 New API 加密模型。
 
-**当前进度：** Task 1 至 Task 3 已完成并通过相应 Node、Go 和前端状态机测试。受控同步现在包含公开无敏感页面类别、复制前清空远端剪贴板、服务层复制串行化、root-only `/sync`、加密凭证落库、quota 刷新和激活。Task 4 的本地回归已完成；剩余远端脱敏验收、部署和提交。
+**当前进度：** Task 1 至 Task 3 已完成并通过相应 Node、Go 和前端状态机测试。受控同步现在包含公开无敏感页面类别、复制前清空远端剪贴板、服务层复制串行化、root-only `/sync`、加密凭证落库、quota 刷新和激活。Task 4 已完成远端原子 rollout、版本头、浏览器页面和侧车 smoke 验证；默认受限状态位置没有可用于脱敏探针的登录会话，故账户级同步保留为已认证前端的自动操作。
 
 ---
 
@@ -140,7 +140,7 @@
 
 **Tech Stack:** Node.js CDP, Go/Gin/GORM, React/TanStack Query, and the existing New API encryption model.
 
-**Current status:** Tasks 1 through 3 are implemented and covered by their Node, Go, and frontend state-machine tests. The controlled sync now includes a public non-sensitive page kind, remote clipboard clearing before copy, service-level copy serialization, a root-only `/sync`, encrypted credential persistence, quota refresh, and activation. The local portion of Task 4 is complete; remote redacted acceptance, deployment, and commit remain.
+**Current status:** Tasks 1 through 3 are implemented and covered by their Node, Go, and frontend state-machine tests. The controlled sync now includes a public non-sensitive page kind, remote clipboard clearing before copy, service-level copy serialization, a root-only `/sync`, encrypted credential persistence, quota refresh, and activation. Task 4 completed the remote atomic rollout, version header, browser page, and sidecar-smoke checks; no login session was available in the default restricted state location for a redacted probe, so authenticated frontend automation remains responsible for account-level sync.
 
 ---
 

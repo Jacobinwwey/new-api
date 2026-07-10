@@ -11,7 +11,7 @@
 - 已实现受限 `sync`：仅接受 OpenCode 工作区 Key 页面，使用语义化 Copy 控件和真实 CDP 鼠标事件读取本次复制结果；点击前清空远端浏览器剪贴板，并在服务层串行化复制阶段，避免旧值或多账户并发交叉采集。
 - 公开登录状态新增无敏感 `page=keys|workspace`；URL 继续脱敏工作区标识。前端按 `account_id:started_at` 会话键仅自动同步一次，并保留显式 Sync 作为失败重试。
 - 已实现 root-only `/api/opencode/accounts/:id/sync`，串联加密保存、Go 配额读取和既有激活事务；公开响应只包含账户布尔状态与配额元数据。
-- 本地 Node、Go 服务/控制器/路由、前端状态机和类型检查均已通过。下一阶段为远端脱敏实机同步、通道兼容性确认与部署回归。
+- 本地 Node、Go 服务/控制器/路由、前端状态机和类型检查均已通过。已完成远端原子 rollout、版本头、浏览器页面和侧车 smoke 验证。当前未从默认受限状态位置发现可供脱敏探针使用的登录会话；账户级 `/sync` 仍由已认证的前端在 Key 页面自动发起。
 
 ### 已验证事实
 
@@ -47,7 +47,7 @@ After a user completes the OpenCode Google sign-in in the remote isolated browse
 - A constrained `sync` flow is implemented: it accepts only the OpenCode workspace Key page, uses a semantic Copy control and real CDP mouse events, clears the remote browser clipboard before the click, and serializes the copy phase in the service to prevent stale values or cross-account concurrent capture.
 - Public login status now exposes only `page=keys|workspace`; workspace identifiers remain redacted in URLs. The frontend auto-syncs once per `account_id:started_at` session key and retains an explicit Sync retry.
 - A root-only `/api/opencode/accounts/:id/sync` endpoint now composes encrypted persistence, Go quota retrieval, and the existing activation transaction; its public response contains only account booleans and quota metadata.
-- Local Node, Go service/controller/router, frontend state-machine, and type checks pass. The next stage is a redacted remote runtime sync, channel-compatibility confirmation, and deployment regression.
+- Local Node, Go service/controller/router, frontend state-machine, and type checks pass. The remote atomic rollout, version header, browser page, and sidecar smoke are complete. No login session was found in the default restricted state location for a redacted probe; the authenticated frontend still initiates account-level `/sync` automatically on the Key page.
 
 ### Verified Facts
 

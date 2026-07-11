@@ -16,6 +16,8 @@
 
 **Google 可达性与点击延迟修复：** 用户复测保留的失败页证明隔离 Chromium 直连 Google 超时，而本机 Clash 代理正常。sidecar 已增加受校验的显式浏览器代理配置和旧会话代理一致性检查。另修复 CDP 响应后 10 秒 deadline timer 未清理的问题，sidecar 点击由约 10.06 秒降至约 70 毫秒。真实 New API 弹窗验收中截图和点击各 1 次、均 HTTP 200，1.415 秒内到达可交互 Google 登录页。
 
+**登录后状态收敛修复：** 远端数据库和服务日志证明本次登录已自动写入三类凭据、刷新 quota 并完成独占激活；`Network error` 发生在部署重启窗口。前端失败假象来自账户查询缓存未在后台同步后失效。主页面与弹窗现每 5 秒重新读取账户公开状态，不重复触发同步事务。
+
 ---
 
 ### Task 1: Sidecar 受限同步与敏感状态边界
@@ -152,6 +154,13 @@
 - [x] **Step 4: 移除弹窗重复自动触发，保留显式 Sync 恢复操作。**
 - [x] **Step 5: 已部署并在真实已登录 Key 页面验证不调用 `/sync` 也能自动落库、刷新 quota 和激活。**
 
+### Task 6: 登录后公开状态最终一致
+
+- [x] **Step 1: 复核远端数据库和日志，区分同步成功、部署重启网络错误与前端陈旧状态。**
+- [x] **Step 2: 用失败测试固定 5 秒账户状态刷新契约。**
+- [x] **Step 3: 主账户页与远端浏览器弹窗共享轮询周期，不重复执行同步。**
+- [ ] **Step 4: 部署并验证页面无需手动刷新即可显示 Active、Quota 和三类凭据完整状态。**
+
 ## English
 
 **Goal:** Automatically copy an existing API key from the logged-in isolated OpenCode browser, persist workspace/cookie/key, fetch Go quota, and activate the bound channel.
@@ -165,6 +174,8 @@
 **Popup interaction fix:** A separate remote profile proved that direct CDP click reaches Google while the frontend hotspot overlay could not mount its ref because it returned `null` initially. The deployed fix mounts it hidden before measurement and stops pointerup propagation. Final remote popup acceptance rendered both Google and GitHub hotspots, emitted exactly one click request, and reached `accounts.google.com`.
 
 **Google reachability and click latency fix:** The retained failure page proved that isolated Chromium timed out on direct Google access while the host-local Clash proxy worked. The sidecar now has validated explicit browser-proxy configuration and rejects reuse when a running session has stale proxy configuration. It also clears the ten-second deadline timer after every settled CDP command, reducing sidecar click latency from about 10.06 seconds to about 70 ms. Real New API popup acceptance emitted one screenshot and one click request, both HTTP 200, and reached the interactive Google sign-in page in 1.415 seconds.
+
+**Post-login state convergence fix:** Remote database and service logs proved that this login had already persisted all three credential classes, refreshed quota, and completed exclusive activation. The `Network error` occurred during the deployment restart window. The false failure display came from a stale account-query cache. The main page and popup now reload public account state every five seconds without rerunning synchronization.
 
 ---
 
@@ -238,3 +249,10 @@
 - [x] Cancel older sessions and Stop/Purge watchers; enforce 60-second operation deadlines, a 30-minute session lifetime, and five exponential-backoff attempts.
 - [x] Remove the competing popup auto trigger while retaining explicit Sync recovery.
 - [x] Deployed and proved on the real logged-in Key page that persistence, quota refresh, and activation complete without calling `/sync` manually.
+
+### Task 6: Eventually Consistent Post-login Public State
+
+- [x] Reconcile remote database and logs to distinguish successful synchronization, restart-window network failure, and stale frontend state.
+- [x] Lock the five-second account-state refresh contract with a failing test.
+- [x] Share the polling interval between the account page and remote-browser popup without rerunning synchronization.
+- [ ] Deploy and prove that Active, Quota, and all three credential indicators update without a manual page refresh.

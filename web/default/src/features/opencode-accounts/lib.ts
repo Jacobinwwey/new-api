@@ -86,6 +86,7 @@ type OpenCodeLoginScreenshotStatusSource = {
 export const OPEN_CODE_INTERACTION_SCREENSHOT_REFRESH_DELAYS_MS = [
   350, 1250, 2500, 5000,
 ] as const
+export const OPEN_CODE_ACCOUNT_STATE_REFRESH_INTERVAL_MS = 5000
 export const OPEN_CODE_REMOTE_BROWSER_PATH = '/opencode-browser'
 
 export function requireSuccessfulOpenCodeResponse<

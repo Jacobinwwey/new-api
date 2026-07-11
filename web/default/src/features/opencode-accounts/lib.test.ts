@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
 import {
+  OPEN_CODE_ACCOUNT_STATE_REFRESH_INTERVAL_MS,
   canConfirmOpenCodeAccountDelete,
   canRefreshOpenCodeLoginScreenshot,
   mapRemoteHotspotToContainedScreenshotRect,
@@ -20,6 +21,10 @@ import {
   requireSuccessfulOpenCodeResponse,
   shouldClearOpenCodeLoginScreenshotOnAccountSelect,
 } from './lib'
+
+test('OpenCode account state refreshes after server-owned background synchronization', () => {
+  assert.equal(OPEN_CODE_ACCOUNT_STATE_REFRESH_INTERVAL_MS, 5000)
+})
 
 function createRefreshSource() {
   let refreshCount = 0

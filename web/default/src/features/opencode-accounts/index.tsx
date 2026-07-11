@@ -78,6 +78,7 @@ import {
   stopOpenCodeLogin,
 } from './api'
 import {
+  OPEN_CODE_ACCOUNT_STATE_REFRESH_INTERVAL_MS,
   OPEN_CODE_INTERACTION_SCREENSHOT_REFRESH_DELAYS_MS,
   canConfirmOpenCodeAccountDelete,
   canRefreshOpenCodeLoginScreenshot,
@@ -133,6 +134,7 @@ export function OpenCodeAccounts() {
   const accountsQuery = useQuery({
     queryKey: ['opencode-accounts'],
     queryFn: listOpenCodeAccounts,
+    refetchInterval: OPEN_CODE_ACCOUNT_STATE_REFRESH_INTERVAL_MS,
   })
   const channelsQuery = useQuery({
     queryKey: ['opencode-channel-options'],

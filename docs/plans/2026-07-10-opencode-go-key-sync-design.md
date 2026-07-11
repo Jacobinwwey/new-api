@@ -18,6 +18,8 @@
 - 修复部署后的远端真实弹窗验收显示 Google/GitHub 两个热点均可见且具有有效面积；真实鼠标点击仅产生一次 `/login/click`，隔离浏览器成功进入 Google 账号页。临时测试账号、管理 token 和浏览器 profile 均已清理。
 - 用户复测暴露了此前验收标准不足：进入 `accounts.google.com` 不等于页面可用。失败页正文确认远端 Chromium 直连 Google 超时，而 Clash 本地代理可正常返回 OAuth 302。sidecar 现通过受校验的显式 `--proxy-server` 使用部署环境变量或本机状态目录配置；代理配置变化会强制重建旧会话。
 - 同次实测确认 CDP 命令响应后未清理 10 秒 deadline timer，使每次点击 API 固定阻塞约 10.06 秒。修复后远端 sidecar 点击降至约 70 毫秒；最终从真实 New API 弹窗进行 CDP 鼠标点击，只产生一次截图请求和一次点击请求，均为 HTTP 200，并在 1.415 秒内进入可交互的 Google 登录页。临时 root 身份、诊断脚本和 headless profile 已清理。
+- 用户登录后的数据库与服务日志复核证明自动同步已完成：目标账户已激活，API key、workspace id、cookie 三类密文与 quota 均完整。用户看到的 `Network error` 对应部署重启窗口；页面仍显示旧 `active=false` 的直接原因是 `opencode-accounts` 查询未在服务端后台同步完成后重新取数。
+- 主账户页与远端浏览器弹窗现共用 5 秒账户状态刷新周期。该轮询只在页面挂载期间运行，不重新触发同步事务；它使 Active、Quota 和凭据完整性标记在后台观察器提交后自动收敛，同时保留手动 Sync 作为明确的故障恢复入口。
 
 ### 已验证事实
 
@@ -81,6 +83,8 @@ The Go service extracts workspace id, cookie, and API key from the same browser 
 - Missing copy controls, invalid copied values, unparsable dashboard quota, and incompatible channels produce classified failures and never mark an account active.
 - A quota refresh failure does not roll back a successfully persisted API key. It preserves the previous quota snapshot; activation is attempted only after key extraction succeeds.
 - The watcher has a 30-minute session lifetime, a 60-second per-operation deadline, and five synchronization attempts. Logs contain only the account id and fixed diagnostic text, never upstream bodies or credentials.
+- Post-login database and service-log verification proved that automatic synchronization had already completed: the target account was active and all three encrypted credential classes plus quota were present. The reported `Network error` matched the deployment restart window; the stale `active=false` display was caused by the `opencode-accounts` query not refetching after server-owned background synchronization.
+- The account page and remote-browser popup now share a five-second account-state refresh interval. Polling exists only while either page is mounted and does not rerun the synchronization transaction. It makes Active, Quota, and credential-presence indicators converge after the watcher commits, while preserving explicit Sync as a recovery operation.
 
 ### Trade-off
 

@@ -61,6 +61,7 @@ import {
   syncOpenCodeAccount,
 } from './api'
 import {
+  OPEN_CODE_ACCOUNT_STATE_REFRESH_INTERVAL_MS,
   OPEN_CODE_INTERACTION_SCREENSHOT_REFRESH_DELAYS_MS,
   canRefreshOpenCodeLoginScreenshot,
   canUseOpenCodeLoginScreenshotResponse,
@@ -112,6 +113,7 @@ export function OpenCodeRemoteBrowserWindow(
   const accountsQuery = useQuery({
     queryKey: ['opencode-accounts'],
     queryFn: listOpenCodeAccounts,
+    refetchInterval: OPEN_CODE_ACCOUNT_STATE_REFRESH_INTERVAL_MS,
   })
   const accounts = accountsQuery.data?.data ?? EMPTY_OPEN_CODE_ACCOUNTS
   const selectedAccount =

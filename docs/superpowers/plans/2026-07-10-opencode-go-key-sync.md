@@ -10,7 +10,7 @@
 
 **技术栈：** Node.js CDP、Go/Gin/GORM、React/TanStack Query、现有 New API 加密模型。
 
-**当前进度：** Task 1 至 Task 4 已完成。远端真实会话已证明 sidecar 和完整 `/sync` 事务可用；随后通过日志确认用户等待期间没有前端同步请求。Task 5 已完成本地实现和测试：自动化所有权下沉到服务端，每个浏览器会话只运行一个观察器，并提供取消、超时和有限退避重试。待完成远端 rollout 后的无人工 `/sync` 验收。
+**当前进度：** Task 1 至 Task 5 已完成。远端真实会话已证明 sidecar 和完整同步事务可用；服务端观察器已部署。最终验收在清空账号同步产物后只调用一次 status GET，12 秒内恢复凭据、quota、Active 和通道 key；`/sync` 路由为 0 次，同会话成功日志只增加一次并保持稳定。
 
 ---
 
@@ -146,7 +146,7 @@
 - [x] **Step 2: 实现按 `account_id + started_at` 跟踪的服务端观察器。**
 - [x] **Step 3: 新会话取消旧观察器，Stop/Purge 主动取消；单操作 60 秒、会话 30 分钟、最多五次指数退避重试。**
 - [x] **Step 4: 移除弹窗重复自动触发，保留显式 Sync 恢复操作。**
-- [ ] **Step 5: 部署并在真实已登录 Key 页面验证不调用 `/sync` 也能自动落库、刷新 quota 和激活。**
+- [x] **Step 5: 已部署并在真实已登录 Key 页面验证不调用 `/sync` 也能自动落库、刷新 quota 和激活。**
 
 ## English
 
@@ -156,7 +156,7 @@
 
 **Tech Stack:** Node.js CDP, Go/Gin/GORM, React/TanStack Query, and the existing New API encryption model.
 
-**Current status:** Tasks 1 through 4 are complete. A real remote session proves the sidecar and full `/sync` transaction work; logs then proved that the frontend emitted no sync request while the user waited. Task 5 is implemented and locally tested: automatic ownership now resides in the service, with one watcher per browser session plus cancellation, deadlines, and bounded backoff. Remote acceptance without a manual `/sync` call remains pending.
+**Current status:** Tasks 1 through 5 are complete. The server watcher is deployed. Final acceptance cleared the prior synchronization outputs and issued only one status GET; credentials, quota, Active state, and channel key were restored in 12 seconds. The `/sync` route count stayed at zero, and the same-session success log increased exactly once and remained stable.
 
 ---
 
@@ -229,4 +229,4 @@
 - [x] Implement a server watcher keyed by `account_id + started_at`.
 - [x] Cancel older sessions and Stop/Purge watchers; enforce 60-second operation deadlines, a 30-minute session lifetime, and five exponential-backoff attempts.
 - [x] Remove the competing popup auto trigger while retaining explicit Sync recovery.
-- [ ] Deploy and prove on the real logged-in Key page that persistence, quota refresh, and activation complete without calling `/sync` manually.
+- [x] Deployed and proved on the real logged-in Key page that persistence, quota refresh, and activation complete without calling `/sync` manually.

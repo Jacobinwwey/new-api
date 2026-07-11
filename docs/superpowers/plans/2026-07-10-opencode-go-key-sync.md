@@ -12,6 +12,8 @@
 
 **当前进度：** Task 1 至 Task 5 已完成。远端真实会话已证明 sidecar 和完整同步事务可用；服务端观察器已部署。最终验收在清空账号同步产物后只调用一次 status GET，12 秒内恢复凭据、quota、Active 和通道 key；`/sync` 路由为 0 次，同会话成功日志只增加一次并保持稳定。
 
+**弹窗交互修复：** 远端独立 profile 证明 CDP 点击可进入 Google，但前端 hotspot overlay 因初始返回 `null` 无法建立 ref。已增加失败回归测试并改为隐藏挂载后测量，同时阻止 pointerup 冒泡。待远端 rollout 后完成真实 Google 点击验收。
+
 ---
 
 ### Task 1: Sidecar 受限同步与敏感状态边界
@@ -157,6 +159,8 @@
 **Tech Stack:** Node.js CDP, Go/Gin/GORM, React/TanStack Query, and the existing New API encryption model.
 
 **Current status:** Tasks 1 through 5 are complete. The server watcher is deployed. Final acceptance cleared the prior synchronization outputs and issued only one status GET; credentials, quota, Active state, and channel key were restored in 12 seconds. The `/sync` route count stayed at zero, and the same-session success log increased exactly once and remained stable.
+
+**Popup interaction fix:** A separate remote profile proved that direct CDP click reaches Google while the frontend hotspot overlay could not mount its ref because it returned `null` initially. A failing regression test now covers hidden initial mounting; pointerup propagation is also stopped. Final remote Google-click acceptance remains pending after rollout.
 
 ---
 

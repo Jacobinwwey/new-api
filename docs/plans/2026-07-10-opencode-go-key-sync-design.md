@@ -15,6 +15,7 @@
 - 服务端现按 `account_id + started_at` 跟踪浏览器会话：登录启动后即观察页面，到达 Key 页面后执行同步；同会话去重，新会话取消旧观察器，失败最多重试五次并指数退避。弹窗不再重复自动触发，从而避免共享剪贴板、quota 和激活事务的双重执行。
 - 远端最终验收将账号凭据、quota、Active 标记和通道 key 临时清空后，只调用一次 `GET login/status`。观察器在 12 秒内自动恢复全部状态；`/sync` 路由调用数保持 0，成功日志仅增加 1 次，并在多个后续轮询周期保持不变。验收未触发回滚，一次性管理 token 已删除。
 - 后续远端弹窗实测发现 hotspot 数据与截图 API 均成功，但 React overlay 在初始 `style=null` 时返回 `null`，导致 ref 永远无法挂载和测量，Google/GitHub 热点不可点击。共享 overlay 现以隐藏禁用状态先挂载，测量后启用，并阻止 `pointerup` 冒泡以避免一次物理点击产生双请求。
+- 修复部署后的远端真实弹窗验收显示 Google/GitHub 两个热点均可见且具有有效面积；真实鼠标点击仅产生一次 `/login/click`，隔离浏览器成功进入 Google 账号页。临时测试账号、管理 token 和浏览器 profile 均已清理。
 
 ### 已验证事实
 
@@ -55,6 +56,7 @@ After a user completes the OpenCode Google sign-in in the remote isolated browse
 - The service now tracks each `account_id + started_at` browser session. It observes the page after login start, synchronizes on the Key page, deduplicates the same session, cancels an older watcher when a new session starts, and retries up to five times with exponential backoff. The popup no longer issues a competing automatic sync.
 - Final remote acceptance temporarily cleared the account credentials, quota, Active marker, and channel key, then issued exactly one `GET login/status`. The watcher restored all state in 12 seconds. The `/sync` route count remained zero, the success log increased exactly once and remained stable across later polling cycles, rollback was not used, and the temporary management token was removed.
 - A later remote popup reproduction proved that screenshot and hotspot payloads succeeded while the React overlay returned `null` for its initial `style=null`, preventing its ref from ever mounting or measuring. The shared overlay now mounts hidden and disabled until measured, then becomes interactive, and stops `pointerup` propagation so one physical click cannot emit duplicate remote requests.
+- Post-deployment remote popup acceptance rendered both Google and GitHub hotspots with valid geometry. A real mouse click emitted exactly one `/login/click` request and the isolated browser reached the Google account page. The temporary account, management token, and browser profile were removed.
 
 ### Verified Facts
 

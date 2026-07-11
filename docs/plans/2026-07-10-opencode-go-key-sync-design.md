@@ -16,6 +16,8 @@
 - 远端最终验收将账号凭据、quota、Active 标记和通道 key 临时清空后，只调用一次 `GET login/status`。观察器在 12 秒内自动恢复全部状态；`/sync` 路由调用数保持 0，成功日志仅增加 1 次，并在多个后续轮询周期保持不变。验收未触发回滚，一次性管理 token 已删除。
 - 后续远端弹窗实测发现 hotspot 数据与截图 API 均成功，但 React overlay 在初始 `style=null` 时返回 `null`，导致 ref 永远无法挂载和测量，Google/GitHub 热点不可点击。共享 overlay 现以隐藏禁用状态先挂载，测量后启用，并阻止 `pointerup` 冒泡以避免一次物理点击产生双请求。
 - 修复部署后的远端真实弹窗验收显示 Google/GitHub 两个热点均可见且具有有效面积；真实鼠标点击仅产生一次 `/login/click`，隔离浏览器成功进入 Google 账号页。临时测试账号、管理 token 和浏览器 profile 均已清理。
+- 用户复测暴露了此前验收标准不足：进入 `accounts.google.com` 不等于页面可用。失败页正文确认远端 Chromium 直连 Google 超时，而 Clash 本地代理可正常返回 OAuth 302。sidecar 现通过受校验的显式 `--proxy-server` 使用部署环境变量或本机状态目录配置；代理配置变化会强制重建旧会话。
+- 同次实测确认 CDP 命令响应后未清理 10 秒 deadline timer，使每次点击 API 固定阻塞约 10.06 秒。修复后远端 sidecar 点击降至约 70 毫秒；最终从真实 New API 弹窗进行 CDP 鼠标点击，只产生一次截图请求和一次点击请求，均为 HTTP 200，并在 1.415 秒内进入可交互的 Google 登录页。临时 root 身份、诊断脚本和 headless profile 已清理。
 
 ### 已验证事实
 
@@ -57,6 +59,8 @@ After a user completes the OpenCode Google sign-in in the remote isolated browse
 - Final remote acceptance temporarily cleared the account credentials, quota, Active marker, and channel key, then issued exactly one `GET login/status`. The watcher restored all state in 12 seconds. The `/sync` route count remained zero, the success log increased exactly once and remained stable across later polling cycles, rollback was not used, and the temporary management token was removed.
 - A later remote popup reproduction proved that screenshot and hotspot payloads succeeded while the React overlay returned `null` for its initial `style=null`, preventing its ref from ever mounting or measuring. The shared overlay now mounts hidden and disabled until measured, then becomes interactive, and stops `pointerup` propagation so one physical click cannot emit duplicate remote requests.
 - Post-deployment remote popup acceptance rendered both Google and GitHub hotspots with valid geometry. A real mouse click emitted exactly one `/login/click` request and the isolated browser reached the Google account page. The temporary account, management token, and browser profile were removed.
+- User retesting exposed an insufficient prior acceptance criterion: reaching `accounts.google.com` did not prove that the page was usable. The retained failure-page body showed that Chromium timed out on direct Google access while the local Clash proxy returned the OAuth redirect successfully. The sidecar now uses a validated explicit `--proxy-server` from deployment environment or host-local state configuration, and rebuilds stale sessions when proxy configuration changes.
+- The same reproduction found that settled CDP commands left their ten-second deadline timers active, forcing every click API process to remain alive for about 10.06 seconds. Clearing settled deadlines reduced the remote sidecar click to about 70 ms. Final acceptance used a real CDP mouse click in the actual New API popup, emitted one screenshot request and one click request, received HTTP 200 for both, and reached an interactive Google sign-in page in 1.415 seconds. The temporary root identity, diagnostic script, and headless profile were removed.
 
 ### Verified Facts
 

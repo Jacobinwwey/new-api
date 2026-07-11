@@ -14,6 +14,8 @@
 
 **弹窗交互修复：** 远端独立 profile 证明 CDP 点击可进入 Google，但前端 hotspot overlay 因初始返回 `null` 无法建立 ref。修复已部署：overlay 隐藏挂载后测量，并阻止 pointerup 冒泡。最终远端弹窗真实鼠标验收中 Google/GitHub 热点均可见，点击只产生 1 次请求，目标成功进入 `accounts.google.com`。
 
+**Google 可达性与点击延迟修复：** 用户复测保留的失败页证明隔离 Chromium 直连 Google 超时，而本机 Clash 代理正常。sidecar 已增加受校验的显式浏览器代理配置和旧会话代理一致性检查。另修复 CDP 响应后 10 秒 deadline timer 未清理的问题，sidecar 点击由约 10.06 秒降至约 70 毫秒。真实 New API 弹窗验收中截图和点击各 1 次、均 HTTP 200，1.415 秒内到达可交互 Google 登录页。
+
 ---
 
 ### Task 1: Sidecar 受限同步与敏感状态边界
@@ -161,6 +163,8 @@
 **Current status:** Tasks 1 through 5 are complete. The server watcher is deployed. Final acceptance cleared the prior synchronization outputs and issued only one status GET; credentials, quota, Active state, and channel key were restored in 12 seconds. The `/sync` route count stayed at zero, and the same-session success log increased exactly once and remained stable.
 
 **Popup interaction fix:** A separate remote profile proved that direct CDP click reaches Google while the frontend hotspot overlay could not mount its ref because it returned `null` initially. The deployed fix mounts it hidden before measurement and stops pointerup propagation. Final remote popup acceptance rendered both Google and GitHub hotspots, emitted exactly one click request, and reached `accounts.google.com`.
+
+**Google reachability and click latency fix:** The retained failure page proved that isolated Chromium timed out on direct Google access while the host-local Clash proxy worked. The sidecar now has validated explicit browser-proxy configuration and rejects reuse when a running session has stale proxy configuration. It also clears the ten-second deadline timer after every settled CDP command, reducing sidecar click latency from about 10.06 seconds to about 70 ms. Real New API popup acceptance emitted one screenshot and one click request, both HTTP 200, and reached the interactive Google sign-in page in 1.415 seconds.
 
 ---
 

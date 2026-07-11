@@ -20,6 +20,7 @@
 - 同次实测确认 CDP 命令响应后未清理 10 秒 deadline timer，使每次点击 API 固定阻塞约 10.06 秒。修复后远端 sidecar 点击降至约 70 毫秒；最终从真实 New API 弹窗进行 CDP 鼠标点击，只产生一次截图请求和一次点击请求，均为 HTTP 200，并在 1.415 秒内进入可交互的 Google 登录页。临时 root 身份、诊断脚本和 headless profile 已清理。
 - 用户登录后的数据库与服务日志复核证明自动同步已完成：目标账户已激活，API key、workspace id、cookie 三类密文与 quota 均完整。用户看到的 `Network error` 对应部署重启窗口；页面仍显示旧 `active=false` 的直接原因是 `opencode-accounts` 查询未在服务端后台同步完成后重新取数。
 - 主账户页与远端浏览器弹窗现共用 5 秒账户状态刷新周期。该轮询只在页面挂载期间运行，不重新触发同步事务；它使 Active、Quota 和凭据完整性标记在后台观察器提交后自动收敛，同时保留手动 Sync 作为明确的故障恢复入口。
+- 远端独立 headless Chromium 最终验收在浏览器响应层仅将第一次账户列表改为陈旧 `active=false`、`0/3` 和无 quota，未修改真实账户。页面先渲染陈旧状态，5037 毫秒后第二次请求返回真实状态，并在无导航、无手动刷新条件下显示 `Active`、`3/3` 和 quota；两次响应均为 HTTP 200，请求失败与控制台错误均为 0。
 
 ### 已验证事实
 
@@ -85,6 +86,7 @@ The Go service extracts workspace id, cookie, and API key from the same browser 
 - The watcher has a 30-minute session lifetime, a 60-second per-operation deadline, and five synchronization attempts. Logs contain only the account id and fixed diagnostic text, never upstream bodies or credentials.
 - Post-login database and service-log verification proved that automatic synchronization had already completed: the target account was active and all three encrypted credential classes plus quota were present. The reported `Network error` matched the deployment restart window; the stale `active=false` display was caused by the `opencode-accounts` query not refetching after server-owned background synchronization.
 - The account page and remote-browser popup now share a five-second account-state refresh interval. Polling exists only while either page is mounted and does not rerun the synchronization transaction. It makes Active, Quota, and credential-presence indicators converge after the watcher commits, while preserving explicit Sync as a recovery operation.
+- Final acceptance used an isolated remote headless Chromium and modified only the first account-list response in the browser to stale `active=false`, `0/3`, and no-quota values without changing the real account. The page rendered that stale state, then consumed the real response 5037 ms later and displayed `Active`, `3/3`, and quota without navigation or manual refresh. Both responses were HTTP 200, with zero failed requests and zero console errors.
 
 ### Trade-off
 

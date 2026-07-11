@@ -159,7 +159,7 @@
 - [x] **Step 1: 复核远端数据库和日志，区分同步成功、部署重启网络错误与前端陈旧状态。**
 - [x] **Step 2: 用失败测试固定 5 秒账户状态刷新契约。**
 - [x] **Step 3: 主账户页与远端浏览器弹窗共享轮询周期，不重复执行同步。**
-- [ ] **Step 4: 部署并验证页面无需手动刷新即可显示 Active、Quota 和三类凭据完整状态。**
+- [x] **Step 4: 已部署并通过远端 Chromium 验证：页面先渲染陈旧 `0/3`，5037 毫秒后无需导航或手动刷新即显示 Active、Quota 和 `3/3`；HTTP、网络与控制台均无错误。**
 
 ## English
 
@@ -255,4 +255,4 @@
 - [x] Reconcile remote database and logs to distinguish successful synchronization, restart-window network failure, and stale frontend state.
 - [x] Lock the five-second account-state refresh contract with a failing test.
 - [x] Share the polling interval between the account page and remote-browser popup without rerunning synchronization.
-- [ ] Deploy and prove that Active, Quota, and all three credential indicators update without a manual page refresh.
+- [x] Deployed and proved with remote Chromium that the page first rendered stale `0/3`, then displayed Active, Quota, and `3/3` after 5037 ms without navigation or manual refresh; HTTP, network, and console checks were clean.

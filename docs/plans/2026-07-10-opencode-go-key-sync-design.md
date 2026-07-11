@@ -9,9 +9,10 @@
 ### 实施进度
 
 - 已实现受限 `sync`：仅接受 OpenCode 工作区 Key 页面，使用语义化 Copy 控件和真实 CDP 鼠标事件读取本次复制结果；点击前清空远端浏览器剪贴板，并在服务层串行化复制阶段，避免旧值或多账户并发交叉采集。
-- 公开登录状态新增无敏感 `page=keys|workspace`；URL 继续脱敏工作区标识。前端按 `account_id:started_at` 会话键仅自动同步一次，并保留显式 Sync 作为失败重试。
+- 公开登录状态新增无敏感 `page=keys|workspace`；URL 继续脱敏工作区标识。显式 Sync 保留为人工恢复操作，但自动同步不再依赖前端窗口生命周期。
 - 已实现 root-only `/api/opencode/accounts/:id/sync`，串联加密保存、Go 配额读取和既有激活事务；公开响应只包含账户布尔状态与配额元数据。
-- 本地 Node、Go 服务/控制器/路由、前端状态机和类型检查均已通过。已完成远端原子 rollout、版本头、浏览器页面和侧车 smoke 验证。当前未从默认受限状态位置发现可供脱敏探针使用的登录会话；账户级 `/sync` 仍由已认证的前端在 Key 页面自动发起。
+- 远端实测证明 sidecar 可从真实已登录 Key 页面取得 API key、workspace id 和 cookie，完整 `/sync` 可刷新 quota、加密落库、更新通道并置 `active=true`。同时确认此前用户等待期间服务日志中没有 `/sync` 请求，根因是自动化所有权错误地落在弹窗 React effect。
+- 服务端现按 `account_id + started_at` 跟踪浏览器会话：登录启动后即观察页面，到达 Key 页面后执行同步；同会话去重，新会话取消旧观察器，失败最多重试五次并指数退避。弹窗不再重复自动触发，从而避免共享剪贴板、quota 和激活事务的双重执行。
 
 ### 已验证事实
 
@@ -23,7 +24,7 @@
 
 浏览器 sidecar 增加一个受限的 `sync` 操作。它仅允许在 `opencode.ai` 工作区的 Key 页面工作，先导航/确认 API Keys 页面，再定位与 API Key 语义关联的复制控件，真实点击后从浏览器剪贴板读取候选值。sidecar 不输出 key 到日志、截图、状态或 UI；候选值仅作为内部 `browser_state.api_key` 返回给 Go 服务。
 
-Go 服务从同一浏览器状态提取 `workspace_id`、cookie 和 API key。控制器用现有加密模型持久化这些材料，随后调用独立的 Go 配额读取器。该读取器只向固定的 OpenCode Go dashboard URL 发送同源 cookie，解析 usage windows，保存无敏感 JSON 快照。最后复用现有 `ActivateOpenCodeAccount` 事务更新通道 key、唯一 Active 标记和通道缓存。
+Go 服务从同一浏览器状态提取 `workspace_id`、cookie 和 API key。服务端会话协调器在 `Start` 后独立于 HTTP 请求持续观察 CDP 状态，并在 Key 页面出现时调用同步事务。该事务通过现有加密模型持久化材料，调用独立的 Go 配额读取器，再复用 `ActivateOpenCodeAccount` 更新通道 key、唯一 Active 标记和通道缓存。
 
 ### 安全与失败语义
 
@@ -31,6 +32,7 @@ Go 服务从同一浏览器状态提取 `workspace_id`、cookie 和 API key。�
 - 不扫描整页文本，不读取任意剪贴板历史，不把 workspace id 放入公开状态 URL。
 - `sync` 没有找到复制控件、复制值无效、配额页面不可解析或通道不兼容时返回分类错误；不会把账户标记为 Active。
 - Go 配额失败不回滚成功保存的 API key，但会保留 `LastQuotaCheckedAt` 之前的配额值并将错误安全地返回给调用方。激活只在 API key 成功提取后执行。
+- 后台观察器有 30 分钟会话上限、60 秒单操作上限和最多五次同步尝试；错误日志仅包含账号编号和固定分类文本，不记录上游响应或凭据。
 
 ### 取舍
 
@@ -45,9 +47,10 @@ After a user completes the OpenCode Google sign-in in the remote isolated browse
 ### Implementation Status
 
 - A constrained `sync` flow is implemented: it accepts only the OpenCode workspace Key page, uses a semantic Copy control and real CDP mouse events, clears the remote browser clipboard before the click, and serializes the copy phase in the service to prevent stale values or cross-account concurrent capture.
-- Public login status now exposes only `page=keys|workspace`; workspace identifiers remain redacted in URLs. The frontend auto-syncs once per `account_id:started_at` session key and retains an explicit Sync retry.
+- Public login status now exposes only `page=keys|workspace`; workspace identifiers remain redacted in URLs. Explicit Sync remains available for operator recovery, while automatic synchronization no longer depends on a frontend window lifecycle.
 - A root-only `/api/opencode/accounts/:id/sync` endpoint now composes encrypted persistence, Go quota retrieval, and the existing activation transaction; its public response contains only account booleans and quota metadata.
-- Local Node, Go service/controller/router, frontend state-machine, and type checks pass. The remote atomic rollout, version header, browser page, and sidecar smoke are complete. No login session was found in the default restricted state location for a redacted probe; the authenticated frontend still initiates account-level `/sync` automatically on the Key page.
+- Remote runtime evidence proves that the sidecar extracts API key, workspace id, and cookie from the real logged-in Key page, and that the full `/sync` transaction refreshes quota, encrypts credentials, updates the channel, and sets `active=true`. Logs also prove that no `/sync` request was emitted while the user previously waited, locating the root cause in ownership by an ephemeral popup React effect.
+- The service now tracks each `account_id + started_at` browser session. It observes the page after login start, synchronizes on the Key page, deduplicates the same session, cancels an older watcher when a new session starts, and retries up to five times with exponential backoff. The popup no longer issues a competing automatic sync.
 
 ### Verified Facts
 
@@ -59,7 +62,7 @@ After a user completes the OpenCode Google sign-in in the remote isolated browse
 
 The browser sidecar gains a constrained `sync` operation. It operates only on the OpenCode workspace key page, confirms or navigates to API Keys, finds a copy control associated with API-key semantics, performs a real click, and reads the resulting candidate from the browser clipboard. It never logs or renders the key; the candidate is returned only as internal `browser_state.api_key` material to the Go service.
 
-The Go service extracts workspace id, cookie, and API key from the same browser state. The controller persists them through the existing encrypted account model, invokes an isolated Go quota reader against the fixed OpenCode dashboard URL, stores a non-sensitive usage snapshot, then reuses `ActivateOpenCodeAccount` for the channel-key update transaction, exclusive active marker, and channel-cache refresh.
+The Go service extracts workspace id, cookie, and API key from the same browser state. A server-side session coordinator observes CDP state independently of the originating HTTP request and invokes synchronization when the Key page appears. The transaction persists encrypted material, invokes the isolated quota reader, then reuses `ActivateOpenCodeAccount` for channel-key update, exclusive active selection, and channel-cache refresh.
 
 ### Security and Failure Semantics
 
@@ -67,6 +70,7 @@ The Go service extracts workspace id, cookie, and API key from the same browser 
 - Do not scan arbitrary document text, inspect clipboard history, or expose workspace ids in public status URLs.
 - Missing copy controls, invalid copied values, unparsable dashboard quota, and incompatible channels produce classified failures and never mark an account active.
 - A quota refresh failure does not roll back a successfully persisted API key. It preserves the previous quota snapshot; activation is attempted only after key extraction succeeds.
+- The watcher has a 30-minute session lifetime, a 60-second per-operation deadline, and five synchronization attempts. Logs contain only the account id and fixed diagnostic text, never upstream bodies or credentials.
 
 ### Trade-off
 

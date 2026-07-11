@@ -6,11 +6,11 @@
 
 **目标：** 自动从已登录的隔离 OpenCode 浏览器复制已有 API key，保存 workspace/cookie/key，拉取 Go 配额并激活绑定通道。
 
-**架构：** Node sidecar 负责受限页面导航、语义化复制控件定位和剪贴板读取；Go 服务负责凭证合并、Go dashboard 配额读取和现有激活事务。前端在浏览器已到达 Key 页面后触发一次幂等同步，显示分类失败而不暴露凭证。
+**架构：** Node sidecar 负责受限页面导航、语义化复制控件定位和剪贴板读取；Go 服务负责浏览器会话观察、凭证合并、Go dashboard 配额读取和现有激活事务。前端只显示状态并保留显式恢复操作，不再拥有自动同步决策。
 
 **技术栈：** Node.js CDP、Go/Gin/GORM、React/TanStack Query、现有 New API 加密模型。
 
-**当前进度：** Task 1 至 Task 3 已完成并通过相应 Node、Go 和前端状态机测试。受控同步现在包含公开无敏感页面类别、复制前清空远端剪贴板、服务层复制串行化、root-only `/sync`、加密凭证落库、quota 刷新和激活。Task 4 已完成远端原子 rollout、版本头、浏览器页面和侧车 smoke 验证；默认受限状态位置没有可用于脱敏探针的登录会话，故账户级同步保留为已认证前端的自动操作。
+**当前进度：** Task 1 至 Task 4 已完成。远端真实会话已证明 sidecar 和完整 `/sync` 事务可用；随后通过日志确认用户等待期间没有前端同步请求。Task 5 已完成本地实现和测试：自动化所有权下沉到服务端，每个浏览器会话只运行一个观察器，并提供取消、超时和有限退避重试。待完成远端 rollout 后的无人工 `/sync` 验收。
 
 ---
 
@@ -132,15 +132,31 @@
 
 仅暂存本计划列出的文件及双语文档；在确认没有密钥、cookie、workspace id、OAuth token 或远端本地文件后提交并推送。
 
+### Task 5: 服务端自动同步所有权
+
+**文件：**
+- 新建：`service/opencode_auto_sync.go`
+- 新建：`service/opencode_auto_sync_test.go`
+- 修改：`service/opencode_browser_session.go`
+- 修改：`web/default/src/features/opencode-accounts/remote-browser-window.tsx`
+- 修改：`web/default/src/features/opencode-accounts/lib.ts`
+- 修改：`web/default/src/features/opencode-accounts/lib.test.ts`
+
+- [x] **Step 1: 用失败测试覆盖无需后续 status 请求、同会话去重和失败重试。**
+- [x] **Step 2: 实现按 `account_id + started_at` 跟踪的服务端观察器。**
+- [x] **Step 3: 新会话取消旧观察器，Stop/Purge 主动取消；单操作 60 秒、会话 30 分钟、最多五次指数退避重试。**
+- [x] **Step 4: 移除弹窗重复自动触发，保留显式 Sync 恢复操作。**
+- [ ] **Step 5: 部署并在真实已登录 Key 页面验证不调用 `/sync` 也能自动落库、刷新 quota 和激活。**
+
 ## English
 
 **Goal:** Automatically copy an existing API key from the logged-in isolated OpenCode browser, persist workspace/cookie/key, fetch Go quota, and activate the bound channel.
 
-**Architecture:** The Node sidecar owns constrained page navigation, semantic copy-control discovery, and clipboard reads. Go owns encrypted credential merging, Go dashboard quota retrieval, and the existing activation transaction. The frontend performs one idempotent sync once the browser reaches the Key page and shows classified failures without exposing credentials.
+**Architecture:** The Node sidecar owns constrained page navigation, semantic copy-control discovery, and clipboard reads. Go owns browser-session observation, encrypted credential merging, Go dashboard quota retrieval, and the existing activation transaction. The frontend displays state and retains explicit recovery actions but no longer owns automatic synchronization.
 
 **Tech Stack:** Node.js CDP, Go/Gin/GORM, React/TanStack Query, and the existing New API encryption model.
 
-**Current status:** Tasks 1 through 3 are implemented and covered by their Node, Go, and frontend state-machine tests. The controlled sync now includes a public non-sensitive page kind, remote clipboard clearing before copy, service-level copy serialization, a root-only `/sync`, encrypted credential persistence, quota refresh, and activation. Task 4 completed the remote atomic rollout, version header, browser page, and sidecar-smoke checks; no login session was available in the default restricted state location for a redacted probe, so authenticated frontend automation remains responsible for account-level sync.
+**Current status:** Tasks 1 through 4 are complete. A real remote session proves the sidecar and full `/sync` transaction work; logs then proved that the frontend emitted no sync request while the user waited. Task 5 is implemented and locally tested: automatic ownership now resides in the service, with one watcher per browser session plus cancellation, deadlines, and bounded backoff. Remote acceptance without a manual `/sync` call remains pending.
 
 ---
 
@@ -198,3 +214,19 @@
 - [ ] Run `rtk git diff --check`, service/controller/router tests, sidecar tests, and the targeted frontend test.
 - [ ] Deploy through the LearnSSH alias and perform a redacted runtime sync verification: version, browser page, sync route, API-key/workspace presence, quota timestamp, activation readiness, and active state.
 - [ ] Stage only the files listed above and the bilingual documents; verify no API keys, cookies, workspace ids, OAuth tokens, or remote local files are committed before push.
+
+### Task 5: Server-side Automatic Synchronization Ownership
+
+**Files:**
+- Create: `service/opencode_auto_sync.go`
+- Create: `service/opencode_auto_sync_test.go`
+- Modify: `service/opencode_browser_session.go`
+- Modify: `web/default/src/features/opencode-accounts/remote-browser-window.tsx`
+- Modify: `web/default/src/features/opencode-accounts/lib.ts`
+- Modify: `web/default/src/features/opencode-accounts/lib.test.ts`
+
+- [x] Add failing tests for synchronization without another status request, same-session deduplication, and transient retry.
+- [x] Implement a server watcher keyed by `account_id + started_at`.
+- [x] Cancel older sessions and Stop/Purge watchers; enforce 60-second operation deadlines, a 30-minute session lifetime, and five exponential-backoff attempts.
+- [x] Remove the competing popup auto trigger while retaining explicit Sync recovery.
+- [ ] Deploy and prove on the real logged-in Key page that persistence, quota refresh, and activation complete without calling `/sync` manually.

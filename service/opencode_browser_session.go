@@ -91,10 +91,22 @@ var openCodeLoginPressKeys = map[string]struct{}{
 }
 
 func StartOpenCodeLoginSession(ctx context.Context, accountID int) (OpenCodeLoginSessionStatus, error) {
-	return runOpenCodeAuthStatusAction(ctx, "start", accountID, nil, "")
+	status, err := runOpenCodeAuthStatusAction(ctx, "start", accountID, nil, "")
+	if err == nil {
+		openCodeAccountAutoSync.track(status)
+	}
+	return status, err
 }
 
 func GetOpenCodeLoginSessionStatus(ctx context.Context, accountID int) (OpenCodeLoginSessionStatus, error) {
+	status, err := loadOpenCodeLoginSessionStatus(ctx, accountID)
+	if err == nil {
+		openCodeAccountAutoSync.track(status)
+	}
+	return status, err
+}
+
+func loadOpenCodeLoginSessionStatus(ctx context.Context, accountID int) (OpenCodeLoginSessionStatus, error) {
 	return runOpenCodeAuthStatusAction(ctx, "status", accountID, nil, "")
 }
 
@@ -118,11 +130,19 @@ func PressOpenCodeLoginSessionKey(ctx context.Context, accountID int, input Open
 }
 
 func StopOpenCodeLoginSession(ctx context.Context, accountID int) (OpenCodeLoginSessionStatus, error) {
-	return runOpenCodeAuthStatusAction(ctx, "stop", accountID, nil, "")
+	status, err := runOpenCodeAuthStatusAction(ctx, "stop", accountID, nil, "")
+	if err == nil {
+		openCodeAccountAutoSync.stop(accountID)
+	}
+	return status, err
 }
 
 func PurgeOpenCodeLoginSession(ctx context.Context, accountID int) (OpenCodeLoginSessionStatus, error) {
-	return runOpenCodeAuthStatusAction(ctx, "purge", accountID, nil, "")
+	status, err := runOpenCodeAuthStatusAction(ctx, "purge", accountID, nil, "")
+	if err == nil {
+		openCodeAccountAutoSync.stop(accountID)
+	}
+	return status, err
 }
 
 func CaptureOpenCodeLoginScreenshot(ctx context.Context, accountID int) (OpenCodeLoginScreenshot, error) {

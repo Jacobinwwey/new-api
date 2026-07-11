@@ -83,14 +83,6 @@ type OpenCodeLoginScreenshotStatusSource = {
   status?: string
 }
 
-type OpenCodeKeyPageSyncStatus = {
-  account_id?: number
-  running?: boolean
-  status?: string
-  page?: string
-  started_at?: number
-}
-
 export const OPEN_CODE_INTERACTION_SCREENSHOT_REFRESH_DELAYS_MS = [
   350, 1250, 2500, 5000,
 ] as const
@@ -267,36 +259,6 @@ export function shouldClearOpenCodeLoginScreenshotForStatus(
   status: OpenCodeLoginScreenshotStatusSource | null | undefined
 ) {
   return status?.running === false || status?.status === 'stopped'
-}
-
-export function openCodeKeyPageSyncSessionKey(
-  status: OpenCodeKeyPageSyncStatus | null | undefined
-) {
-  const accountID = status?.account_id
-  const startedAt = status?.started_at
-  if (
-    !Number.isInteger(accountID) ||
-    (accountID ?? 0) <= 0 ||
-    !Number.isInteger(startedAt) ||
-    (startedAt ?? 0) <= 0
-  ) {
-    return ''
-  }
-  return `${accountID}:${startedAt}`
-}
-
-export function shouldAutoSyncOpenCodeKeyPage(
-  status: OpenCodeKeyPageSyncStatus | null | undefined,
-  attemptedSessionKey: string
-) {
-  const sessionKey = openCodeKeyPageSyncSessionKey(status)
-  return (
-    status?.running === true &&
-    status.status === 'running' &&
-    status.page === 'keys' &&
-    sessionKey !== '' &&
-    sessionKey !== attemptedSessionKey
-  )
 }
 
 export function shouldClearOpenCodeLoginScreenshotOnAccountSelect(

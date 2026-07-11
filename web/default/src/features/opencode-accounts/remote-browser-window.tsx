@@ -67,9 +67,7 @@ import {
   mapContainedScreenshotClickToRemotePoint,
   mapRemoteHotspotToContainedScreenshotRect,
   normalizeOpenCodeLoginScreenshot,
-  openCodeKeyPageSyncSessionKey,
   openCodeLoginStatusLabel,
-  shouldAutoSyncOpenCodeKeyPage,
   shouldClearOpenCodeLoginScreenshotForStatus,
   type OpenCodeLoginHotspot,
   type OpenCodeLoginScreenshotImage,
@@ -110,7 +108,6 @@ export function OpenCodeRemoteBrowserWindow(
   const selectedAccountIDRef = useRef<number | null>(selectedID)
   const screenshotPendingRef = useRef(false)
   const screenshotRefreshTimerRefs = useRef<ReturnType<typeof setTimeout>[]>([])
-  const syncAttemptSessionKeyRef = useRef('')
 
   const accountsQuery = useQuery({
     queryKey: ['opencode-accounts'],
@@ -282,27 +279,6 @@ export function OpenCodeRemoteBrowserWindow(
         toast.error(t('OpenCode account synchronization failed'))
       },
     })
-
-  useEffect(() => {
-    if (
-      selectedAccountID === null ||
-      isSyncPending ||
-      !shouldAutoSyncOpenCodeKeyPage(
-        loginStatus,
-        syncAttemptSessionKeyRef.current
-      )
-    ) {
-      return
-    }
-    syncAttemptSessionKeyRef.current =
-      openCodeKeyPageSyncSessionKey(loginStatus)
-    syncOpenCodeAccountMutation(selectedAccountID)
-  }, [
-    loginStatus,
-    selectedAccountID,
-    isSyncPending,
-    syncOpenCodeAccountMutation,
-  ])
 
   const stopMutation = useMutation({
     mutationFn: stopOpenCodeLogin,

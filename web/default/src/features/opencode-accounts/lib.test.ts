@@ -19,7 +19,6 @@ import {
   refreshOpenCodeAccountPageData,
   requireSuccessfulOpenCodeResponse,
   shouldClearOpenCodeLoginScreenshotOnAccountSelect,
-  shouldAutoSyncOpenCodeKeyPage,
 } from './lib'
 
 function createRefreshSource() {
@@ -271,33 +270,6 @@ describe('OpenCode account page helpers', () => {
     assert.equal(
       shouldClearOpenCodeLoginScreenshotOnAccountSelect(null, 7),
       true
-    )
-  })
-
-  test('auto-syncs a Key page exactly once for each browser session', () => {
-    const keyPageStatus = {
-      account_id: 7,
-      running: true,
-      status: 'running',
-      page: 'keys',
-      started_at: 1_784_300_000,
-    }
-
-    assert.equal(shouldAutoSyncOpenCodeKeyPage(keyPageStatus, ''), true)
-    assert.equal(
-      shouldAutoSyncOpenCodeKeyPage(keyPageStatus, '7:1784300000'),
-      false
-    )
-    assert.equal(
-      shouldAutoSyncOpenCodeKeyPage(
-        { ...keyPageStatus, page: 'workspace' },
-        ''
-      ),
-      false
-    )
-    assert.equal(
-      shouldAutoSyncOpenCodeKeyPage({ ...keyPageStatus, running: false }, ''),
-      false
     )
   })
 

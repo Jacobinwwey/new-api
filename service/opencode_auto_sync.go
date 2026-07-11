@@ -65,7 +65,9 @@ func (coordinator *openCodeAutoSyncCoordinator) track(status OpenCodeLoginSessio
 			coordinator.mutex.Unlock()
 			return
 		}
-		current.cancel()
+		if current.cancel != nil {
+			current.cancel()
+		}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), openCodeAutoSyncSessionLimit)
 	coordinator.sessions[status.AccountID] = openCodeTrackedSession{
@@ -81,7 +83,9 @@ func (coordinator *openCodeAutoSyncCoordinator) stop(accountID int) {
 	coordinator.mutex.Lock()
 	defer coordinator.mutex.Unlock()
 	if session, exists := coordinator.sessions[accountID]; exists {
-		session.cancel()
+		if session.cancel != nil {
+			session.cancel()
+		}
 		delete(coordinator.sessions, accountID)
 	}
 }
@@ -90,13 +94,15 @@ func (coordinator *openCodeAutoSyncCoordinator) stopAll() {
 	coordinator.mutex.Lock()
 	defer coordinator.mutex.Unlock()
 	for accountID, session := range coordinator.sessions {
-		session.cancel()
+		if session.cancel != nil {
+			session.cancel()
+		}
 		delete(coordinator.sessions, accountID)
 	}
 }
 
 func (coordinator *openCodeAutoSyncCoordinator) run(ctx context.Context, initialStatus OpenCodeLoginSessionStatus) {
-	defer coordinator.release(initialStatus.AccountID, initialStatus.StartedAt)
+	defer coordinator.finish(initialStatus.AccountID, initialStatus.StartedAt)
 	status := initialStatus
 	syncAttempts := 0
 	for {
@@ -134,12 +140,14 @@ func (coordinator *openCodeAutoSyncCoordinator) run(ctx context.Context, initial
 	}
 }
 
-func (coordinator *openCodeAutoSyncCoordinator) release(accountID int, startedAt int64) {
+func (coordinator *openCodeAutoSyncCoordinator) finish(accountID int, startedAt int64) {
 	coordinator.mutex.Lock()
 	defer coordinator.mutex.Unlock()
 	if current, exists := coordinator.sessions[accountID]; exists && current.startedAt == startedAt {
-		current.cancel()
-		delete(coordinator.sessions, accountID)
+		if current.cancel != nil {
+			current.cancel()
+		}
+		coordinator.sessions[accountID] = openCodeTrackedSession{startedAt: startedAt}
 	}
 }
 

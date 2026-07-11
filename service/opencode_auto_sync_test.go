@@ -73,6 +73,47 @@ func TestOpenCodeAutoSyncDeduplicatesTheSameBrowserSession(t *testing.T) {
 	close(release)
 }
 
+func TestOpenCodeAutoSyncDoesNotRestartACompletedBrowserSession(t *testing.T) {
+	var attempts atomic.Int32
+	completed := make(chan struct{}, 2)
+	coordinator := newOpenCodeAutoSyncCoordinator(
+		func(context.Context, int) (OpenCodeLoginSessionStatus, error) {
+			return OpenCodeLoginSessionStatus{}, errors.New("status should not be reloaded for an initial key page")
+		},
+		func(context.Context, int) error {
+			attempts.Add(1)
+			completed <- struct{}{}
+			return nil
+		},
+		func(context.Context, time.Duration) bool { return true },
+	)
+	t.Cleanup(coordinator.stopAll)
+	status := OpenCodeLoginSessionStatus{
+		AccountID: 8,
+		Running:   true,
+		Status:    "running",
+		Page:      "keys",
+		StartedAt: 1_784_300_002,
+	}
+
+	coordinator.track(status)
+	select {
+	case <-completed:
+	case <-time.After(time.Second):
+		t.Fatal("initial automatic synchronization did not complete")
+	}
+	require.Eventually(t, func() bool {
+		coordinator.mutex.Lock()
+		defer coordinator.mutex.Unlock()
+		session, exists := coordinator.sessions[status.AccountID]
+		return !exists || session.cancel == nil
+	}, time.Second, 10*time.Millisecond)
+
+	coordinator.track(status)
+	time.Sleep(50 * time.Millisecond)
+	assert.Equal(t, int32(1), attempts.Load())
+}
+
 func TestOpenCodeAutoSyncWaitsForKeyPageAndRetriesTransientFailure(t *testing.T) {
 	var statusLoads atomic.Int32
 	var syncAttempts atomic.Int32

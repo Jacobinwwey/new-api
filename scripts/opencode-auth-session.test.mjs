@@ -11,6 +11,9 @@ import vm from "node:vm";
 
 import {
   buildBrowserEnv,
+  buildOpenCodeBrowserLaunchArgs,
+  openCodeBrowserSessionMatchesProxy,
+  resolveOpenCodeBrowserProxyServer,
   browserProcessArgsMatchState,
   buildOpenCodeBrowserStateExpression,
   isDirectScriptExecution,
@@ -584,6 +587,67 @@ test("buildBrowserEnv preserves proxy variables needed for external auth pages",
   assert.equal(env.ALL_PROXY, "socks5://127.0.0.1:18080");
   assert.equal(env.NO_PROXY, "localhost,127.0.0.1");
   assert.equal(env.DISPLAY, ":201");
+});
+
+test("browser launch args bind external auth traffic to an explicit credential-free proxy", () => {
+  const args = buildOpenCodeBrowserLaunchArgs({
+    port: 43123,
+    profile: "/tmp/opencode-auth/profile-7",
+    url: "https://opencode.ai/auth",
+    proxyServer: "http://127.0.0.1:18080",
+  });
+
+  assert.ok(args.includes("--proxy-server=http://127.0.0.1:18080"));
+  assert.equal(args.at(-1), "https://opencode.ai/auth");
+  assert.throws(
+    () =>
+      buildOpenCodeBrowserLaunchArgs({
+        port: 43123,
+        profile: "/tmp/opencode-auth/profile-7",
+        url: "https://opencode.ai/auth",
+        proxyServer: "http://user:secret@127.0.0.1:18080",
+      }),
+    /must not contain credentials/,
+  );
+  assert.throws(
+    () =>
+      buildOpenCodeBrowserLaunchArgs({
+        port: 43123,
+        profile: "/tmp/opencode-auth/profile-7",
+        url: "https://opencode.ai/auth",
+        proxyServer: "file:///tmp/proxy",
+      }),
+    /unsupported scheme/,
+  );
+});
+
+test("running browser sessions are reused only when their proxy configuration matches", () => {
+  assert.equal(
+    openCodeBrowserSessionMatchesProxy(
+      { browserProxyServer: "http://127.0.0.1:18080" },
+      "http://127.0.0.1:18080",
+    ),
+    true,
+  );
+  assert.equal(openCodeBrowserSessionMatchesProxy({}, "http://127.0.0.1:18080"), false);
+  assert.equal(openCodeBrowserSessionMatchesProxy({}, ""), true);
+});
+
+test("browser proxy resolution prefers deployment environment and otherwise reads local state configuration", async () => {
+  const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-browser-proxy-"));
+  try {
+    await fs.writeFile(path.join(stateDir, "browser-proxy-url"), "http://127.0.0.1:18080\n", "utf8");
+    assert.equal(await resolveOpenCodeBrowserProxyServer({}, stateDir), "http://127.0.0.1:18080");
+    assert.equal(
+      await resolveOpenCodeBrowserProxyServer(
+        { OPENCODE_AUTH_BROWSER_PROXY: "socks5://127.0.0.1:1080" },
+        stateDir,
+      ),
+      "socks5://127.0.0.1:1080",
+    );
+  } finally {
+    await fs.rm(stateDir, { recursive: true, force: true });
+  }
 });
 
 test("press action rejects unsupported keys without echoing the raw key", async () => {

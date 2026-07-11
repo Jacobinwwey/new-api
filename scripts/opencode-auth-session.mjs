@@ -772,6 +772,60 @@ export function buildBrowserEnv(baseEnv = process.env) {
   return env;
 }
 
+function normalizeOpenCodeBrowserProxyServer(rawProxyServer) {
+  const proxyServer = String(rawProxyServer || "").trim();
+  if (!proxyServer) return "";
+
+  let parsed;
+  try {
+    parsed = new URL(proxyServer);
+  } catch {
+    throw new Error("opencode auth browser proxy is invalid");
+  }
+  if (!["http:", "https:", "socks4:", "socks5:"].includes(parsed.protocol)) {
+    throw new Error("opencode auth browser proxy uses an unsupported scheme");
+  }
+  if (parsed.username || parsed.password) {
+    throw new Error("opencode auth browser proxy must not contain credentials");
+  }
+  if (!parsed.hostname || !parsed.port || (parsed.pathname && parsed.pathname !== "/") || parsed.search || parsed.hash) {
+    throw new Error("opencode auth browser proxy must contain only scheme, host, and port");
+  }
+  return `${parsed.protocol}//${parsed.hostname}:${parsed.port}`;
+}
+
+export async function resolveOpenCodeBrowserProxyServer(env, stateDir) {
+  const configuredProxy = String(env?.OPENCODE_AUTH_BROWSER_PROXY || "").trim();
+  if (configuredProxy) return normalizeOpenCodeBrowserProxyServer(configuredProxy);
+  try {
+    const localProxy = await fs.readFile(path.join(stateDir, "browser-proxy-url"), "utf8");
+    return normalizeOpenCodeBrowserProxyServer(localProxy);
+  } catch (error) {
+    if (error?.code === "ENOENT") return "";
+    throw error;
+  }
+}
+
+export function buildOpenCodeBrowserLaunchArgs({ port, profile, url, proxyServer = "" }) {
+  const normalizedProxyServer = normalizeOpenCodeBrowserProxyServer(proxyServer);
+  const args = [
+    `--remote-debugging-port=${port}`,
+    "--remote-debugging-address=127.0.0.1",
+    `--user-data-dir=${profile}`,
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-dev-shm-usage",
+    `--window-size=${DEFAULT_VIEWPORT.width},${DEFAULT_VIEWPORT.height}`,
+  ];
+  if (normalizedProxyServer) args.push(`--proxy-server=${normalizedProxyServer}`);
+  args.push(url);
+  return args;
+}
+
+export function openCodeBrowserSessionMatchesProxy(state, proxyServer) {
+  return String(state?.browserProxyServer || "") === normalizeOpenCodeBrowserProxyServer(proxyServer);
+}
+
 function requestJSON(url, timeoutMs = 5000) {
   return new Promise((resolve, reject) => {
     const req = http.get(url, { timeout: timeoutMs }, (res) => {
@@ -897,13 +951,14 @@ async function startSession(args) {
   const accountID = Number(args["account-id"]);
   const stateDir = args["state-dir"];
   const url = args.url || "https://opencode.ai/auth";
+  const browserProxyServer = await resolveOpenCodeBrowserProxyServer(process.env, stateDir);
   await ensureDir(stateDir);
 
   try {
     const existing = await readState(stateDir, accountID);
     if (pidRunning(existing.browserPid)) {
       const existingStatus = await statusFromState(existing);
-      if (existingStatus.running) {
+      if (existingStatus.running && openCodeBrowserSessionMatchesProxy(existing, browserProxyServer)) {
         json({ success: true, status: existingStatus });
         return;
       }
@@ -918,7 +973,7 @@ async function startSession(args) {
   let lastError;
   for (const display of displays) {
     try {
-      const state = await startSessionProcesses({ accountID, stateDir, url, display });
+      const state = await startSessionProcesses({ accountID, stateDir, url, display, browserProxyServer });
       await writeState(stateDir, accountID, state);
       json({ success: true, status: await statusFromState(state) });
       return;
@@ -939,7 +994,7 @@ function isRetryableXvfbStartupError(error) {
   return /Xvfb exited before ready/.test(String(error?.message || ""));
 }
 
-async function startSessionProcesses({ accountID, stateDir, url, display }) {
+async function startSessionProcesses({ accountID, stateDir, url, display, browserProxyServer }) {
   const port = await allocatePort();
   let xvfb;
   let xvfbStartup;
@@ -957,16 +1012,12 @@ async function startSessionProcesses({ accountID, stateDir, url, display }) {
   const profile = profileDir(stateDir, accountID);
   await ensureDir(profile);
   const browserCommand = chromiumBinary();
-  const browser = spawn(browserCommand, [
-    `--remote-debugging-port=${port}`,
-    "--remote-debugging-address=127.0.0.1",
-    `--user-data-dir=${profile}`,
-    "--no-first-run",
-    "--no-default-browser-check",
-    "--disable-dev-shm-usage",
-    `--window-size=${DEFAULT_VIEWPORT.width},${DEFAULT_VIEWPORT.height}`,
+  const browser = spawn(browserCommand, buildOpenCodeBrowserLaunchArgs({
+    port,
+    profile,
     url,
-  ], {
+    proxyServer: browserProxyServer,
+  }), {
     detached: true,
     stdio: "ignore",
     env,
@@ -994,6 +1045,7 @@ async function startSessionProcesses({ accountID, stateDir, url, display }) {
     profile,
     browserPid: browser.pid,
     xvfbPid: xvfb?.pid || 0,
+    browserProxyServer,
     startedAt: Math.floor(Date.now() / 1000),
   };
   return state;

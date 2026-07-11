@@ -320,7 +320,7 @@ test("runCacheSmoke redacts generic secret-shaped relay failures", async () => {
       assert.match(message, /relay rejected/);
       assert.doesNotMatch(
         message,
-        /upstream-key-secret|upstream-cookie-secret|upstream-workspace-secret|upstream-access-secret|upstream-refresh-secret|upstream-id-secret|upstream-authorization-secret|upstream-bearer-secret-value|oauth-code-secret|oauth-state-secret|operator@example\.test|100\.126\.180\.64|192\.168\.1\.20/,
+        /upstream-key-secret|upstream-cookie-secret|upstream-workspace-secret|upstream-access-secret|upstream-refresh-secret|upstream-id-secret|upstream-authorization-secret|upstream-bearer-secret-value|oauth-code-secret|oauth-state-secret|operator@example\.test|100\.64\.0\.250|192\.168\.255\.250/,
       );
       assert.doesNotMatch(message, /D:\\srv|\/opt\/release/);
       assert.match(message, /<redacted-ip>/);

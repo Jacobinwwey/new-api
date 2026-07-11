@@ -773,8 +773,8 @@ test("runOpenCodePreflight redacts generic secret-shaped endpoint errors", async
   assert.doesNotMatch(encoded, /operator@example\.test/);
   assert.doesNotMatch(encoded, /oauth-code-secret/);
   assert.doesNotMatch(encoded, /oauth-state-secret/);
-  assert.doesNotMatch(encoded, /100\.126\.180\.64/);
-  assert.doesNotMatch(encoded, /192\.168\.1\.20/);
+  assert.doesNotMatch(encoded, /100\.64\.0\.250/);
+  assert.doesNotMatch(encoded, /192\.168\.255\.250/);
   assert.match(encoded, /<redacted-ip>/);
   assert.doesNotMatch(encoded, /D:\\srv/);
   assert.doesNotMatch(encoded, /\/opt\/release/);

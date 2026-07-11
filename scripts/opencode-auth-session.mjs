@@ -891,6 +891,12 @@ async function pageWebSocketURL(port) {
   return { url: page.url || "", title: page.title || "", ws: page.webSocketDebuggerUrl };
 }
 
+export function settleCDPCommand(pending, message, clearCommandTimeout = clearTimeout) {
+  clearCommandTimeout(pending.timeout);
+  if (message.error) pending.reject(new Error(message.error.message || "CDP error"));
+  else pending.resolve(message.result || {});
+}
+
 class CDP {
   constructor(wsURL) {
     this.wsURL = wsURL;
@@ -906,8 +912,7 @@ class CDP {
       const pending = this.pending.get(message.id);
       if (!pending) return;
       this.pending.delete(message.id);
-      if (message.error) pending.reject(new Error(message.error.message || "CDP error"));
-      else pending.resolve(message.result || {});
+      settleCDPCommand(pending, message);
     });
     await new Promise((resolve, reject) => {
       this.socket.addEventListener("open", resolve, { once: true });
@@ -919,9 +924,10 @@ class CDP {
     const id = this.nextID++;
     const payload = JSON.stringify({ id, method, params });
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      const pending = { resolve, reject, timeout: null };
+      this.pending.set(id, pending);
       this.socket.send(payload);
-      setTimeout(() => {
+      pending.timeout = setTimeout(() => {
         if (!this.pending.has(id)) return;
         this.pending.delete(id);
         reject(new Error(`CDP command timed out: ${method}`));

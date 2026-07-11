@@ -14,6 +14,7 @@ import {
   buildOpenCodeBrowserLaunchArgs,
   openCodeBrowserSessionMatchesProxy,
   resolveOpenCodeBrowserProxyServer,
+  settleCDPCommand,
   browserProcessArgsMatchState,
   buildOpenCodeBrowserStateExpression,
   isDirectScriptExecution,
@@ -648,6 +649,22 @@ test("browser proxy resolution prefers deployment environment and otherwise read
   } finally {
     await fs.rm(stateDir, { recursive: true, force: true });
   }
+});
+
+test("settled CDP commands clear their deadline before resolving", () => {
+  const calls = [];
+  const pending = {
+    timeout: { id: 7 },
+    resolve: (value) => calls.push(["resolve", value]),
+    reject: (error) => calls.push(["reject", error.message]),
+  };
+
+  settleCDPCommand(pending, { result: { ready: true } }, (timeout) => calls.push(["clear", timeout]));
+
+  assert.deepEqual(calls, [
+    ["clear", { id: 7 }],
+    ["resolve", { ready: true }],
+  ]);
 });
 
 test("press action rejects unsupported keys without echoing the raw key", async () => {

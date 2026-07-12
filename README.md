@@ -14,7 +14,7 @@
   <a href="./README.ja.md">日本語</a>
 </p>
 
-Friendly Links: Linux DO：学AI，上L站！
+#### Friendly Links: [Linux DO：学AI，上L站！](https://linux.do/)
 
 <p align="center">
   <a href="https://raw.githubusercontent.com/Calcium-Ion/new-api/main/LICENSE">
